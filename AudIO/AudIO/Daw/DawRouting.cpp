@@ -1,6 +1,7 @@
 
 #include "DawBus.h"
 #include <algorithm>
+#include <thread>
 
 namespace AudIO
 {
