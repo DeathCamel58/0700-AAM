@@ -113,6 +113,16 @@ include(GNUInstallDirs)
 set(KICK_INSTALL_LIBEXECDIR "${CMAKE_INSTALL_LIBEXECDIR}/kick")
 set(KICK_INSTALL_DATADIR    "${CMAKE_INSTALL_DATADIR}/kick")
 
+## Where the Linux build looks for things at run time (kick_paths.cpp).
+set(KICK_DATA_DIR    "/app"         CACHE PATH "Read-only data: assets, demos, templates")
+set(KICK_SAMPLES_DIR "/data/sounds" CACHE PATH "Sample library")
+set(KICK_STATE_DIR   "/home/Kick"   CACHE PATH "Writable state: projects, logs, prefs")
+add_compile_definitions(
+    KICK_DATA_DIR="${KICK_DATA_DIR}"
+    KICK_SAMPLES_DIR="${KICK_SAMPLES_DIR}"
+    KICK_STATE_DIR="${KICK_STATE_DIR}"
+)
+
 ## CMake package management...
 ## Fetch 3rd Party dependencies from their respective git repositories...
 include(3rdParty.cmake)

@@ -22,6 +22,17 @@
 //common
 #define MT_SOURCE_SRCDIR "."
 
+// Linux locations; the build system can override them (see CMakeLists.txt).
+#ifndef KICK_DATA_DIR
+    #define KICK_DATA_DIR "/app"
+#endif
+#ifndef KICK_SAMPLES_DIR
+    #define KICK_SAMPLES_DIR "/data/sounds"
+#endif
+#ifndef KICK_STATE_DIR
+    #define KICK_STATE_DIR "/home/Kick"
+#endif
+
 juce::File getAppDirs( DirType T )
 {
     auto seprator = juce::File::getSeparatorString();
@@ -58,19 +69,19 @@ juce::File getAppDirs( DirType T )
         return juce::File( "./prefs" );
 #elif defined( LINUX ) || defined( __linux__ )
     if( T == MTAssets )
-        return juce::File( "/app/assets" );
+        return juce::File( KICK_DATA_DIR "/assets" );
     else if( T == MTSamples )
-        return juce::File( "/data/sounds" );
+        return juce::File( KICK_SAMPLES_DIR );
     else if( T == MTDemos )
-        return juce::File( "/app/demos/" );
+        return juce::File( KICK_DATA_DIR "/demos/" );
     else if( T == MTTemp )
-        return juce::File( "/app/templates/" );
+        return juce::File( KICK_DATA_DIR "/templates/" );
     else if( T == MTProjects )
-        return juce::File( "/home/Kick/projects/" );
+        return juce::File( KICK_STATE_DIR "/projects/" );
     else if( T == MTLog )
-        return juce::File( "/home/Kick/logs/" );
+        return juce::File( KICK_STATE_DIR "/logs/" );
     else if( T == MTPrefs )
-        return juce::File( "/home/Kick/prefs" );
+        return juce::File( KICK_STATE_DIR "/prefs" );
 #endif
 
     return juce::File::getSpecialLocation( juce::File::tempDirectory );
