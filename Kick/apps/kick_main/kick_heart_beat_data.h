@@ -70,7 +70,7 @@ namespace kick
                 for( auto itr = heartBeatEventTimePoints.begin(); itr != heartBeatEventTimePoints.end(); itr.next() )
                 {
                     juce::int64 timepoint = itr.getValue();
-                    int         hostId    = itr.getValue();
+                    int         hostId    = itr.getKey();
                     if( timepoint >= checkTimePointStart && timepoint <= checkPointEnd )
                         continue;
                     juce::MessageManager::callAsync( [&, hostId]() { onVerificationFailed( hostId ); } );
