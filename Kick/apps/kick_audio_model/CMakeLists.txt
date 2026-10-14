@@ -156,21 +156,6 @@ set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 ## Create Install package...
 install(
     TARGETS ${TargetName}
-    EXPORT "${TargetName}Targets" DESTINATION "."
+    EXPORT "${TargetName}Targets" DESTINATION "${KICK_INSTALL_LIBEXECDIR}"
     COMPONENT ${TargetName} # must be here, not any line lower
-)
-## Add resource directory...
-install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/assets" DESTINATION "."
-    PATTERN "${CMAKE_SOURCE_DIR}/assets/*"
-)
-
-install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/templates" DESTINATION "."
-    PATTERN "${CMAKE_SOURCE_DIR}/templates/*"
-)
-
-install(
-    DIRECTORY "${CMAKE_SOURCE_DIR}/demos" DESTINATION "."
-    PATTERN "${CMAKE_SOURCE_DIR}/demos/*"
 )

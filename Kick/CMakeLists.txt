@@ -103,6 +103,16 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+## Install layout...
+## KickMain starts the other processes from its own directory, so every
+## process binary goes into one private directory rather than bin/. The
+## data the processes read at run time is installed once, as component
+## KickData, so that each process can be installed on its own with
+##   cmake --install <build> --component <target>
+include(GNUInstallDirs)
+set(KICK_INSTALL_LIBEXECDIR "${CMAKE_INSTALL_LIBEXECDIR}/kick")
+set(KICK_INSTALL_DATADIR    "${CMAKE_INSTALL_DATADIR}/kick")
+
 ## CMake package management...
 ## Fetch 3rd Party dependencies from their respective git repositories...
 include(3rdParty.cmake)
@@ -113,6 +123,15 @@ if( TIMESTAMP )
 endif()
 add_subdirectory(modules)
 add_subdirectory(apps)
+
+install(
+    DIRECTORY
+        "${CMAKE_SOURCE_DIR}/assets"
+        "${CMAKE_SOURCE_DIR}/templates"
+        "${CMAKE_SOURCE_DIR}/demos"
+    DESTINATION "${KICK_INSTALL_DATADIR}"
+    COMPONENT KickData
+)
 
 ##
 ## Add CPack support
