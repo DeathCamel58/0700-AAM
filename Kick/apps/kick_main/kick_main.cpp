@@ -33,6 +33,7 @@
 #include "ipc/process/mt_ipc_process_manager.h"
 #include "ipc/connection/mt_ipc_connection_manager.h"
 #include "kick_exit_message_handler.h"
+#include "kick_service_notifier.h"
 
 #define COMMAND_LINE_ARGUMENT_STANDALONE "standalone"
 
@@ -55,13 +56,16 @@ public:
 
     void initialise( const juce::String& commandLine ) override
     {
+        reportStatus( "Starting" );
         IPCApplication::initialise( commandLine );
-        monitor.reset( new kick::main::KickHearBeatMonitor( heartBeatData, std::bind( &KickMain ::onHeartBeatNotReceived, this, std::placeholders::_1 ) ) );
+        monitor.reset( new kick::main::KickHearBeatMonitor( heartBeatData, std::bind( &KickMain ::onHeartBeatNotReceived, this, std::placeholders::_1 ),
+                                                            std::bind( &KickMain::onHeartBeatsVerified, this, std::placeholders::_1 ) ) );
         monitor->startMonitoring();
     }
 
     void shutdown()
     {
+        serviceNotifier.notify( "STOPPING=1" );
         monitor->stopMonintoring();
         monitor.reset();
         heartBeatData.reset();
@@ -70,9 +74,28 @@ public:
 
     juce::var getConfig( const juce::String& commandLine ) override
     {
-        return (commandLine == COMMAND_LINE_ARGUMENT_STANDALONE ?
+        juce::var config = (commandLine == COMMAND_LINE_ARGUMENT_STANDALONE ?
             contracts::KickIPCConfig().getStandAloneConfig()
             : contracts::KickIPCConfig().getConfig());
+
+        // Expect a heartbeat from every child the process manager launches
+        // from this configuration (none in the standalone one).
+        juce::Array<int> childHostIds;
+        juce::var children = config.getProperty( ipc::IPC_KEY_PROCESS_CONFIG, juce::var() ).getProperty( ipc::IPC_KEY_CHILDREN, juce::var() );
+        if( auto* childConfigs = children.getArray() )
+        {
+            for( const juce::var& child : *childConfigs )
+            {
+                int hostId = child.getProperty( ipc::IPC_KEY_HOST_ID, -1 );
+                if( hostId < 0 )
+                    continue;
+                childHostIds.add( hostId );
+                childNames.set( hostId, child.getProperty( ipc::IPC_KEY_PROCESS_NAME, hostId ).toString() );
+            }
+        }
+        heartBeatData->expectHeartBeatsFrom( childHostIds );
+
+        return config;
     }
 
     void addMessageHandlers( std::vector<std::shared_ptr<ipc::MTIIPCMessageHandler>>& handlers )
@@ -93,9 +116,55 @@ private:
             
     }
 
+    // Runs on the monitor thread after every verification window. Until it
+    // is told READY=1, the service manager only enforces its start timeout;
+    // after that, missing WATCHDOG=1 notifications let it restart KickMain
+    // when the subsystem restart in onHeartBeatNotReceived() does not help.
+    void onHeartBeatsVerified( const juce::Array<int>& missingHostIds )
+    {
+        if( missingHostIds.isEmpty() )
+        {
+            if( !reportedReady )
+            {
+                reportedReady = true;
+                serviceNotifier.notify( "READY=1" );
+            }
+            reportStatus( "Running" );
+            serviceNotifier.notify( "WATCHDOG=1" );
+            return;
+        }
+
+        juce::StringArray names;
+        bool              restarting = false;
+        for( const int hostId : missingHostIds )
+        {
+            names.add( childNames[hostId] );
+            // A host that has sent a heartbeat before has gone quiet, and
+            // KickHeartBeatData::verify() has asked for a restart.
+            restarting = restarting || heartBeatData->latestHeartBeat( hostId ) >= 0;
+        }
+        reportStatus( ( restarting ? "Restarting after a missed heartbeat from " : "Waiting for " )
+                      + names.joinIntoString( ", " ) );
+    }
+
+    void reportStatus( const juce::String& status )
+    {
+        if( status == reportedStatus )
+            return;
+        reportedStatus = status;
+        serviceNotifier.notify( "STATUS=" + status );
+    }
+
 private:
     std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
     std::unique_ptr<kick::main::KickHearBeatMonitor> monitor;
+
+    // Set up on the message thread before the monitor thread starts; from
+    // then until shutdown() stops it, only the monitor thread uses them.
+    kick::main::KickServiceNotifier  serviceNotifier;
+    juce::HashMap<int, juce::String> childNames;
+    bool                             reportedReady{ false };
+    juce::String                     reportedStatus;
 
 };
 

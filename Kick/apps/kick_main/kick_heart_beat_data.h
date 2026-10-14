@@ -44,6 +44,7 @@ namespace kick
 
             juce::int64 latestHeartBeat( const int hostId ) const
             {
+                const juce::ScopedLock sl( lock );
                 if( heartBeatEventTimePoints.contains( hostId ) )
                     return heartBeatEventTimePoints[hostId];
                 return -1;
@@ -61,12 +62,23 @@ namespace kick
 
             void setHeartBeat( const int hostId, juce::int64 timeInMs )
             {
+                const juce::ScopedLock sl( lock );
                 heartBeatEventTimePoints.set( hostId, juce::Time::currentTimeMillis() );
             }
 
-            void verify( const juce::int64 checkTimePointStart,
-                         const juce::int64 checkPointEnd)
+            // The hosts whose heartbeat verify() expects, whether or not they
+            // have sent one yet.
+            void expectHeartBeatsFrom( const juce::Array<int>& hostIds )
             {
+                const juce::ScopedLock sl( lock );
+                expectedHostIds = hostIds;
+            }
+
+            // Returns the expected hosts without a heartbeat in the window.
+            juce::Array<int> verify( const juce::int64 checkTimePointStart,
+                                     const juce::int64 checkPointEnd)
+            {
+                const juce::ScopedLock sl( lock );
                 for( auto itr = heartBeatEventTimePoints.begin(); itr != heartBeatEventTimePoints.end(); itr.next() )
                 {
                     juce::int64 timepoint = itr.getValue();
@@ -75,10 +87,23 @@ namespace kick
                         continue;
                     juce::MessageManager::callAsync( [&, hostId]() { onVerificationFailed( hostId ); } );
                 }
+
+                juce::Array<int> missingHostIds;
+                for( const int hostId : expectedHostIds )
+                {
+                    juce::int64 timepoint = heartBeatEventTimePoints.contains( hostId ) ? heartBeatEventTimePoints[hostId] : -1;
+                    if( timepoint < checkTimePointStart || timepoint > checkPointEnd )
+                        missingHostIds.add( hostId );
+                }
+                return missingHostIds;
             }
 
         private:
+            // Heartbeats are registered on the IPC message processor thread
+            // and verified on the monitor thread.
+            juce::CriticalSection            lock;
             juce::HashMap<int, juce::int64>  heartBeatEventTimePoints;
+            juce::Array<int>                 expectedHostIds;
             std::function<void( const int )> onVerificationFailed;
         };
     }

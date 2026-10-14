@@ -37,10 +37,12 @@ namespace kick
         {
         public:
             KickHearBeatMonitor( std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData,
-                                 std::function<void( const int )>               onHeartBeatNotReceived )
+                                 std::function<void( const int )>               onHeartBeatNotReceived,
+                                 std::function<void( const juce::Array<int>& )> onHeartBeatsVerified = nullptr )
                 : juce::Thread( "HeartBeatMonitorThread" )
                 , heartBeatData( heartBeatData )
                 , onHeartBeatNotReceived( onHeartBeatNotReceived )
+                , onHeartBeatsVerified( onHeartBeatsVerified )
             {
 
             }
@@ -68,8 +70,11 @@ namespace kick
                     {
                         count = 0;
                         juce::int64 currentCheckTimePoint = juce::Time::currentTimeMillis();
-                        heartBeatData->verify( previousCheckTimePoint, currentCheckTimePoint );
+                        juce::Array<int> missingHostIds = heartBeatData->verify( previousCheckTimePoint, currentCheckTimePoint );
                         previousCheckTimePoint = juce::Time::currentTimeMillis();
+                        // Called on this thread, once per verification window.
+                        if( onHeartBeatsVerified )
+                            onHeartBeatsVerified( missingHostIds );
                     }
                 }
             }
@@ -77,6 +82,7 @@ namespace kick
         private:
             std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
             std::function<void( const int )>               onHeartBeatNotReceived;
+            std::function<void( const juce::Array<int>& )> onHeartBeatsVerified;
             juce::int64                                    previousCheckTimePoint{ 0 };
         };
     }
