@@ -123,6 +123,10 @@ add_compile_definitions(
     KICK_STATE_DIR="${KICK_STATE_DIR}"
 )
 
+## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
+set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
+add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")
+
 ## CMake package management...
 ## Fetch 3rd Party dependencies from their respective git repositories...
 include(3rdParty.cmake)

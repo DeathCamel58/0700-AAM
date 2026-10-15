@@ -49,11 +49,8 @@ namespace mt
         }
 
     private:
-        std::vector<juce::String>          networks;
-        juce::String                       executeCommand( const juce::String& command );
-        void                               addSSID( const juce::String& ssid, const juce::String& password, int priority = 5 );
-        std::map<std::string, std::string> loadWifiCredentials();
-        void                               saveWifiCredential( const std::string& ssid, const std::string& password );
-        bool                               fileExists( const std::string& filename );
+        std::vector<juce::String> networks;
+        juce::String              wpaCli( const juce::StringArray& args, bool* ok = nullptr );
+        int                       findNetwork( const juce::String& ssid );
     };
 }
