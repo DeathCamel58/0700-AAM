@@ -1,4 +1,5 @@
 #include "kick_SWUpdateScreen.h"
+#include <hardware/source/kick_Process.h>
 namespace kick_ui
 {
     SWUpdateScreen::SWUpdateScreen()
@@ -122,7 +123,10 @@ namespace kick_ui
             mt::utils::showDialog( "SUCCESS!", warningPopup, [&]( int R ) {
                 if( R == UI::APPLY )
                 {
-                    if( system( "reboot -nf" ) == 0 )
+                    // A clean reboot through systemd: "reboot -nf" skipped
+                    // syncing and unmounting the file systems, and needs
+                    // root, which the application should not run as.
+                    if( mt::process::run( { "systemctl", "reboot" } ) == 0 )
                         DBG( "Rebooting the device so new firmware will apply" );
                 }
                 else if( R == UI::CANCEL )

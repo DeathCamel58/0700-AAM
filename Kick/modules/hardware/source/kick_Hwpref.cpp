@@ -26,7 +26,6 @@ namespace mt
     namespace fs = std::filesystem;
 
     const char* FACTORY_RESET_CMD = "/bin/rm -rf /home/Kick/projects* /home/Kick/prefs";
-    const char* POWEROFF          = "/sbin/poweroff";
 
     HwPref::HwPref()
         : juce::Thread( "powerbutton" )
@@ -137,7 +136,9 @@ namespace mt
 
     int HwPref::shutdown( void )
     {
-        return executeSetCommand( POWEROFF );
+        // Through systemd, which shuts down cleanly and lets an
+        // unprivileged user power off where the system's policy allows it.
+        return process::run( { "systemctl", "poweroff" } );
     }
 
     // Function to compare firmware versions
