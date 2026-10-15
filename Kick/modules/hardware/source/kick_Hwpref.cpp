@@ -215,15 +215,15 @@ namespace mt
 
     bool HwPref::extractImage( std::string path )
     {
-        bool        status         = true;
-        std::string imageFormat    = ".swu";
-        std::string creatFolderCmd = "mkdir " + path;
-        DBG( "FwUpdate ->extractImage->  " << creatFolderCmd );
-        system( creatFolderCmd.c_str() );
-        std::string outFullpath = decrptionDir + decryptedFwname;
-        std::string cmd         = "mount -o loop -t ext4  " + outFullpath + " " + extractDir;
-        DBG( "FwUpdate ->extractImage->  " << cmd );
-        system( cmd.c_str() );
+        bool            status      = true;
+        std::string     imageFormat = ".swu";
+        std::error_code ec;
+        DBG( "FwUpdate ->extractImage-> creating " << path );
+        fs::create_directory( path, ec );
+        std::string             outFullpath = decrptionDir + decryptedFwname;
+        const juce::StringArray mount { "mount", "-o", "loop", "-t", "ext4", outFullpath, extractDir };
+        DBG( "FwUpdate ->extractImage->  " << mount.joinIntoString( " " ) );
+        process::run( mount );
         std::vector<std::string> swuFiles = getSWUFiles( extractDir, imageFormat );
         if( swuFiles.empty() )
         {
@@ -463,15 +463,23 @@ namespace mt
 
     bool HwPref::removeHeaderFromImage( std::string fwfilepath )
     {
-        std::string cmd = "tail -c +" + std::to_string( fw_ver_index ) + " " + fwfilepath + " > " + decrptionDir + fwHeaderFile;
-        DBG( "removing Header from image" << cmd );
-        int result = system( cmd.c_str() ); // Execute the command using system call
+        // Copy everything from byte fw_ver_index on (counting from 1, as
+        // "tail -c +N" did) into the file that is decrypted next.
+        const std::string outFilepath = decrptionDir + fwHeaderFile;
+        DBG( "removing Header from image " << fwfilepath << " -> " << outFilepath );
+        {
+            std::ifstream in( fwfilepath, std::ios::binary );
+            std::ofstream out( outFilepath, std::ios::binary | std::ios::trunc );
 
-	if ( result != 0 )
-    {
-        DBG( "Failed to remove header from image." );
-        return false;
-    }
+            if( fw_ver_index > 0 )
+                in.seekg( fw_ver_index - 1 );
+
+            if( !in || !out || !( out << in.rdbuf() ) || !out.flush() )
+            {
+                DBG( "Failed to remove header from image." );
+                return false;
+            }
+        }
 
     // Now remove the original file
     if ( std::remove( fwfilepath.c_str() ) != 0 )
@@ -492,18 +500,21 @@ namespace mt
         bool        status        = false;
         std::string outFwfilepath = decrptionDir + decryptedFwname;
         std::string inFwfilepath  = decrptionDir + fwHeaderFile;
-        std::string cmd           = "mkdir -p " + decrptionDir; // Create decryption directory if not exists
 #if( JUCE_LINUX || __linux__ )
-        system( cmd.c_str() ); // Execute the command using system call to create directory
+        std::error_code ec;
+        fs::create_directories( decrptionDir, ec ); // Create decryption directory if not exists
 
         if( isImgFile( fwfilepath ) )
         { // Check if it's an img file
             if( removeHeaderFromImage( fwfilepath ) )
             { // Remove header from image
-                std::string command = "openssl enc -aes-256-cbc -pbkdf2 -d -salt -in " + inFwfilepath + " -out " + outFwfilepath + " -k '" + decrptKey + "'";
+                // The passphrase goes to openssl on its standard input, not
+                // on its command line, where any user could read it.
+                const juce::StringArray command { "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d", "-salt",
+                                                  "-in", inFwfilepath, "-out", outFwfilepath, "-pass", "stdin" };
 
-                std::cout << "Decrypting image: " << command << std::endl;
-                int result = system( command.c_str() ); // Execute the command using system call
+                std::cout << "Decrypting image: " << inFwfilepath << " -> " << outFwfilepath << std::endl;
+                int result = process::runWithInput( command, decrptKey + "\n" );
 
                 if( result == 0 )
                 {
