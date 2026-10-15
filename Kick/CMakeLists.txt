@@ -123,6 +123,10 @@ add_compile_definitions(
     KICK_STATE_DIR="${KICK_STATE_DIR}"
 )
 
+## The power key's input device (kick_Hwpref.cpp).
+set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
+add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
+
 ## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
 set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
 add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")

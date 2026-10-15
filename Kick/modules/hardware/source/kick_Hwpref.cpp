@@ -21,6 +21,12 @@
 
 #include "kick_Hwpref.h"
 
+// The power key's input device; the build system can override it (see
+// CMakeLists.txt).
+#ifndef KICK_POWER_KEY_DEVICE
+    #define KICK_POWER_KEY_DEVICE "/dev/input/event2"
+#endif
+
 namespace mt
 {
     namespace fs = std::filesystem;
@@ -36,7 +42,11 @@ namespace mt
 
     void HwPref::run()
     {
-        const char* devicePath = "/dev/input/event2"; // Replace X with the appropriate event number
+        const char* devicePath = KICK_POWER_KEY_DEVICE;
+
+        // How long to wait before trying the device again after it could
+        // not be opened or read; doubled on every failure, up to 30 s.
+        int retryMs = 500;
 
         while( !threadShouldExit() )
         {
@@ -44,12 +54,16 @@ namespace mt
             if( !inputDevice.is_open() ) // Check if inputDevice is not valid
             {
                 // Open the input device file
+                inputDevice.clear();
                 inputDevice.open( devicePath, std::ios::binary );
                 if( !inputDevice.is_open() )
                 {
-                    DBG( "Error opening Input device" );
-                    // Handle the error (e.g., return, continue loop, or retry opening)
-                    continue; // Continue the loop if opening failed
+                    DBG( "Error opening Input device " << devicePath );
+                    // It may appear later, or not exist on this hardware:
+                    // try again, without spinning on a CPU core.
+                    wait( retryMs );
+                    retryMs = juce::jmin( retryMs * 2, 30000 );
+                    continue;
                 }
             }
 
@@ -57,16 +71,19 @@ namespace mt
             struct input_event ev;
             if( inputDevice.read( reinterpret_cast<char*>( &ev ), sizeof( struct input_event ) ) )
             {
-                // Process the input event
-                if( ev.type == EV_KEY && ev.code == KEY_STOP )
+                retryMs = 500;
+
+                // Process the input event. The key is KEY_STOP or, from a
+                // power key driver such as the i.MX SNVS one, KEY_POWER.
+                if( ev.type == EV_KEY && ( ev.code == KEY_STOP || ev.code == KEY_POWER ) )
                 {
                     if( ev.value == 1 )
                     {
-                        DBG( "KEY_STOP pressed" );
+                        DBG( "Power key pressed" );
                     }
                     else if( ev.value == 0 )
                     {
-                        DBG( "KEY_STOP released" );
+                        DBG( "Power key released" );
                         if( powerButtonUI )
                             powerButtonUI();
                     }
@@ -74,7 +91,13 @@ namespace mt
             }
             else
             {
-                continue; // Continue the loop if reading failed
+                // The device went away or cannot be read: open it again
+                // after a while.
+                DBG( "Error reading Input device " << devicePath );
+                inputDevice.close();
+                wait( retryMs );
+                retryMs = juce::jmin( retryMs * 2, 30000 );
+                continue;
             }
 #endif
             juce::Thread::sleep( 300 );
