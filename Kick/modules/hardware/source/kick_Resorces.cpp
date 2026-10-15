@@ -20,6 +20,7 @@
  */
 
 #include "kick_Resorces.h"
+#include "kick_Process.h"
 
 namespace mt
 {
@@ -66,24 +67,22 @@ namespace mt
         juce::File fileToCheck( path );
         if( fileToCheck.exists() )
         {
-            info.status          = true;
-            juce::String command = "df -h ";
-            command += juce::String( path.c_str() ); // Convert std::string to juce::Stringpath;
+            info.status = true;
 
-            // Execute the `df -h` command and capture its output
-            FILE* pipe = popen( command.toRawUTF8(), "r" );
-            if( !pipe )
+            // Run `df -h <path>` (without a shell: path can be a mount
+            // point named after a removable disk's label) and capture its
+            // output
+            juce::String output;
+            if( process::run( { "df", "-h", path }, &output ) < 0 )
             {
                 std::cerr << "Error executing command." << std::endl;
                 return;
             }
 
-            std::string line;
-            char        buffer[256];
-            std::string filesystem, size, used, available, usePercentage, mountPoint;
-            while( fgets( buffer, sizeof( buffer ), pipe ) )
+            std::istringstream lines( output.toStdString() );
+            std::string        filesystem, size, used, available, usePercentage, mountPoint;
+            for( std::string line; std::getline( lines, line ); )
             {
-                std::string line( buffer );
                 if( line.find( path ) != std::string::npos )
                 {
                     std::istringstream iss( line );
@@ -95,8 +94,6 @@ namespace mt
                     info.perSize   = juce::String( usePercentage ).getIntValue();
                 }
             }
-            // Close the command output pipe
-            pclose( pipe );
         }
 #elif( defined( _WIN32 ) || defined( _WIN64 ) )
         // Dummy data for Windows
@@ -138,25 +135,15 @@ namespace mt
 #if( JUCE_LINUX || __linux__ )
         const char* folderPath = path.c_str();
 
-        // Create the command to run du -sh on the specified folder
-        char command[256];
-        snprintf( command, sizeof( command ), "du -sh \"%s\"", folderPath );
-
-        // Open a pipe to execute the command and capture its output
-        FILE* pipe = popen( command, "r" );
-        if( !pipe )
+        // Run du -sh on the specified folder (without a shell) and capture
+        // its output
+        juce::String output;
+        if( process::run( { "du", "-sh", path }, &output ) < 0 )
         {
             std::cerr << "Error executing du command." << std::endl;
             return;
         }
-
-        // Read the output of the du command
-        char        buffer[128];
-        std::string result;
-        while( fgets( buffer, sizeof( buffer ), pipe ) != nullptr )
-        {
-            result += buffer;
-        }
+        std::string result = output.toStdString();
 
         // Parse the result to extract the size
         char sizeStr[16];
@@ -167,10 +154,8 @@ namespace mt
         else
         {
             std::cerr << "Error parsing du command output." << std::endl;
-            pclose( pipe );
             return;
         }
-        pclose( pipe );
 #endif
     }
 }
