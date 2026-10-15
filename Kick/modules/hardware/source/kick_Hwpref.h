@@ -193,7 +193,6 @@ namespace mt
         std::ifstream inputDevice;
         PowerButtonUI powerButtonUI;
         // Setter for the function pointer
-        std::string executeCommand( const std::string& command );
         int         executeSetCommand( const std::string& command );
         bool        setDateTime( int year, int month, int day, int hour, int minute, int second );
     };

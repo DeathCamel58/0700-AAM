@@ -81,31 +81,6 @@ namespace mt
         }
     }
 
-    std::string HwPref::executeCommand( const std::string& command )
-    {
-        std::string result = "";
-#if( JUCE_LINUX || __linux__ )
-        char buffer[128];
-
-        FILE* pipe = popen( command.c_str(), "r" );
-        if( !pipe )
-        {
-            return "Error";
-        }
-
-        while( !feof( pipe ) )
-        {
-            if( fgets( buffer, 128, pipe ) != nullptr )
-            {
-                result += buffer;
-            }
-        }
-
-        pclose( pipe );
-#endif
-        return result;
-    }
-
     int HwPref::executeSetCommand( const std::string& command )
     {
         int result = 0;
@@ -115,18 +90,20 @@ namespace mt
         return result;
     }
 
+    // The system's network manager owns the Ethernet interface: it brings
+    // the link up, runs DHCP on it and keeps the address and routes. A DHCP
+    // client or an interface configuration of our own would fight it (and
+    // needs root), so DHCP is always on and the rest is not done here.
     int HwPref::startDhcp( void )
     {
-	    DBG("Starting DHCP");
-        std::string command = "/usr/sbin/udhcpc -i eth0 &";
-        return executeSetCommand( command.c_str() );
+        DBG( "DHCP is run by the system's network manager" );
+        return 0;
     }
 
     int HwPref::stopDhcp( void )
     {
-	    DBG("Stoping DHCP");
-        std::string command = "killall udhcpc";
-        return executeSetCommand( command.c_str() );
+        DBG( "DHCP is run by the system's network manager; not stopping it" );
+        return -1;
     }
 
     int HwPref::factoryReset( void )
@@ -614,8 +591,9 @@ namespace mt
     bool HwPref::isEthernetCableConnected()
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string ethtoolOutput = executeCommand( "ethtool eth0 | grep 'Link detected'" );
-        return ( ethtoolOutput.find( "yes" ) != std::string::npos );
+        std::ifstream carrier( "/sys/class/net/eth0/carrier" );
+        int           detected = 0;
+        return ( carrier >> detected ) && detected == 1;
 #endif
         return false;
     }
@@ -623,16 +601,10 @@ namespace mt
     bool HwPref::ethernetEnable( bool status )
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string command = status ? "ifconfig eth0 up" : "ifconfig eth0 down";
-        int         result  = system( command.c_str() ); // Execute the command using system call
-        if( result == 0 )
-        {
-            return true; // Command executed successfully
-        }
-        else
-        {
-            return false; // Command execution failed
-        }
+        // The system's network manager brings the link up and down.
+        juce::ignoreUnused( status );
+        DBG( "Ethernet is managed by the system's network manager; not turning it " << ( status ? "on" : "off" ) );
+        return false;
 #else
         return true; // Not supported on non-Linux systems
 #endif
@@ -663,11 +635,12 @@ namespace mt
     int HwPref::setIP( const std::string& interface, const std::string& ipAddress, const std::string& subnetMask, const std::string& gateway )
     {
         DBG( "SetIP Fucntion Called" );
-        int         result  = 0;
-        std::string command = "ifconfig " + interface + " " + ipAddress + " netmask " + subnetMask;
-	DBG("cmd = " <<command);
+        int result = 0;
 #if( JUCE_LINUX || __linux__ )
-        result = executeSetCommand( command.c_str() );
+        // The system's network manager owns the interface's addresses.
+        juce::ignoreUnused( interface, ipAddress, subnetMask, gateway );
+        DBG( "Not setting " << interface << " to " << ipAddress << "/" << subnetMask << ": addresses come from the system's network manager" );
+        result = -1;
 #endif
         return result;
     }
@@ -712,27 +685,14 @@ namespace mt
     std::string HwPref::getGateway( const std::string& interface )
     {
 #if( JUCE_LINUX || __linux__ )
-        // Command to retrieve routing information
-        std::string command = "ip route show";
-        char        buffer[128];
-        std::string result = "";
-
-        // Open the command for reading
-        FILE* pipe = popen( command.c_str(), "r" );
-        if( !pipe )
+        // Retrieve routing information
+        juce::String output;
+        if( process::run( { "ip", "route", "show" }, &output ) < 0 )
         {
             std::cerr << "Failed to run command\n";
             return "";
         }
-
-        // Read the output of the command
-        while( fgets( buffer, sizeof( buffer ), pipe ) != nullptr )
-        {
-            result += buffer;
-        }
-
-        // Close the pipe
-        pclose( pipe );
+        std::string result = output.toStdString();
 
         // Parse the result to find the line corresponding to the desired interface
         std::istringstream iss( result );
@@ -761,16 +721,22 @@ namespace mt
         DBG( "GetIP Fucntion Called" );
         std::string ipAddress = "0.0.0.0";
 
-        std::string command = "ip -4 addr show " + interface + " | awk '/inet / {split($2, a, \"\\\\/\"); print a[1]}'";
 #if( JUCE_LINUX || __linux__ )
 
-        // Get the local IP address
-        ipAddress = executeCommand( command );
-        info.IP   = ipAddress;
+        // Get the local IP address: the "inet <address>/<prefix>" of
+        // "ip -4 -o addr show dev <interface>"
+        juce::String output;
+        process::run( { "ip", "-4", "-o", "addr", "show", "dev", interface }, &output );
+        const auto fields = juce::StringArray::fromTokens( output, " \t\n", "" );
+        const auto inet   = fields.indexOf( "inet" );
+        if( inet >= 0 && inet + 1 < fields.size() )
+            ipAddress = fields[inet + 1].upToFirstOccurrenceOf( "/", false, false ).toStdString();
+        info.IP = ipAddress;
 
-        // Get Ethernet adapter status
-        std::string ifconfigOutput = executeCommand( "ifconfig eth0" );
-        if( ifconfigOutput.find( "UP" ) != std::string::npos )
+        // Get the adapter status
+        std::ifstream operstate( "/sys/class/net/" + interface + "/operstate" );
+        std::string   state;
+        if( ( operstate >> state ) && state == "up" )
         {
             info.status = true;
             DBG( "Ethernet Adapter Status: Operational" );
