@@ -20,6 +20,7 @@
  */
 
 #include "kick_Hwpref.h"
+#include "kick_RemovableMedia.h"
 
 // The power key's input device; the build system can override it (see
 // CMakeLists.txt).
@@ -907,9 +908,9 @@ namespace mt
         std::strncpy( info.internalStorageStatus.totalSpace, juce::String( sInfo.totalSize ).toRawUTF8(), sizeof( info.internalStorageStatus.totalSpace ) );
         std::strncpy( info.internalStorageStatus.usedSpace, juce::String( sInfo.usedSize ).toRawUTF8(), sizeof( info.internalStorageStatus.usedSpace ) );
 
-        internalPath = "/mnt/flash";
+        internalPath = getRemovableMediaPath( RemovableMedia::UsbDisk );
 
-        if( isStorageconnected( "flash" ) )
+        if( !internalPath.empty() )
         {
             mt::SystemResource::getResourceInterface().sizeInfo( internalPath, sInfo );
 

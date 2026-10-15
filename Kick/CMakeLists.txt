@@ -123,6 +123,10 @@ add_compile_definitions(
     KICK_STATE_DIR="${KICK_STATE_DIR}"
 )
 
+## The directory removable disks are mounted below (kick_RemovableMedia.h).
+set(KICK_MEDIA_DIR "/mnt" CACHE PATH "Mount point directory of removable disks")
+add_compile_definitions(KICK_MEDIA_DIR="${KICK_MEDIA_DIR}")
+
 ## The power key's input device (kick_Hwpref.cpp).
 set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
 add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")

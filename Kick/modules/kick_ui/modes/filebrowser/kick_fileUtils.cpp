@@ -1,42 +1,30 @@
 #pragma once
 #include <kick_ui/modes/filebrowser/kick_fileUtils.h>
+#include <hardware/source/kick_RemovableMedia.h>
 namespace ui
 {
     namespace fileUtils
     {
         int lastPressedPad = -1;
 
+        // An SD card or USB disk is there once the system has mounted it.
         juce::String getSdCardMountedPath()
         {
-            return "/mnt//sdcard";
+            return mt::getRemovableMediaPath( mt::RemovableMedia::SdCard );
         }
         juce::String getUsbMountedPath()
         {
-            return "/mnt//flash";
+            return mt::getRemovableMediaPath( mt::RemovableMedia::UsbDisk );
         }
 
         bool getSdCardStatus()
         {
-#if defined( LINUX ) || defined( __linux__ )
-            const char* sdCardDevicePath = "/dev/mmcblk1";
-            if( access( sdCardDevicePath, F_OK ) != -1 )
-                return true;
-            else
-                return false;
-#endif
-            return false;
+            return getSdCardMountedPath().isNotEmpty();
         }
 
         bool getUsbStatus()
         {
-#if defined( LINUX ) || defined( __linux__ )
-            const char* usbDevicePath = "/dev/sda";
-            if( access( usbDevicePath, F_OK ) != -1 )
-                return true;
-            else
-                return false;
-#endif
-            return false;
+            return getUsbMountedPath().isNotEmpty();
         }
 
         juce::int32 calculateFolderSize( juce::File filePath )

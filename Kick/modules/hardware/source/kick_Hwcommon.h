@@ -22,14 +22,16 @@
 #pragma once
 
 #include <iostream>
+#include "kick_RemovableMedia.h"
 
 // Writable state; the build system can override it (see CMakeLists.txt).
 #ifndef KICK_STATE_DIR
     #define KICK_STATE_DIR "/home/Kick"
 #endif
 
-#define SDCARD_PATH  "/mnt/sdcard"
-#define USBDISK_PATH "/mnt/flash"
+// Where an SD card and a USB disk are mounted, or empty if they are not.
+#define SDCARD_PATH  mt::getRemovableMediaPath( mt::RemovableMedia::SdCard )
+#define USBDISK_PATH mt::getRemovableMediaPath( mt::RemovableMedia::UsbDisk )
 #define PCMODE_PATH  KICK_STATE_DIR "/Firmware_Update"
 
 #define INFO         ( ( 'I' ) | ( 'N' << 8 ) | ( 'F' << 16 ) | ( 'O' << 24 ) )

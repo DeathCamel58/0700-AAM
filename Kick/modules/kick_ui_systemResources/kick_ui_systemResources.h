@@ -44,6 +44,7 @@
 #pragma once
 
 #include <kick_ui_controls/kick_ui_controls.h>
+#include <hardware/source/kick_RemovableMedia.h>
 
 // Writable state; the build system can override it (see CMakeLists.txt).
 #ifndef KICK_STATE_DIR
@@ -81,8 +82,8 @@ namespace kick_ui
         ui::KickImageButton purgeUnused{ "Purge Unused", "purgeused" };
         ui::KickImageButton ok{ "OK", "ok_resource" };
         std::string         internalPath = KICK_STATE_DIR;
-        std::string         sdCardPath   = "/dev/mmcblk1p1";
-        std::string         usbDiskPath  = "/dev/sda1";
+        std::string         sdCardPath;
+        std::string         usbDiskPath;
     };
 
     class KickSysResources
