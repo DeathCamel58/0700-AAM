@@ -829,11 +829,10 @@ namespace mt
     int HwPref::setTimeZone( juce::String& str )
     {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::string cmd = "timedatectl set-timezone " + str.toStdString();
-        int         ret = system( cmd.c_str() );
+        int ret = process::run( { "timedatectl", "set-timezone", str } );
         if( ret == 0 )
         {
-            DBG( "setting timezone Success" << cmd );
+            DBG( "setting timezone Success " << str );
             return 1;
         }
         else
@@ -939,13 +938,14 @@ namespace mt
 
     void HwPref::setDate( int day, int month, int year )
     {
-        //date - s "2024-05-15"
-        std::string cmd = std::to_string( year ) + "-" + std::to_string( month ) + "-" + std::to_string( day );
-        DBG( "Setting Day -> " << cmd );
-        // Execute the command
-        int result = std::system( cmd.c_str() );
-        // Check if the command executed successfully
-        if( result == 0 )
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // timedatectl sets the date and the time together: keep the time.
+        std::time_t now = std::time( nullptr );
+        std::tm     local {};
+        localtime_r( &now, &local );
+
+        DBG( "Setting Day -> " << year << "-" << month << "-" << day );
+        if( setDateTime( year, month, day, local.tm_hour, local.tm_min, local.tm_sec ) )
         {
             DBG( "Date successfully updated to: " << day << "/" << month << "/" << year );
         }
@@ -953,16 +953,19 @@ namespace mt
         {
             DBG( "Failed to update date." );
         }
+#endif
     }
 
     void HwPref::setTime( int hour, int minute )
     {
-        std::string cmd = std::to_string( hour ) + ":" + std::to_string( minute ) + ":00";
-        DBG( "Setting Day -> " << cmd );
-        // Execute the command
-        int result = std::system( cmd.c_str() );
-        // Check if the command executed successfully
-        if( result == 0 )
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // timedatectl sets the date and the time together: keep the date.
+        std::time_t now = std::time( nullptr );
+        std::tm     local {};
+        localtime_r( &now, &local );
+
+        DBG( "Setting Time -> " << hour << ":" << minute << ":00" );
+        if( setDateTime( local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, hour, minute, 0 ) )
         {
             DBG( "Time successfully updated to: " << hour << "/" << minute );
         }
@@ -970,8 +973,21 @@ namespace mt
         {
             DBG( "Failed to update Time." );
         }
+#endif
 
         DBG( "Setting Day -> " << hour << "::" << minute );
+    }
+
+    bool HwPref::setDateTime( int year, int month, int day, int hour, int minute, int second )
+    {
+        char localTime[32];
+        std::snprintf( localTime, sizeof( localTime ), "%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second );
+
+        // A clock set by hand would be overwritten by network time, and
+        // timedated refuses to set it while network time is on, so turn it
+        // off first.
+        process::run( { "timedatectl", "set-ntp", "false" } );
+        return process::run( { "timedatectl", "set-time", localTime } ) == 0;
     }
 
     // Get the number of days in a month, considering leap years
