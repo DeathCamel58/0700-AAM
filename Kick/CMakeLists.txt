@@ -127,6 +127,11 @@ add_compile_definitions(
 set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
 add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
 
+## A systemd unit that performs the factory reset (kick_Hwpref.cpp); empty:
+## the application removes its own projects and preferences.
+set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
+add_compile_definitions(KICK_FACTORY_RESET_UNIT="${KICK_FACTORY_RESET_UNIT}")
+
 ## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
 set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
 add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")

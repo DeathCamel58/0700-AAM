@@ -27,6 +27,12 @@
     #define KICK_POWER_KEY_DEVICE "/dev/input/event2"
 #endif
 
+// A systemd unit that performs the factory reset, or empty if the
+// application only removes its own state; the build system can set it.
+#ifndef KICK_FACTORY_RESET_UNIT
+    #define KICK_FACTORY_RESET_UNIT ""
+#endif
+
 namespace mt
 {
     namespace fs = std::filesystem;
@@ -103,15 +109,6 @@ namespace mt
         }
     }
 
-    int HwPref::executeSetCommand( const std::string& command )
-    {
-        int result = 0;
-#if( JUCE_LINUX || __linux__ )
-        result = std::system( command.c_str() );
-#endif
-        return result;
-    }
-
     // The system's network manager owns the Ethernet interface: it brings
     // the link up, runs DHCP on it and keeps the address and routes. A DHCP
     // client or an interface configuration of our own would fight it (and
@@ -130,6 +127,13 @@ namespace mt
 
     int HwPref::factoryReset( void )
     {
+        // A system that resets more than the application's own state (its
+        // own configuration, say) provides a unit that does it all and
+        // restarts the device. Started without waiting, as it stops the
+        // application.
+        if( std::string( KICK_FACTORY_RESET_UNIT ).size() > 0 )
+            return process::run( { "systemctl", "start", "--no-block", KICK_FACTORY_RESET_UNIT } );
+
         // Remove the projects and the preferences from the state directory
         // (what "rm -rf <state>/projects* <state>/prefs" did).
         std::error_code       ec;
