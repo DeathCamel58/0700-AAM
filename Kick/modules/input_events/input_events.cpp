@@ -9,6 +9,12 @@
 
 #include "ComConfig.hpp"
 
+// The front-panel MCU's serial port; the build system can override it (see
+// CMakeLists.txt).
+#ifndef KICK_MCU_SERIAL_DEVICE
+    #define KICK_MCU_SERIAL_DEVICE "/dev/ttymxc0"
+#endif
+
 namespace Controls
 {
     std::atomic<bool> shiftBtnState{ false };
@@ -43,7 +49,7 @@ namespace Controls
         void connect()
         {
 #if( JUCE_LINUX || __linux__ )
-            if( juce::File( "/dev/ttymxc0" ).exists() )
+            if( juce::File( KICK_MCU_SERIAL_DEVICE ).exists() )
             {
                 juce::StringPairArray portlist = SerialPort::getSerialPortPaths();
 
@@ -51,8 +57,7 @@ namespace Controls
                     return;
 
                 bool         hasSerialPort = false;
-                juce::String serialDev     = "/dev/ttymxc0";
-                serialDev                  = "/dev/ttymxc0";
+                juce::String serialDev     = KICK_MCU_SERIAL_DEVICE;
 
                 auto serialDebug = []( juce::String str1, juce::String str2 ) {
                     DBG( str1 );
@@ -89,7 +94,7 @@ namespace Controls
             }
             else
             {
-                DBG( "Serial Not Found" );
+                DBG( "Serial port " << KICK_MCU_SERIAL_DEVICE << " not found" );
             }
 #endif
         }

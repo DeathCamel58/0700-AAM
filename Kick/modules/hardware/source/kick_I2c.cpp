@@ -28,10 +28,16 @@
     #include <unistd.h>
 #endif
 
+// The CV DAC's I2C bus; the build system can override it (see
+// CMakeLists.txt).
+#ifndef KICK_CV_DAC_I2C_DEVICE
+    #define KICK_CV_DAC_I2C_DEVICE "/dev/i2c-3"
+#endif
+
 namespace mt
 {
     I2CDevice::I2CDevice()
-        : devicePath_( "/dev/i2c-3" ), address_( 0xc ), file_( -1 ), isDeviceOpen_( false )
+        : devicePath_( KICK_CV_DAC_I2C_DEVICE ), address_( 0xc ), file_( -1 ), isDeviceOpen_( false )
     {
         if( openDevice() )
         {
@@ -54,7 +60,7 @@ namespace mt
         file_ = open( devicePath_.c_str(), O_RDWR );
         if( file_ < 0 )
         {
-            DBG( "Failed to open the I2C device" );
+            DBG( "Failed to open the I2C device " << devicePath_.c_str() );
             return false;
         }
         else

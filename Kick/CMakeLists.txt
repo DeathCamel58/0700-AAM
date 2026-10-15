@@ -131,6 +131,15 @@ add_compile_definitions(KICK_MEDIA_DIR="${KICK_MEDIA_DIR}")
 set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
 add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
 
+## The front-panel MCU's serial port (input_events.cpp) and the CV DAC's I2C
+## bus (kick_I2c.cpp).
+set(KICK_MCU_SERIAL_DEVICE "/dev/ttymxc0" CACHE FILEPATH "Front-panel MCU serial port")
+set(KICK_CV_DAC_I2C_DEVICE "/dev/i2c-3"   CACHE FILEPATH "CV DAC I2C bus device")
+add_compile_definitions(
+    KICK_MCU_SERIAL_DEVICE="${KICK_MCU_SERIAL_DEVICE}"
+    KICK_CV_DAC_I2C_DEVICE="${KICK_CV_DAC_I2C_DEVICE}"
+)
+
 ## A systemd unit that performs the factory reset (kick_Hwpref.cpp); empty:
 ## the application removes its own projects and preferences.
 set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
