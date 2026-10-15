@@ -105,21 +105,35 @@ public:
         handlers.push_back( std::shared_ptr<ipc::MTIIPCMessageHandler>( new kick::main::KickExitMessageHandler() ) );
     }
 private:
-    void onHeartBeatNotReceived( const int hostId)
+    // Runs on the message thread, queued by KickHeartBeatData::verify() for
+    // a host whose last heartbeat is outside the verification window.
+    // Restarts that process only; the others keep running and reconnect to
+    // it. (Stopping and starting the whole subsystem destroyed its data in
+    // stop(), and start() then dereferenced it.)
+    void onHeartBeatNotReceived( const int hostId )
     {
-        auto ss = subsystem(); // restart the complete system if one of the process is hanged.
-        if( ss )
-        {
-            ss->stop();
-            ss->start();
-        }
-            
+        if( !childNames.contains( hostId ) )
+            return;
+
+        // verify() queues a call every window until the heartbeat changes:
+        // act on the first only. The host may also have recovered since.
+        const juce::int64 latest = heartBeatData->latestHeartBeat( hostId );
+        if( latest < 0 || juce::Time::currentTimeMillis() - latest <= HEART_BEAT_MONITOR_TIMEOUT_IN_MS )
+            return;
+
+        auto ss = subsystem();
+        if( !ss )
+            return;
+
+        // The restarted process registers a new heartbeat when it is up.
+        heartBeatData->forgetHeartBeat( hostId );
+        ss->restartHost( hostId );
     }
 
     // Runs on the monitor thread after every verification window. Until it
     // is told READY=1, the service manager only enforces its start timeout;
     // after that, missing WATCHDOG=1 notifications let it restart KickMain
-    // when the subsystem restart in onHeartBeatNotReceived() does not help.
+    // when restarting the process in onHeartBeatNotReceived() does not help.
     void onHeartBeatsVerified( const juce::Array<int>& missingHostIds )
     {
         if( missingHostIds.isEmpty() )
@@ -160,7 +174,9 @@ private:
     std::unique_ptr<kick::main::KickHearBeatMonitor> monitor;
 
     // Set up on the message thread before the monitor thread starts; from
-    // then until shutdown() stops it, only the monitor thread uses them.
+    // then until shutdown() stops it, only the monitor thread uses them
+    // (childNames, which no longer changes, is also read on the message
+    // thread).
     kick::main::KickServiceNotifier  serviceNotifier;
     juce::HashMap<int, juce::String> childNames;
     bool                             reportedReady{ false };

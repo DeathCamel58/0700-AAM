@@ -79,6 +79,11 @@ namespace ipc
             restartOnKill = enable;
         }
 
+        bool isRestartOnKillEnabled() const
+        {
+            return restartOnKill;
+        }
+
     private:
         bool                                                 restartOnKill{ true };
         std::function<void( int )>                           restartChildProcess;
@@ -442,20 +447,19 @@ namespace ipc
 
     void MTIPCBaseSubsystem::restartHost( const int hostId )
     {
-        if( !data ) return;
-        int connectionId = -1;
+        if( !data || !data->processManager ) return;
 
-        for( auto itr = data->connectionIdtoConnectedHost.begin(); itr != data->connectionIdtoConnectedHost.end(); itr.next() )
-        {
-            if( itr.getValue() == hostId )
-            {
-                connectionId = itr.getKey();
-                break;
-            }
-        }
         auto processName = data->processManager->processName( hostId );
         juce::Logger::writeToLog( "Attempting to Restart " + processName + " with host id " + juce::String( hostId ) + " As Host did not send heartbeat" );
         data->processManager->stopProcess( hostId );
+
+        // With restart on kill enabled, the process monitor reports the exit
+        // and restartChildProcess() starts the process again, giving up after
+        // repeated failures as it does when the process crashes. Starting it
+        // here as well would run two instances.
+        if( data->pmCallback && data->pmCallback->isRestartOnKillEnabled() )
+            return;
+
         data->processManager->waitForProcessToExit( hostId );
         juce::MessageManager::callAsync( [&, hostId]() { data->processManager->startProcess( hostId ); } );
     }

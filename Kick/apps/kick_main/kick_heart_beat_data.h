@@ -66,6 +66,14 @@ namespace kick
                 heartBeatEventTimePoints.set( hostId, juce::Time::currentTimeMillis() );
             }
 
+            // Drops the host's heartbeat, so that verify() asks for no
+            // further restart until the host has sent a new one.
+            void forgetHeartBeat( const int hostId )
+            {
+                const juce::ScopedLock sl( lock );
+                heartBeatEventTimePoints.remove( hostId );
+            }
+
             // The hosts whose heartbeat verify() expects, whether or not they
             // have sent one yet.
             void expectHeartBeatsFrom( const juce::Array<int>& hostIds )
