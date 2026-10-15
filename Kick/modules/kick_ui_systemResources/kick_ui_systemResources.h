@@ -45,6 +45,11 @@
 
 #include <kick_ui_controls/kick_ui_controls.h>
 
+// Writable state; the build system can override it (see CMakeLists.txt).
+#ifndef KICK_STATE_DIR
+    #define KICK_STATE_DIR "/home/Kick"
+#endif
+
 namespace kick_ui
 {
     class KSystemResources
@@ -75,7 +80,7 @@ namespace kick_ui
         ui::KickImageButton purgeAll{ "Purge All", "purge" };
         ui::KickImageButton purgeUnused{ "Purge Unused", "purgeused" };
         ui::KickImageButton ok{ "OK", "ok_resource" };
-        std::string         internalPath = "/home/Kick";
+        std::string         internalPath = KICK_STATE_DIR;
         std::string         sdCardPath   = "/dev/mmcblk1p1";
         std::string         usbDiskPath  = "/dev/sda1";
     };

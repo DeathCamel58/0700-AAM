@@ -23,9 +23,14 @@
 
 #include <iostream>
 
+// Writable state; the build system can override it (see CMakeLists.txt).
+#ifndef KICK_STATE_DIR
+    #define KICK_STATE_DIR "/home/Kick"
+#endif
+
 #define SDCARD_PATH  "/mnt/sdcard"
 #define USBDISK_PATH "/mnt/flash"
-#define PCMODE_PATH  "/home/Kick/Firmware_Update"
+#define PCMODE_PATH  KICK_STATE_DIR "/Firmware_Update"
 
 #define INFO         ( ( 'I' ) | ( 'N' << 8 ) | ( 'F' << 16 ) | ( 'O' << 24 ) )
 #define FAIL         ( ( 'F' ) | ( 'A' << 8 ) | ( 'I' << 16 ) | ( 'L' << 24 ) )

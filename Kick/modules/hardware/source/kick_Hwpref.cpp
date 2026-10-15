@@ -31,7 +31,6 @@ namespace mt
 {
     namespace fs = std::filesystem;
 
-    const char* FACTORY_RESET_CMD = "/bin/rm -rf /home/Kick/projects* /home/Kick/prefs";
 
     HwPref::HwPref()
         : juce::Thread( "powerbutton" )
@@ -131,7 +130,27 @@ namespace mt
 
     int HwPref::factoryReset( void )
     {
-        return executeSetCommand( FACTORY_RESET_CMD );
+        // Remove the projects and the preferences from the state directory
+        // (what "rm -rf <state>/projects* <state>/prefs" did).
+        std::error_code       ec;
+        std::vector<fs::path> paths;
+
+        for( const auto& entry : fs::directory_iterator( KICK_STATE_DIR, ec ) )
+        {
+            const auto name = entry.path().filename().string();
+            if( name.rfind( "projects", 0 ) == 0 || name == "prefs" )
+                paths.push_back( entry.path() );
+        }
+
+        int result = 0;
+        for( const auto& path : paths )
+        {
+            fs::remove_all( path, ec );
+            if( ec )
+                result = -1;
+        }
+
+        return result;
     }
 
     int HwPref::shutdown( void )
@@ -877,7 +896,7 @@ namespace mt
         std::strncpy( info.memoryStatus.used, juce::String( rInfo.usedRam ).toRawUTF8(), sizeof( info.memoryStatus.used ) );
 
         mt::sysSizeInfo sInfo;
-        std::string     internalPath = "/home/Kick";
+        std::string     internalPath = KICK_STATE_DIR;
         mt::SystemResource::getResourceInterface().sizeInfo( internalPath, sInfo );
 
         std::strncpy( info.internalStorageStatus.availableSpace, juce::String( sInfo.avaSize ).toRawUTF8(), sizeof( info.internalStorageStatus.availableSpace ) );
