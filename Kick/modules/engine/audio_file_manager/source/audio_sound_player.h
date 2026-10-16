@@ -46,8 +46,10 @@ namespace mt
         void setTranspose( int Loop ) noexcept { slice.setFine( Loop ); }
 
     private:
+        bool stopAndWait();
+
         juce::AudioFormatManager audioFmtMgr;
-        ASound                   sound{ "", audioFmtMgr, 1.f };
+        ASound::Ptr              sound; // Control threads; the renderer reads it through slice.
         ASoundSlice              slice;
     };
 
