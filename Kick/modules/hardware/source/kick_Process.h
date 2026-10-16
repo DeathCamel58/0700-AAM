@@ -32,6 +32,7 @@
     #include <cerrno>
     #include <climits>
     #include <fcntl.h>
+    #include <signal.h>
     #include <spawn.h>
     #include <sys/wait.h>
     #include <unistd.h>
@@ -100,9 +101,26 @@ namespace mt
             posix_spawn_file_actions_init( &actions );
             posix_spawn_file_actions_adddup2( &actions, fds[0], STDIN_FILENO );
 
-            pid_t      pid;
-            const auto error = posix_spawnp( &pid, argv[0], &actions, nullptr, argv.data(), environ );
+            // Kick blocks its termination signals in every thread (they are
+            // read from a signalfd) and ignores SIGPIPE, and posix_spawn()
+            // runs no pthread_atfork() handlers: give the program an empty
+            // signal mask and those signals' default actions, as a program
+            // expects to start with (an ignored signal stays ignored across
+            // exec).
+            posix_spawnattr_t attributes;
+            posix_spawnattr_init( &attributes );
+            sigset_t signals;
+            sigemptyset( &signals );
+            posix_spawnattr_setsigmask( &attributes, &signals );
+            for( const int signal : { SIGTERM, SIGINT, SIGHUP, SIGPIPE } )
+                sigaddset( &signals, signal );
+            posix_spawnattr_setsigdefault( &attributes, &signals );
+            posix_spawnattr_setflags( &attributes, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF );
 
+            pid_t      pid;
+            const auto error = posix_spawnp( &pid, argv[0], &actions, &attributes, argv.data(), environ );
+
+            posix_spawnattr_destroy( &attributes );
             posix_spawn_file_actions_destroy( &actions );
             close( fds[0] );
 
