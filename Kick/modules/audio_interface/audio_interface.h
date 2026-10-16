@@ -29,4 +29,12 @@
 
 // Module include files.
 
+namespace mt
+{
+    // The engine and the UI name AudIO's recording objects unqualified in mt.
+    using AudIO::Looper;
+    using AudIO::Recorder;
+    using AudIO::SampleRecorder;
+} // namespace mt
+
 #endif // AUDIO_INTERFACE_INCLUDE
