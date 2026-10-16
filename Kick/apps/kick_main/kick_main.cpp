@@ -112,7 +112,7 @@ private:
     // stop(), and start() then dereferenced it.)
     void onHeartBeatNotReceived( const int hostId )
     {
-        if( !childNames.contains( hostId ) )
+        if( !childNames.contains( hostId ) || juce::MessageManager::getInstance()->hasStopMessageBeenSent() )
             return;
 
         // verify() queues a call every window until the heartbeat changes:

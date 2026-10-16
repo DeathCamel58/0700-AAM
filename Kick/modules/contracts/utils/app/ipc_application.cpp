@@ -21,6 +21,7 @@
 
 #include "juce_core/juce_core.h"
 #include "ipc_application.h"
+#include "termination_signals.h"
 #include "ipc/subsystem/mt_ipc_subsystem.h"
 #include "contracts/logger/logger.h"
 #include "ipc/utils/mt_ipc_helpers.h"
@@ -217,10 +218,19 @@ namespace contracts
         // crash takes the others down; ignored, the write fails with EPIPE
         // and the connection's reader reports the disconnect.
         std::signal( SIGPIPE, SIG_IGN );
+
+        // The service manager stops Kick with SIGTERM: quit through the
+        // message loop, so that shutdown() runs, as it does for an exit
+        // message.
+        terminationSignals.reset( new contracts::TerminationSignals( [this]( int signalNumber ) {
+            juce::Logger::writeToLog( "Received " + contracts::TerminationSignals::signalName( signalNumber ) + ", quitting" );
+            systemRequestedQuit();
+        } ) );
     }
 
     IPCApplication::~IPCApplication()
     {
+        terminationSignals.reset();
         impl.reset();
     }
     const juce::String IPCApplication::getApplicationName()

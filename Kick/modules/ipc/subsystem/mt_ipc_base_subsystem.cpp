@@ -347,6 +347,11 @@ namespace ipc
 
     void MTIPCBaseSubsystem::restartChildProcess( int processIdentifier )
     {
+        // The service manager signals every process when it stops Kick, so
+        // the children exit while this process is quitting too.
+        if( juce::MessageManager::getInstance()->hasStopMessageBeenSent() )
+            return;
+
         if( data->processManager )
         {
             if( !data->delayedRestarters.contains( processIdentifier ) )

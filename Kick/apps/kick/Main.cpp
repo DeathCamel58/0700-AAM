@@ -25,6 +25,8 @@
 #include "kick_audio_engine_adapter.h"
 #include "kick_audio_interface.h"
 
+#include "contracts/utils/app/termination_signals.h"
+
 #include <csignal>
 
 #ifdef PERFETTO
@@ -116,6 +118,10 @@ public:
         // A write to a closed socket or pipe should fail with EPIPE, not
         // kill the application.
         std::signal( SIGPIPE, SIG_IGN );
+
+        // Quit through the message loop on SIGTERM, SIGINT and SIGHUP, so
+        // that shutdown() runs.
+        terminationSignals = std::make_unique<contracts::TerminationSignals>( [this]( int ) { systemRequestedQuit(); } );
     }
 
     //==============================================================================
@@ -254,6 +260,7 @@ private:
     std::unique_ptr<KickDeviceAdapter>    adapter;
     std::unique_ptr<KickAudioEngineAdapter>    engineAdapter;
     std::shared_ptr<contracts::AudioInterface> audioInterface;
+    std::unique_ptr<contracts::TerminationSignals> terminationSignals;
 #if PERFETTO
     std::unique_ptr<perfetto::TracingSession> tracingSession;
 #endif
