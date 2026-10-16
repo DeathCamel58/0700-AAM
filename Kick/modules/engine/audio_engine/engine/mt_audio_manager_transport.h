@@ -125,6 +125,8 @@ namespace mt
         PlayOnNextBar             _nextBar;
         std::atomic<bool>         stopTickProcessing{ false };
         std::atomic<bool>         threadIsProcessingTick{ false };
+        std::atomic<uint32_t>     ticksProcessed{ 0 };
+        juce::WaitableEvent       tickProcessed;
         std::atomic<unsigned int> prevTick{ 0 };
         std::atomic<unsigned int> curTick{ 0 };
 

@@ -97,16 +97,32 @@ namespace mt
     {
         if( Sequence && Sequence == playingSequence.load() )
             close();
+        else
+            waitForTickThread(); // It may have been playing until just now.
     }
 
     void MTAudioTransportManager::waitForTickThread()
     {
         // The tick thread sets threadIsProcessingTick before it reads
-        // playingSequence, so once that is clear it cannot be using a
-        // sequence it read before playingSequence was cleared.
-        const auto deadline = juce::Time::getMillisecondCounter() + 1000;
-        while( threadIsProcessingTick.load() && juce::Time::getMillisecondCounter() < deadline )
-            std::this_thread::yield();
+        // playingSequence, so once the tick it is processing now is done it
+        // cannot be using a sequence it read before playingSequence was
+        // cleared. The caller frees that next, so wait for as long as it
+        // takes: the tick thread never waits for this thread, and the
+        // callers hold none of the locks it takes.
+        jassert( std::this_thread::get_id() != tickProcessingThread->get_id() );
+
+        const auto processed = ticksProcessed.load();
+        const auto start     = juce::Time::getMillisecondCounter();
+        auto       reported  = false;
+        while( threadIsProcessingTick.load() && processed == ticksProcessed.load() )
+        {
+            tickProcessed.wait( 100 );
+            if( !reported && juce::Time::getMillisecondCounter() - start >= 1000 )
+            {
+                reported = true;
+                juce::Logger::writeToLog( "MTAudioTransportManager: the tick thread has been busy with one tick for over a second, still waiting for it" );
+            }
+        }
     }
 
     void MTAudioTransportManager::setup()
@@ -358,6 +374,8 @@ namespace mt
             {
                 DBG( "Exception While tick Processing..." );
             }
+            ++ticksProcessed;
+            tickProcessed.signal();
         }
     }
 
