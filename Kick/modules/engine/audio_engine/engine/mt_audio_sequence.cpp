@@ -83,7 +83,10 @@ namespace mt
         vTree.removeListener( this );
         stop();
 
-        tracks.clear();
+        {
+            const juce::ScopedLock sl( lock );
+            tracks.clear();
+        }
 
         // Write MIDI data...
         {
@@ -274,8 +277,13 @@ namespace mt
             VT.setProperty( IDs::name, nameStr, nullptr );
         }
 
-        if( auto& t = tracks.emplace_back( std::make_unique<MTTrack>( manager, *this, undoManager, VT ) ) )
+        if( auto track = std::make_unique<MTTrack>( manager, *this, undoManager, VT ) )
         {
+            {
+                // The tick thread walks the tracks under this lock.
+                const juce::ScopedLock sl( lock );
+                tracks.push_back( std::move( track ) );
+            }
             ++_trkNo;
             updateTrackList();
             return ( (int)tracks.size() - 1 );
