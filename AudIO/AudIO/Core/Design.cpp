@@ -32,7 +32,15 @@ namespace AudIO
     {
         Object::prepareToPlay( samplerate, blocksize );
         pImpl->prepareToPlay( samplerate, blocksize );
-        PatchQueue<float>::get().start();
+
+        // The patch queue is the process's, with one consumer: the audio
+        // thread, which processes the top-level design. So only the
+        // top-level design (one with no parent: the engine) starts and stops
+        // it. A sub-design must be inserted (insertDesign()) before it is
+        // prepared: it is then prepared, and later torn down, while the
+        // audio thread runs, and must leave the queue alone.
+        if( nullptr == pParent )
+            PatchQueue<float>::get().start();
     }
 
     void Design::process( Buffer<float>& Buffer )
@@ -61,7 +69,9 @@ namespace AudIO
 
     void Design::teardown()
     {
-        PatchQueue<float>::get().stop();
+        // See prepareToPlay().
+        if( nullptr == pParent )
+            PatchQueue<float>::get().stop();
     }
 
     inline void Design::setName( const std::string& name )

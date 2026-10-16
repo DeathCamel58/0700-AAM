@@ -30,9 +30,10 @@
 //       AudIO/Tests/GraphStress.cpp -o GraphStress -lpthread
 //   ./GraphStress 30
 //
-// It first checks a few behaviors on their own (chain inserts, meters). It passes
-// when those checks pass, the sanitizer reports nothing and the memory pool
-// holds only the stand-in device's buffers once the design is gone.
+// It first checks a few behaviors on their own (chain inserts, meters,
+// sub-designs). It passes when those checks pass, the sanitizer reports
+// nothing and the memory pool holds only the stand-in device's buffers once
+// the design is gone.
 
 #include "AudIO.h"
 
@@ -276,6 +277,42 @@ namespace
         design->teardown();
         return ok;
     }
+
+    // A sub-design inserted and torn down while the engine plays must not
+    // start or stop the patch queue, which only the audio thread empties.
+    bool checkSubDesign()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.start();
+
+        auto& queue = AudIO::PatchQueue<float>::get();
+        bool  ok    = true;
+        for( int i = 0; i < 20; ++i )
+        {
+            auto sub    = std::make_shared<AudIO::Design>( 0, 2 );
+            auto source = sub->createObject( std::make_unique<Source>() );
+            sub->setDesignOutput( source, true );
+            auto id = design->insertDesign( sub );
+            ok &= check( 0 != id, "inserting a sub-design" );
+            design->sendToBus( out, id, 1.f );
+            player.waitBlocks( 2 );
+
+            sub->teardown();
+            ok &= check( queue.isRunning(), "a sub-design's teardown leaves the patch queue running" );
+            design->removeObject( id );
+        }
+
+        player.stop();
+        design->teardown();
+        ok &= check( !queue.isRunning(), "the top-level design's teardown stops the patch queue" );
+        return ok;
+    }
 } // namespace
 
 int main( int argc, char** argv )
@@ -284,7 +321,7 @@ int main( int argc, char** argv )
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
 
-    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() )
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() )
         return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );

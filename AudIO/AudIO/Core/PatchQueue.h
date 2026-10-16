@@ -50,8 +50,13 @@ namespace AudIO
             return _s;
         }
 
+        // The top-level design's prepareToPlay() and teardown(): see there.
         void start()
         {
+            // Applying patches here while the audio thread does would make
+            // two consumers.
+            if( _running.load() )
+                return;
             process();
             _running.store( true );
         }
