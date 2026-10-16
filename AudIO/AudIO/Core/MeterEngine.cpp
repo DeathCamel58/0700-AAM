@@ -71,7 +71,10 @@ namespace AudIO
 
     void MeterEngine::recalculate()
     {
-        _loopCntr = (int)( _rateMs / blockRate() );
+        // Blocks per metering period: blockRate() is in seconds. Not known
+        // before prepareToPlay().
+        const auto blockMs = ( ( 0 < sampleRate() ) && ( 0 < blockSize() ) ) ? ( blockRate() * 1000.f ) : 0.f;
+        _loopCntr          = ( 0.f < blockMs ) ? utils::max( 1, (int)( _rateMs / blockMs ) ) : 1;
         _metersPerBlock.store( (int)( 1 + ( (float)_meters.size() / (float)_loopCntr ) ) );
     }
 #endif
