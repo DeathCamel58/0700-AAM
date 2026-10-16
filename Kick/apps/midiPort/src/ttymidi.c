@@ -40,6 +40,9 @@
 #define MIDI_BAUD_RATE             31250
 
 static volatile sig_atomic_t run = 1;
+/* Set when a thread stops on an error rather than on a signal, so that the
+ * exit status tells the service manager to restart ttymidi. */
+static volatile sig_atomic_t failed = 0;
 static int serial = -1;
 static int port_out_id;
 
@@ -269,6 +272,7 @@ static void* read_midi_from_alsa(void* seq)
 	if (snd_midi_event_new(MAX_MSG_SIZE, &decoder) < 0)
 	{
 		fprintf(stderr, "Error creating the MIDI decoder.\n");
+		failed = 1;
 		run = 0;
 		return NULL;
 	}
@@ -311,6 +315,7 @@ static void* read_midi_from_serial_port(void* seq)
 	if (snd_midi_event_new(MAX_MSG_SIZE, &encoder) < 0)
 	{
 		fprintf(stderr, "Error creating the MIDI encoder.\n");
+		failed = 1;
 		run = 0;
 		return NULL;
 	}
@@ -326,6 +331,7 @@ static void* read_midi_from_serial_port(void* seq)
 			if (errno == EINTR)
 				continue;
 			perror("poll");
+			failed = 1;
 			break;
 		}
 		if (result == 0)
@@ -334,6 +340,7 @@ static void* read_midi_from_serial_port(void* seq)
 		if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
 		{
 			fprintf(stderr, "%s: the serial port went away\n", arguments.serialdevice);
+			failed = 1;
 			break;
 		}
 
@@ -343,6 +350,7 @@ static void* read_midi_from_serial_port(void* seq)
 			if (errno == EINTR || errno == EAGAIN)
 				continue;
 			perror(arguments.serialdevice);
+			failed = 1;
 			break;
 		}
 		if (length == 0)
@@ -496,5 +504,5 @@ int main(int argc, char** argv)
 
 	if (!arguments.silent)
 		printf("\ndone!\n");
-	return 0;
+	return failed ? 1 : 0;
 }
