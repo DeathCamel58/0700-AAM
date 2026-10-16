@@ -261,10 +261,17 @@ namespace
             return all;
         };
 
-        std::vector<uint32_t> first;
-        for( int i = 0; i < 4; ++i )
+        // Before it has run, a meter reads silence.
+        player.stop();
+        const auto fresh = addMetered();
+        const auto& data = design->readMeter( fresh );
+        bool        ok   = check( !data.empty() && ( -100.f == data[0].peak ), "a meter that has not run reads silence" );
+        player.start();
+
+        std::vector<uint32_t> first{ fresh };
+        for( int i = 0; i < 3; ++i )
             first.push_back( addMetered() );
-        bool ok = check( metered( first ), "four meters are updated" );
+        ok &= check( metered( first ), "four meters are updated" );
 
         // Fewer meters than the round-robin has been through.
         for( int i = 0; i < 3; ++i )
@@ -289,6 +296,7 @@ namespace
         auto source = design->createObject( std::make_unique<Source>() );
         design->patch( source, chain );
         design->setDesignOutput( chain, true );
+        design->addMeter( chain );
 
         AudIO::Buffer<float> device( 2, true, 2, true );
         design->prepareToPlay( 48000, BLOCK );
@@ -309,6 +317,10 @@ namespace
         design->setGain( chain, 0.5f );
         ok &= check( 0.5f == design->getGain( chain ), "a chain's gain reads back at once" );
         ok &= check( 0.125f == level( 40 ), "a chain's gain ramps to its new value" );
+        player.stop();
+        const auto& meter = design->readMeter( chain ); // 0.125: -18 dB.
+        ok &= check( !meter.empty() && ( std::fabs( meter[0].peak + 18.06f ) < 0.1f ), "the chain's meter follows its level down" );
+        player.start();
 
         design->setMute( chain, true );
         ok &= check( 0.f == level( 40 ), "a muted chain is silent" );
