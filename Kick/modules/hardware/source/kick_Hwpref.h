@@ -32,6 +32,8 @@
     #include <cstdlib>
     #include <linux/input.h>
     #include <sys/types.h>
+    #include <fcntl.h>
+    #include <poll.h>
     #include <termios.h>
     #include <sys/ioctl.h>
     #include <netinet/in.h>
@@ -193,7 +195,7 @@ namespace mt
         int           idecrptKey   = 123;
         int           fw_ver_index = -1;
         int           serialComPortHandler;
-        std::ifstream inputDevice;
+        int           powerKeyFd = -1;
         PowerButtonUI powerButtonUI;
         // Setter for the function pointer
         bool        setDateTime( int year, int month, int day, int hour, int minute, int second );

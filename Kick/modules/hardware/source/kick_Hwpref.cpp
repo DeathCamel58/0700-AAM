@@ -64,12 +64,10 @@ namespace mt
         while( !threadShouldExit() )
         {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-            if( !inputDevice.is_open() ) // Check if inputDevice is not valid
+            if( powerKeyFd < 0 )
             {
-                // Open the input device file
-                inputDevice.clear();
-                inputDevice.open( devicePath, std::ios::binary );
-                if( !inputDevice.is_open() )
+                powerKeyFd = open( devicePath, O_RDONLY | O_CLOEXEC | O_NONBLOCK );
+                if( powerKeyFd < 0 )
                 {
                     DBG( "Error opening Input device " << devicePath );
                     // It may appear later, or not exist on this hardware:
@@ -80,14 +78,42 @@ namespace mt
                 }
             }
 
-            // Read the input event
-            struct input_event ev;
-            if( inputDevice.read( reinterpret_cast<char*>( &ev ), sizeof( struct input_event ) ) )
-            {
-                retryMs = 500;
+            // Wait for events, but not so long that a request to stop the
+            // thread goes unnoticed.
+            struct pollfd pfd {};
+            pfd.fd     = powerKeyFd;
+            pfd.events = POLLIN;
+            const int ready = poll( &pfd, 1, 200 );
+            if( ready == 0 || ( ready < 0 && errno == EINTR ) )
+                continue;
 
-                // Process the input event. The key is KEY_STOP or, from a
-                // power key driver such as the i.MX SNVS one, KEY_POWER.
+            // The device delivers whole events, several at a time if they
+            // queued up.
+            struct input_event events[16];
+            const ssize_t      n = ready > 0 ? read( powerKeyFd, events, sizeof( events ) ) : -1;
+            if( n < 0 && ( errno == EAGAIN || errno == EINTR ) )
+                continue;
+
+            if( n <= 0 || ( pfd.revents & ( POLLERR | POLLHUP | POLLNVAL ) ) != 0 )
+            {
+                // The device went away or cannot be read: open it again
+                // after a while.
+                DBG( "Error reading Input device " << devicePath );
+                close( powerKeyFd );
+                powerKeyFd = -1;
+                wait( retryMs );
+                retryMs = juce::jmin( retryMs * 2, 30000 );
+                continue;
+            }
+
+            retryMs = 500;
+
+            for( size_t i = 0; i < (size_t)n / sizeof( struct input_event ); ++i )
+            {
+                const auto& ev = events[i];
+
+                // The key is KEY_STOP or, from a power key driver such as
+                // the i.MX SNVS one, KEY_POWER.
                 if( ev.type == EV_KEY && ( ev.code == KEY_STOP || ev.code == KEY_POWER ) )
                 {
                     if( ev.value == 1 )
@@ -102,19 +128,18 @@ namespace mt
                     }
                 }
             }
-            else
-            {
-                // The device went away or cannot be read: open it again
-                // after a while.
-                DBG( "Error reading Input device " << devicePath );
-                inputDevice.close();
-                wait( retryMs );
-                retryMs = juce::jmin( retryMs * 2, 30000 );
-                continue;
-            }
+#else
+            wait( 1000 );
 #endif
-            juce::Thread::sleep( 300 );
         }
+
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        if( powerKeyFd >= 0 )
+        {
+            close( powerKeyFd );
+            powerKeyFd = -1;
+        }
+#endif
     }
 
     // The system's network manager owns the Ethernet interface: it brings
