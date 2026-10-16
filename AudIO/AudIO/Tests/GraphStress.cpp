@@ -230,7 +230,7 @@ int main( int argc, char** argv )
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
 
-    if( !checkChainInserts( false ) )
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) )
         return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
@@ -267,6 +267,7 @@ int main( int argc, char** argv )
     std::mt19937          rng( 1234 );
     long                  operations = 0;
     std::vector<uint32_t> objects;
+    std::vector<uint32_t> chainInserts;
     const auto            deadline = std::chrono::steady_clock::now() + std::chrono::seconds( seconds );
 
     while( std::chrono::steady_clock::now() < deadline )
@@ -311,14 +312,24 @@ int main( int argc, char** argv )
                 }
                 break;
             case 5:
-            {
-                auto id = design->createInsert( chain, "TestGain" );
-                design->addInsert( chain, id, rng() % 3 );
-                if( rng() & 1 )
-                    design->removeInsert( chain, id );
-                design->deleteInsert( chain, id );
+                // Up to a few inserts, added anywhere (the tail included)
+                // and deleted in any order.
+                if( ( chainInserts.size() < 4 ) && ( rng() & 1 ) )
+                {
+                    auto id = design->createInsert( chain, "TestGain" );
+                    design->addInsert( chain, id, rng() % ( chainInserts.size() + 2 ) );
+                    chainInserts.push_back( id );
+                }
+                else if( !chainInserts.empty() )
+                {
+                    auto index = rng() % chainInserts.size();
+                    auto id    = chainInserts[index];
+                    if( rng() & 1 )
+                        design->removeInsert( chain, id );
+                    design->deleteInsert( chain, id );
+                    chainInserts.erase( chainInserts.begin() + (long)index );
+                }
                 break;
-            }
             case 6:
                 pHost->addEffect( "TestGain", rng() % AudIO::DawInserts::MAX_INSERTS );
                 break;

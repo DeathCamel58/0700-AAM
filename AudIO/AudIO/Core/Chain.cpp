@@ -331,7 +331,7 @@ namespace AudIO
             auto& objectBuffer = object.getBuffer();
             for( uint32_t ch = 0; ch < ( m_stereo ? 2U : 1U ); ch++ )
             {
-                PatchQueue<float>::get().patchInput( &objectBuffer, chainBuffer.getInputBuffer( ch ), ch );
+                PatchQueue<float>::get().patchInputFrom( &objectBuffer, ch, &chainBuffer, PatchSource::input, ch );
             }
         }
     }
@@ -345,7 +345,7 @@ namespace AudIO
             auto& objectBuffer = object.getBuffer();
             for( uint32_t ch = 0; ch < ( m_stereo ? 2U : 1U ); ch++ )
             {
-                PatchQueue<float>::get().patchOutput( &objectBuffer, chainBuffer.getOutputBuffer( ch ), ch );
+                PatchQueue<float>::get().patchOutputFrom( &objectBuffer, ch, &chainBuffer, PatchSource::output, ch );
             }
         }
     }
