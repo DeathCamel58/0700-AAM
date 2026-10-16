@@ -65,7 +65,6 @@ namespace mt
             if( it.hasType( IDs::TRACK ) )
             {
                 createTrack( it );
-                std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
             }
         }
 

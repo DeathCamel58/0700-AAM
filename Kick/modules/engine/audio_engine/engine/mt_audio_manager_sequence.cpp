@@ -43,9 +43,11 @@ namespace mt
         undoManager = nullptr;
 
         pSelectedSequence = nullptr;
+
+        // The tick thread must be done with the playing sequence first.
+        manager.detachSequence( manager.getPlayingSequence() );
         sequences.clear();
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         updateSequenceList();
         if( trackListChanged ) trackListChanged( -1 );
     }
@@ -63,7 +65,6 @@ namespace mt
                 createSequence( it );
             }
         }
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
 
         updateSequenceList();
 

@@ -1,7 +1,6 @@
 #include "DawEngine.h"
 #include "DawSequence.h"
-
-#include <thread>
+#include "../Core/PatchQueue.h"
 
 #if defined( AUDIO_OBJECT_AUDIO_FILE_RECORDER ) && ( AUDIO_OBJECT_AUDIO_FILE_RECORDER > 0 )
     #include "Objects/DawRecorder.h"
@@ -98,8 +97,6 @@ namespace AudIO
         for( auto ids : _AudioPreviews )
             removeFromBus( mainOut, ids );
 #endif
-
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
     }
 
     /// Effects.
@@ -171,12 +168,16 @@ namespace AudIO
 
         /// Reset Bus Manager
         _busMgr->reset();
-
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+        waitForAudioThread();
 
         // Add default meters...
         addDefaultMeters();
         auto availMemAfterReset = AudIO::MemoryPool<float>::get().getUsed();
+    }
+
+    bool DawEngine::waitForAudioThread()
+    {
+        return PatchQueue<float>::get().waitUntilEmpty() && AudioThreadSync::get().synchronize();
     }
 
     bool DawEngine::addAudioDevice( const std::string& name, IAudioDevice* device, bool /*master*/ )
@@ -433,7 +434,6 @@ namespace AudIO
             removeObject( ID );
             removeMeter( ID );
             _AudioPreviews.erase( std::find( _AudioPreviews.begin(), _AudioPreviews.end(), ID ) );
-            std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
         }
     }
 

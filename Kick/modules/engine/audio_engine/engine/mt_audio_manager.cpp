@@ -187,7 +187,8 @@ namespace mt
         MTAudioProgramManager::setup( vTree.getOrCreateChildWithName( IDs::PROGRAMS, nullptr ), &undoManager );
         //DBG( "LP: FM3: " << engine.getFeeMemory() );
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 500 ) );
+        // Let the audio thread take up the programs' routing.
+        engine.waitForAudioThread();
 
         // Initialize Song Manager...
         MTSongManager::init( vTree.getOrCreateChildWithName( IDs::SONGS, nullptr ), &undoManager );
@@ -231,14 +232,17 @@ namespace mt
         MTSongManager::close();
 
         //DBG( "CP: FM2: " << engine.getFeeMemory() );
+        // Waits for the audio thread to take up the reset routing.
         engine.reset();
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         //DBG( "CP: FM3: " << engine.getFeeMemory() );
 
+        // The transport, closed above, waited for the tick thread to let go
+        // of the sequences, and removing a program's objects waits for the
+        // audio thread to let go of them.
         MTAudioSequenceManager::close();
         MTAudioProgramManager::close();
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 500 ) );
+        engine.waitForAudioThread();
         //DBG( "CP: End FM: " << engine.getFeeMemory() );
 
         // Reset Selection.
