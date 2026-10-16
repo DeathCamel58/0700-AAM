@@ -34,5 +34,8 @@ namespace ipc
         virtual void onConnected( const int connectionId, const juce::String& connectionName)              = 0;
         virtual void onDisconnected( const int connectionId, const juce::String& connectionName ) = 0;
         virtual void onMessage( const int connectionId, std::shared_ptr<MTIPCJson> message ) = 0;
+        // A client connection could not be established, or the server
+        // rejected its registration; it is not connected.
+        virtual void onConnectFailed( [[maybe_unused]] const int connectionId, [[maybe_unused]] const juce::String& connectionName ) {}
     };
 }

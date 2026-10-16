@@ -28,6 +28,9 @@ namespace ipc
     const int IPC_DEFAULT_RESPONSE_TIMEOUT( 10000 );
     const int IPC_PROCESS_MONITOR_THREAD_TIMEOUT_IN_MILLI_SECONDS( 1000 );
     const int IPC_DELAYED_CONNECT_DELAY_IN_MILLI_SECONDS( 5000 );
+    // Reconnection attempts start this far apart and back off to the maximum.
+    const int IPC_RECONNECT_MIN_DELAY_IN_MILLI_SECONDS( 1000 );
+    const int IPC_RECONNECT_MAX_DELAY_IN_MILLI_SECONDS( 10000 );
     const int IPC_DELAYED_RESTART_DELAY_IN_MILLI_SECONDS( 5000 );
     // A child started this many times within the interval is given up on.
     const int IPC_RESTART_BURST_LIMIT( 5 );

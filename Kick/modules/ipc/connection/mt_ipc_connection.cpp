@@ -103,9 +103,9 @@ namespace ipc
 			return connected;
 		}
 
-		void disconnect()
+		void disconnect( Notify notify = Notify::yes )
 		{
-			juce::InterprocessConnection::disconnect();
+			juce::InterprocessConnection::disconnect( -1, notify );
 		}
 
 		bool publish(std::shared_ptr<ipc::MTIPCJson> message)
@@ -291,6 +291,13 @@ namespace ipc
            callback->onMessage(connectionIdentifier(), message);
         }
             
+    }
+
+    void MTIPCConnection::connectFailed()
+    {
+        impl->disconnect( juce::InterprocessConnection::Notify::no );
+        if( callback )
+            callback->onConnectFailed( connectionIdentifier(), connectionName() );
     }
 
 	void MTIPCConnection::setCallback(std::shared_ptr<ipc::MTIIPCConnectionCallback> pCallback)

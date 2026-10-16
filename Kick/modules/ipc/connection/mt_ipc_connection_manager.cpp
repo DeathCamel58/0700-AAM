@@ -227,7 +227,10 @@ namespace ipc
             {
                 if( !conn->connection )
                     conn->connection.reset( new ipc::MTIPCServerConnection( data->uuid, id, conn->config, data->connectionCallbackPtr ) );
-                conn->connection->connect();
+                // The server's process may not be listening yet: report the
+                // failure, so that the subsystem keeps trying.
+                if( !conn->connection->connect() && data->connectionCallbackPtr )
+                    data->connectionCallbackPtr->onConnectFailed( id, conn->connection->connectionName() );
             }
         }
     }

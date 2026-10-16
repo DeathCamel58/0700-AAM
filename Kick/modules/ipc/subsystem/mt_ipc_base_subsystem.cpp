@@ -132,8 +132,15 @@ namespace ipc
     public:
         MTIPCSubsystemConnectionCallback( std::function<void( int, const juce::String& )>             disconnectedCB,
                                           std::function<void( int, const juce::String& )>             connectedCB,
-                                          std::function<void( int, std::shared_ptr<ipc::MTIPCJson> )> messageCB )
-            : disconnectedCB( disconnectedCB ), connectedCB( connectedCB ), messageCB( messageCB ){};
+                                          std::function<void( int, std::shared_ptr<ipc::MTIPCJson> )> messageCB,
+                                          std::function<void( int, const juce::String& )>             connectFailedCB )
+            : disconnectedCB( disconnectedCB ), connectedCB( connectedCB ), messageCB( messageCB ), connectFailedCB( connectFailedCB ){};
+
+        inline void onConnectFailed( const int connectionId, const juce::String& connectionName ) override
+        {
+            if( connectFailedCB )
+                connectFailedCB( connectionId, connectionName );
+        }
 
         inline void onConnected( const int connectionId, const juce::String& connectionName ) override
         {
@@ -175,6 +182,7 @@ namespace ipc
         std::function<void( int, const juce::String& )>            disconnectedCB;
         std::function<void( int, const juce::String& )>            connectedCB;
         std::function<void( int, std::shared_ptr<ipc::MTIPCJson> )> messageCB;
+        std::function<void( int, const juce::String& )>            connectFailedCB;
     };
 
     MTIPCBaseSubsystem::MTIPCBaseSubsystem( const juce::String& name,
@@ -209,7 +217,8 @@ namespace ipc
                                                      new MTIPCSubsystemConnectionCallback(
                                                          std::bind( &MTIPCBaseSubsystem::disconnected, this, std::placeholders::_1, std::placeholders::_2 ),
                                                          std::bind( &MTIPCBaseSubsystem::connected, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                         std::bind( &MTIPCBaseSubsystem::processMessage, this, std::placeholders::_1, std::placeholders::_2 ) ) ) ) );
+                                                         std::bind( &MTIPCBaseSubsystem::processMessage, this, std::placeholders::_1, std::placeholders::_2 ),
+                                                         std::bind( &MTIPCBaseSubsystem::connectFailed, this, std::placeholders::_1, std::placeholders::_2 ) ) ) ) );
             data->messageDispatcher.reset( new ipc::MTIPCMessageDispatcher( data->connectionManager ) );
             data->handlerStore.reset( new ipc::MTIPCHandlerStore( handlers ) );
             data->messageProcessor.reset( new ipc::MTIPCMessageProcessor( data->messageDispatcher, data->handlerStore ) );
@@ -420,6 +429,13 @@ namespace ipc
 
        juce::MessageManager::callAsync( [&, connectionId]() { tryReconnect( connectionId ); } );
        juce::MessageManager::callAsync( [&, connectionId, connName]() { handleDisconnect( connectionId, connName ); } );
+    }
+
+    // Unlike a lost connection, this does not end the process when it is the
+    // parent's: the parent may simply not be listening yet.
+    void MTIPCBaseSubsystem::connectFailed( const int connectionId, const juce::String& connName )
+    {
+        juce::MessageManager::callAsync( [&, connectionId]() { tryReconnect( connectionId ); } );
     }
 
     void MTIPCBaseSubsystem::tryReconnect( int connectionId )
