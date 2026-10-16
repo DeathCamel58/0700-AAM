@@ -19,12 +19,9 @@
 
 // Tests of the front-panel MCU frame parser (kick_McuFrame.h): frames split
 // across reads, noise and corrupted frames, and a stream joined out of step,
-// where a false header must not hold up the frames after it. Build and run
-// it from the Kick directory, with AddressSanitizer:
-//
-//   g++ -std=c++17 -g -fsanitize=address,undefined -I modules/input_events
-//       Tests/McuFrameTest.cpp -o McuFrameTest
-//   ./McuFrameTest
+// where a false header must not hold up the frames after it. Built with
+// -DKICK_BUILD_TESTS=ON (and -DKICK_TEST_SANITIZER=address for
+// AddressSanitizer); it needs no arguments.
 
 #include "kick_McuFrame.h"
 

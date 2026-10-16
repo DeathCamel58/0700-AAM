@@ -21,13 +21,9 @@
 // wpa_supplicant's control interface, which answers as wpa_supplicant 2.10
 // does, replies of at most 4096 bytes included, and records the commands.
 // Its socket is in ./wifi-test-ctrl, so the test needs no wpa_supplicant and
-// leaves the system's alone. Build it from the Kick directory with
-// AddressSanitizer, JUCE's modules directory as JUCE, and run it:
-//
-//   g++ -std=c++17 -g -fsanitize=address,undefined -I $JUCE -I modules/hardware/source
-//       -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0
-//       Tests/WifiManagerTest.cpp $JUCE/juce_core/juce_core.cpp -o WifiManagerTest -ldl -lpthread
-//   ./WifiManagerTest
+// leaves the system's alone. Built with -DKICK_BUILD_TESTS=ON (and
+// -DKICK_TEST_SANITIZER=address for AddressSanitizer); run it from a scratch
+// directory, where it makes wifi-test-ctrl.
 
 #define KICK_WIFI_IFACE    "wlan-test"
 #define KICK_WPA_CTRL_DIR  "wifi-test-ctrl"

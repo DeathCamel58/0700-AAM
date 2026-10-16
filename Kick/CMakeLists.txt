@@ -27,7 +27,7 @@ option( KICK_MULTITOUCH "KICK Multitouch demo App" OFF )
 option( DEBUG_TOUCH "Enable mouse cursor" OFF )
 option( USE_ASAN_KICK "enable address sanitizer" OFF )
 option( PERFETTO "Enable tracing using Perfetto" OFF )
-option( KICK_BUILD_TESTS "Build the engine's stress tests" OFF )
+option( KICK_BUILD_TESTS "Build the tests in tests/" OFF )
 
 #Compile commands, useful for some IDEs like VS-Code
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
