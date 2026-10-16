@@ -38,6 +38,12 @@ namespace mt
     /// built without it) the first type that has devices is used, and if the
     /// device cannot be opened, the type's default device.
     ///
+    /// The main mix plays on the first two outputs. The engine's other
+    /// outputs are only opened on a device that has that many channels of
+    /// its own, never on a sound server or a converting PCM, which would
+    /// mix them into the main outputs. A device whose input cannot be
+    /// opened is opened for output only.
+    ///
     /// The engine processes fixed blocks of the AudIO buffer pool's block
     /// size. The device is asked for that buffer size; when it delivers
     /// whole multiples of it the blocks are processed in place, otherwise
@@ -68,7 +74,10 @@ namespace mt
         void audioDeviceStopped() override;
         void audioDeviceError( const juce::String& ErrorMessage ) override;
 
-        bool openDevice( uint32_t SampleRate, uint32_t BlockSize );
+        bool         openDevice( uint32_t SampleRate, uint32_t BlockSize );
+        juce::String openDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, uint32_t SampleRate, uint32_t BlockSize );
+        juce::String initialiseDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, int Inputs, int Outputs, uint32_t SampleRate, uint32_t BlockSize );
+        int          numOutputChannelsFor( juce::AudioIODeviceType& Type, const juce::String& Output ) const;
         void readInputs( const float* const* InputData, int NumInputChannels, int SrcOffset, int DstOffset, int NumSamples );
 
         // A device manager that offers the configured device type first, so

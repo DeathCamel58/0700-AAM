@@ -63,6 +63,18 @@ namespace mt
             const auto names = Type.getDeviceNames( Input );
             return names[Type.getDefaultDeviceIndex( Input )];
         }
+
+        // Whether a device is a sound server or the type's default device,
+        // which mix or convert what they are given rather than play it on
+        // as many hardware channels.
+        bool isSharedDevice( juce::AudioIODeviceType& Type, const juce::String& Name )
+        {
+            return Name == defaultDeviceName( Type, false )
+                   || Name.containsIgnoreCase( "default" )
+                   || Name.containsIgnoreCase( "pipewire" )
+                   || Name.containsIgnoreCase( "pulse" )
+                   || Name.containsIgnoreCase( "dmix" );
+        }
     } // namespace
 
     ///
@@ -173,53 +185,60 @@ namespace mt
 
     bool AudioDevice::openDevice( uint32_t SampleRate, uint32_t BlockSize )
     {
-        // Creates the device types, the configured one first.
-        deviceManager.getAvailableDeviceTypes();
+        // Creates and scans the device types, the configured one first.
+        const auto& types = deviceManager.getAvailableDeviceTypes();
 
-        juce::AudioDeviceManager::AudioDeviceSetup setup;
-        setup.sampleRate               = (double)SampleRate;
-        setup.bufferSize               = (int)BlockSize;
-        setup.useDefaultInputChannels  = false;
-        setup.useDefaultOutputChannels = false;
-        setup.inputChannels.setRange( 0, numInputs, true );
-        setup.outputChannels.setRange( 0, numOutputs, true );
+        juce::AudioIODeviceType* type = nullptr;
+        juce::String             output;
+        juce::String             input;
 
-        // initialise() picks the first type that has devices: the configured
-        // one when it has any. Look the device up in the types in that order.
         if( deviceName.isNotEmpty() )
         {
-            for( auto* type : deviceManager.getAvailableDeviceTypes() )
+            for( auto* t : types )
             {
-                const auto output = findDeviceName( type->getDeviceNames( false ), deviceName );
-                const auto input  = findDeviceName( type->getDeviceNames( true ), deviceName );
+                output = findDeviceName( t->getDeviceNames( false ), deviceName );
+                input  = findDeviceName( t->getDeviceNames( true ), deviceName );
 
                 if( output.isNotEmpty() || input.isNotEmpty() )
                 {
-                    setup.outputDeviceName = output;
-                    setup.inputDeviceName  = input;
+                    type = t;
                     break;
                 }
             }
 
-            if( setup.outputDeviceName.isEmpty() && setup.inputDeviceName.isEmpty() )
+            if( type == nullptr )
                 logAudioDevice( "no device matches \"" + deviceName + "\", using the default device" );
         }
 
-        auto error = deviceManager.initialise( numInputs, numOutputs, nullptr, false, juce::String(), &setup );
+        juce::String error;
 
+        if( type != nullptr )
+        {
+            error = openDevice( *type, output, input, SampleRate, BlockSize );
+
+            if( deviceManager.getCurrentAudioDevice() == nullptr )
+                logAudioDevice( "cannot open \"" + ( output.isNotEmpty() ? output : input ) + "\": " + error + ", using the default device" );
+        }
+
+        // Fall back to the default devices of the first type that has any.
         if( deviceManager.getCurrentAudioDevice() == nullptr )
         {
-            if( error.isNotEmpty() )
-                logAudioDevice( "cannot open the device: " + error );
-
-            // Fall back to the default device of the type initialise() picked.
-            if( auto* type = deviceManager.getCurrentDeviceTypeObject() )
+            type = nullptr;
+            for( auto* t : types )
             {
-                type->scanForDevices();
-                setup.outputDeviceName = numOutputs > 0 ? defaultDeviceName( *type, false ) : juce::String();
-                setup.inputDeviceName  = numInputs > 0 && type->hasSeparateInputsAndOutputs() ? defaultDeviceName( *type, true ) : setup.outputDeviceName;
+                if( !t->getDeviceNames( false ).isEmpty() || !t->getDeviceNames( true ).isEmpty() )
+                {
+                    type = t;
+                    break;
+                }
+            }
 
-                error = deviceManager.setAudioDeviceSetup( setup, false );
+            if( type != nullptr )
+            {
+                output = numOutputs > 0 ? defaultDeviceName( *type, false ) : juce::String();
+                input  = numInputs > 0 && type->hasSeparateInputsAndOutputs() ? defaultDeviceName( *type, true ) : output;
+
+                error = openDevice( *type, output, input, SampleRate, BlockSize );
             }
         }
 
@@ -236,6 +255,74 @@ namespace mt
                         + juce::String( device->getActiveInputChannels().countNumberOfSetBits() ) + " in / "
                         + juce::String( device->getActiveOutputChannels().countNumberOfSetBits() ) + " out" );
         return true;
+    }
+
+    juce::String AudioDevice::openDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, uint32_t SampleRate, uint32_t BlockSize )
+    {
+        const auto outputs = Output.isNotEmpty() ? numOutputChannelsFor( Type, Output ) : 0;
+        const auto inputs  = Input.isNotEmpty() ? numInputs : 0;
+
+        auto error = initialiseDevice( Type, Output, Input, inputs, outputs, SampleRate, BlockSize );
+
+        // A device that cannot record (a busy or missing input) still plays.
+        if( deviceManager.getCurrentAudioDevice() == nullptr && inputs > 0 && Output.isNotEmpty() )
+        {
+            logAudioDevice( "cannot open \"" + Input + "\" for input: " + error + ", opening the output only" );
+            error = initialiseDevice( Type, Output, {}, 0, outputs, SampleRate, BlockSize );
+        }
+
+        return error;
+    }
+
+    juce::String AudioDevice::initialiseDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, int Inputs, int Outputs, uint32_t SampleRate, uint32_t BlockSize )
+    {
+        // initialise() takes the device type only from a saved setup; any
+        // other way of choosing it opens the type's default device first.
+        juce::BigInteger inputChannels;
+        juce::BigInteger outputChannels;
+        inputChannels.setRange( 0, Inputs, true );
+        outputChannels.setRange( 0, Outputs, true );
+
+        juce::XmlElement state( "DEVICESETUP" );
+        state.setAttribute( "deviceType", Type.getTypeName() );
+        state.setAttribute( "audioOutputDeviceName", Output );
+        state.setAttribute( "audioInputDeviceName", Inputs > 0 ? Input : juce::String() );
+        state.setAttribute( "audioDeviceInChans", inputChannels.toString( 2 ) );
+        state.setAttribute( "audioDeviceOutChans", outputChannels.toString( 2 ) );
+
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        setup.sampleRate = (double)SampleRate;
+        setup.bufferSize = (int)BlockSize;
+
+        auto error = deviceManager.initialise( Inputs, Outputs, &state, false, juce::String(), &setup );
+
+        if( error.isEmpty() && deviceManager.getCurrentAudioDevice() == nullptr )
+            error = "the device did not open";
+
+        return error;
+    }
+
+    int AudioDevice::numOutputChannelsFor( juce::AudioIODeviceType& Type, const juce::String& Output ) const
+    {
+        // The engine's first two outputs are its main mix. The others are
+        // only opened on a device that has them: a mixing or converting
+        // PCM (ALSA "default", PipeWire, PulseAudio) would take 8 channels
+        // and mix them down, so outputs 3-8 would play in the main mix.
+        const auto stereo = juce::jmin( 2, numOutputs );
+        if( numOutputs <= stereo || isSharedDevice( Type, Output ) )
+            return stereo;
+
+        std::unique_ptr<juce::AudioIODevice> probe( Type.createDevice( Output, juce::String() ) );
+        const auto channels = probe != nullptr ? probe->getOutputChannelNames().size() : 0;
+
+        // A PCM that converts or mixes reports the most channels it
+        // accepts rather than what is behind it (PipeWire 128, PulseAudio
+        // 32, plug up to JUCE's limit of 256).
+        if( channels <= stereo || channels >= 32 )
+            return stereo;
+
+        logAudioDevice( "\"" + Output + "\" has " + juce::String( channels ) + " outputs" );
+        return juce::jmin( channels, numOutputs );
     }
 
     void AudioDevice::audioDeviceAboutToStart( juce::AudioIODevice* Device )
