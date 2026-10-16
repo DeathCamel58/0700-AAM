@@ -71,6 +71,7 @@ namespace mt{
         void changeListenerCallback( ChangeBroadcaster* source );
         void timerCallback() override;
         void readSamples( juce::AudioBuffer<float>& Dest, int DestStart, int NumSamples, juce::int64 Start ) const;
+        bool turnAround();
 
     private:
         juce::AudioSourcePlayer player;
@@ -84,7 +85,6 @@ namespace mt{
         juce::int64 regionStart = 0;
         juce::int64 regionEnd = 0;
         bool playingBackwords = false;
-        int samplesPerBlock = 0;
 
         juce::File sourceFile;
         juce::AudioBuffer<float> samples;

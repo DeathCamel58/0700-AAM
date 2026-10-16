@@ -74,7 +74,8 @@ namespace mt
         playingBackwords = false;
         transportSource.stop();
 
-        if( samples.getNumSamples() <= 0 )
+        const juce::int64 numSamples = samples.getNumSamples();
+        if( numSamples <= 0 )
             return;
 
         // Drops what the resampler kept of the last playback.
@@ -82,58 +83,52 @@ namespace mt
         finished        = false;
         positionChanged = false;
 
-        region      = r;
-        playMode    = pm;
-        regionStart = region.start;
-        regionEnd   = region.end;
+        region   = r;
+        playMode = pm;
 
+        // The part of the file that is played, [first, last).
+        juce::int64 first = 0;
+        juce::int64 last  = numSamples;
         if( region.isValid() )
         {
-            if( playMode == MTSamplePlayMode::samplePlayFromStart || playMode == MTSamplePlayMode::samplePlayModeLoopForward
-                || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional )
+            if( playMode == MTSamplePlayMode::samplePlayToStart )
             {
-                pos    = region.start;
-                length = region.end;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayToStart )
-            {
-                pos    = 0;
-                length = region.start;
+                last = region.start;
             }
             else if( playMode == MTSamplePlayMode::samplePlayToEnd )
             {
-                pos    = 0;
-                length = region.end;
+                last = region.end;
             }
             else if( playMode == MTSamplePlayMode::samplePlayFromEnd )
             {
-                pos    = region.end;
-                length = samples.getNumSamples();
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
-            {
-                playingBackwords = true;
-                length           = region.end;
-                pos              = length - samplesPerBlock;
+                first = region.end;
             }
             else if( playMode == MTSamplePlayMode::samplePlayModeCue )
             {
-                int previewOffSet = static_cast<int>( ( sourceSampleRate * cuePreviewLengthInMs ) / 60 );
-                pos               = region.getStart();
-                length            = pos + previewOffSet;
-                pos               = pos - previewOffSet;
+                const auto previewOffSet = static_cast<juce::int64>( ( sourceSampleRate * cuePreviewLengthInMs ) / 60 );
+                first                    = region.start - previewOffSet;
+                last                     = region.start + previewOffSet;
             }
-            length = juce::jmin( length, (juce::int64)samples.getNumSamples() );
-        }
-        else
-        {
-            pos    = 0;
-            length = samples.getNumSamples();
+            else
+            {
+                first = region.start;
+                last  = region.end;
+            }
         }
 
-        //length = juce::jmin( length, reader->lengthInSamples );
+        // A region reaching past the file's end would leave a loop playing
+        // silence there, or never reach its end.
+        regionStart = juce::jlimit( (juce::int64)0, numSamples, first );
+        regionEnd   = juce::jlimit( regionStart, numSamples, last );
+        length      = regionEnd;
 
-        looping = ( playMode == MTSamplePlayMode::samplePlayModeLoopForward || playMode == MTSamplePlayMode::samplePlayModeLoopBackward || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional );
+        playingBackwords = ( playMode == MTSamplePlayMode::samplePlayModeLoopBackward );
+        pos              = playingBackwords ? regionEnd : regionStart;
+
+        // An empty region is not looped, so its playback ends at once.
+        looping = regionStart < regionEnd
+                  && ( playMode == MTSamplePlayMode::samplePlayModeLoopForward || playMode == MTSamplePlayMode::samplePlayModeLoopBackward
+                       || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional );
 
         transportSource.start();
         startTimerHz( 30 );
@@ -157,10 +152,7 @@ namespace mt
         return looping;
     }
 
-    void MTSamplePlayer::prepareToPlay( int samplesPerBlockExpected, double /*sr*/ )
-    {
-        samplesPerBlock = samplesPerBlockExpected;
-    }
+    void MTSamplePlayer::prepareToPlay( int /*samplesPerBlockExpected*/, double /*sr*/ ) {}
 
     void MTSamplePlayer::releaseResources() {}
 
@@ -180,60 +172,72 @@ namespace mt
             Dest.copyFrom( ch, DestStart + offset, samples, juce::jmin( ch, numChannels - 1 ), (int)first, count );
     }
 
+    bool MTSamplePlayer::turnAround()
+    {
+        if( !looping )
+            return false;
+
+        if( playMode == MTSamplePlayMode::samplePlayModeLoopForward )
+            pos = regionStart;
+        else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
+            pos = regionEnd;
+        else
+            playingBackwords = !playingBackwords;
+
+        return true;
+    }
+
     void MTSamplePlayer::getNextAudioBlock( const juce::AudioSourceChannelInfo& bufferToFill )
     {
         bufferToFill.clearActiveBufferRegion();
-        int sampleCopySize = 0;
-        if( playingBackwords )
+
+        // Plays [regionStart, regionEnd). Forwards, pos is the first sample
+        // played next; backwards, it is the end of what is played next, so
+        // a block reads [pos - n, pos) and reverses it. A loop wraps within
+        // the block instead of leaving the rest of it silent.
+        int done = 0;
+        while( done < bufferToFill.numSamples )
         {
-            sampleCopySize = ( pos - regionStart < bufferToFill.numSamples ) ? static_cast<int>( pos - regionStart ) : bufferToFill.numSamples;
-            sampleCopySize = juce::jmax( 0, sampleCopySize );
-            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
-            bufferToFill.buffer->reverse( bufferToFill.startSample, sampleCopySize );
-            pos -= sampleCopySize;
-        }
-        else
-        {
-            sampleCopySize = ( length - pos < bufferToFill.numSamples ) ? static_cast<int>( length - pos ) : bufferToFill.numSamples;
-            sampleCopySize = juce::jmax( 0, sampleCopySize );
-            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
-            pos += sampleCopySize;
+            const auto wanted    = (juce::int64)( bufferToFill.numSamples - done );
+            const auto destStart = bufferToFill.startSample + done;
+            int        count     = 0;
+
+            if( playingBackwords )
+            {
+                count = (int)juce::jmin( wanted, pos - regionStart );
+                if( count > 0 )
+                {
+                    readSamples( *bufferToFill.buffer, destStart, count, pos - count );
+                    bufferToFill.buffer->reverse( destStart, count );
+                    pos -= count;
+                }
+            }
+            else
+            {
+                count = (int)juce::jmin( wanted, regionEnd - pos );
+                if( count > 0 )
+                {
+                    readSamples( *bufferToFill.buffer, destStart, count, pos );
+                    pos += count;
+                }
+            }
+
+            if( count > 0 )
+                done += count;
+            else if( !turnAround() )
+                break;
         }
 
+        const bool atEnd = playingBackwords ? pos <= regionStart : pos >= regionEnd;
+        if( !looping && atEnd )
+            finished = true;
+
         // send playheade position message
-        numSamplesElapsed += sampleCopySize;
-        if( pos == length || numSamplesElapsed >= broadcastElapsedSamples )
+        numSamplesElapsed += done;
+        if( done > 0 && ( atEnd || numSamplesElapsed >= broadcastElapsedSamples ) )
         {
             numSamplesElapsed = 0;
             positionChanged   = true;
-        }
-
-        if( !looping && ( playingBackwords ? pos <= regionStart : pos >= length ) )
-            finished = true;
-
-        // reset pos if playmode is loop
-        if( looping && ( pos >= regionEnd || pos <= regionStart ) )
-        {
-            if( playMode == MTSamplePlayMode::samplePlayModeLoopForward )
-            {
-                pos = regionStart;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
-            {
-                pos = regionEnd;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional )
-            {
-                if( pos <= regionStart )
-                {
-                    playingBackwords = false;
-                }
-                else
-                {
-                    pos              = length - samplesPerBlock;
-                    playingBackwords = true;
-                }
-            }
         }
     }
 
