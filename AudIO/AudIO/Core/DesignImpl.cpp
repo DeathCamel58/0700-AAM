@@ -2,6 +2,9 @@
 
 #include "DesignImpl.h"
 
+#include <tuple>
+#include <vector>
+
 namespace AudIO
 {
 
@@ -14,11 +17,15 @@ namespace AudIO
         _sampleRate = sampleRate;
         _blockSize  = blockSize;
 
-        topologicalSort();
+        rebuildRenderSequence();
 
-        for( auto obj : _dfs )
+        if( auto sequence = _renderSequence.current() )
         {
-            obj->prepareToPlay( _sampleRate, _blockSize );
+            for( auto obj : sequence->order )
+            {
+                if( obj )
+                    obj->prepareToPlay( _sampleRate, _blockSize );
+            }
         }
 
         _meters.prepareToPlay( _sampleRate, _blockSize );
@@ -31,9 +38,6 @@ namespace AudIO
         auto dOutGain    = designOutputGain.getNext( _blockSize );
         auto dBypassGain = bypassGain.getNext( _blockSize );
 
-        handleClearDesign(); // delete everything if marked for clear
-        processRemoveQueue(); // delete any objects marked for remove
-        topologicalSort(); // sort design for processing
         handleClearDesignInput();
         handleClearDesignOutput();
 
@@ -57,10 +61,13 @@ namespace AudIO
                 }
 
                 // Process design
-                for( auto obj : _dfs )
+                if( auto sequence = _renderSequence.get() )
                 {
-                    if( obj )
-                        obj->process();
+                    for( auto obj : sequence->order )
+                    {
+                        if( obj )
+                            obj->process();
+                    }
                 }
 
                 // Copy Outputs
@@ -138,14 +145,11 @@ namespace AudIO
 
         _clearDesignInput  = false;
         _clearDesignOutput = false;
-        _clearRequest      = false;
     }
 
     inline void DesignImpl::clear()
     {
-        _clearRequest.store( true );
-        if( !_running.load() )
-            handleClearDesign();
+        handleClearDesign();
     }
 
     bool DesignImpl::patch( objectMeta& srcmeta, const uint32_t srcch, objectMeta& dstmeta, const uint32_t dstch )
@@ -157,7 +161,7 @@ namespace AudIO
                 srcmeta.unpatch( dstmeta, srcch, dstch );
                 return false;
             }
-            _dirty.store( true );
+            rebuildRenderSequence();
             return true;
         }
         return false;
@@ -205,7 +209,8 @@ namespace AudIO
             {
                 obj.prepareToPlay( sampleRate, blockSize );
             }
-            _dirty.store( true );
+            // Only now, prepared, does the audio thread get to see it.
+            rebuildRenderSequence();
             return true;
         }
         return false;
@@ -224,16 +229,21 @@ namespace AudIO
                 }
             }
 
-            _dirty.store( true );
-            if( _running )
-            {
-                _removeQueue.push( id );
-                return true;
-            }
-            else
-            {
-                return handleRemove( id );
-            }
+            // Detach it from the buses it is sent to and unpatch what it
+            // feeds: otherwise they keep reading its last block, and the
+            // buses keep a pointer to its meta.
+            for( auto& bus : _buses )
+                bus->removeInput( *objMeta );
+
+            std::vector<std::tuple<objectMeta*, uint32_t, uint32_t>> connections;
+            for( auto& [dstMeta, channels] : objMeta->_outputs )
+                for( auto& [dstch, srcch] : channels )
+                    connections.emplace_back( dstMeta, srcch, dstch );
+            for( auto& [dstMeta, srcch, dstch] : connections )
+                if( dstMeta )
+                    objMeta->unpatch( *dstMeta, srcch, dstch );
+
+            return handleRemove( id );
         }
         return false;
     }
@@ -245,7 +255,6 @@ namespace AudIO
             if( insertObject( *obj, _sampleRate, _blockSize ) )
             {
                 _designs.emplace_back( obj );
-                _dirty.store( true );
                 return obj->getId();
             }
         }
@@ -323,45 +332,49 @@ namespace AudIO
         return false;
     }
 
-    void DesignImpl::topologicalSort()
+    void DesignImpl::rebuildRenderSequence()
     {
-        if( !_dirty.load() )
-            return;
+        auto sequence = std::make_unique<RenderSequence>();
+        topologicalSort( sequence->order );
+        _renderSequence.publish( std::move( sequence ) );
+    }
+
+    void DesignImpl::topologicalSort( std::vector<objectMeta*>& order )
+    {
         for( auto& [id, objMeta] : _objects )
         {
             objMeta.clearVisited();
             objMeta.clearDfs();
         }
-        _dfs.resize( _objects.size() );
-        _dfsIndex = (uint32_t)_dfs.size() - 1;
+        order.resize( _objects.size() );
+        auto index = (uint32_t)order.size() - 1;
         for( auto& [id, objMeta] : _objects )
         {
-            topologicalSortUtil( objMeta );
+            topologicalSortUtil( objMeta, order, index );
         }
 #if defined( DEBUG_PRINTS ) && ( DEBUG_PRINTS > 0 )
-        // for( auto obj : _dfs )
+        // for( auto obj : order )
         // {
         //     if( obj )
         //         std::cout << obj->getObject().getName() << ", ";
         // }
         // std::cout << std::endl;
 #endif
-        _dirty.store( false );
     }
 
-    void DesignImpl::topologicalSortUtil( objectMeta& meta )
+    void DesignImpl::topologicalSortUtil( objectMeta& meta, std::vector<objectMeta*>& order, uint32_t& index )
     {
         if( !meta.visited() )
         {
             meta.markVisited();
             bool flag = false;
             auto func = [&]( objectMeta& adj ) {
-                topologicalSortUtil( adj );
+                topologicalSortUtil( adj, order, index );
             };
             meta.visitAll( func, flag );
-            _dfs[_dfsIndex] = ( &meta );
-            if( _dfsIndex )
-                _dfsIndex--;
+            order[index] = ( &meta );
+            if( index )
+                index--;
         }
     }
 
@@ -395,15 +408,16 @@ namespace AudIO
         auto it = _objects.find( id );
         if( it != _objects.end() )
         {
-            // If a meter is added on this object remove it now, otherwise it will be left dangling.
-            _meters.removeMeter( id );
+            auto removed = std::make_shared<RemovedObject>();
 
+            // Take the object out of the containers that own it...
             auto findindesign = [id]( const std::shared_ptr<Design> design ) {
                 return design->getId() == id;
             };
             auto designit = std::find_if( _designs.begin(), _designs.end(), findindesign );
             if( designit != _designs.end() )
             {
+                removed->design = *designit;
                 _designs.erase( designit );
             }
             else
@@ -414,7 +428,7 @@ namespace AudIO
                 auto chainit = std::find_if( _chains.begin(), _chains.end(), findinChain );
                 if( chainit != _chains.end() )
                 {
-                    _chains.erase( chainit );
+                    removed->chain.splice( removed->chain.end(), _chains, chainit );
                 }
                 else
                 {
@@ -424,7 +438,7 @@ namespace AudIO
                     auto busit = std::find_if( _buses.begin(), _buses.end(), findinBus );
                     if( busit != _buses.end() )
                     {
-                        _buses.erase( busit );
+                        removed->bus.splice( removed->bus.end(), _buses, busit );
                     }
                     else
                     {
@@ -434,7 +448,7 @@ namespace AudIO
                         auto objit = std::find_if( _objectPointers.begin(), _objectPointers.end(), findinObjects );
                         if( objit != _objectPointers.end() )
                         {
-                            _objectPointers.erase( objit );
+                            removed->object.splice( removed->object.end(), _objectPointers, objit );
                         }
                         else
                         {
@@ -444,8 +458,20 @@ namespace AudIO
                 }
             }
 
-            _objects.erase( id );
-            _dirty.store( true );
+            // If a meter is added on this object remove it now, otherwise it will be left dangling.
+            _meters.removeMeter( id );
+
+            // ...and out of what the audio thread uses.
+            auto& buffer = it->second.getBuffer();
+            if( _inputObjBuffer.load() == &buffer )
+                _inputObjBuffer.store( nullptr );
+            if( _outputObjBuffer.load() == &buffer )
+                _outputObjBuffer.store( nullptr );
+
+            removed->meta = _objects.extract( it );
+            rebuildRenderSequence();
+
+            releaseWhenUnused( std::move( removed ) );
 
 #if defined( DEBUG_PRINTS ) && ( DEBUG_PRINTS > 0 )
             std::cout << "Removed object " << std::endl;
@@ -455,35 +481,38 @@ namespace AudIO
         return false;
     }
 
-    void DesignImpl::processRemoveQueue()
-    {
-        uint32_t id;
-        while( true == _removeQueue.pop( id ) )
-        {
-            handleRemove( id );
-        }
-    }
-
     void DesignImpl::handleClearDesign()
     {
-        if( _clearRequest.load() )
+        struct ClearedDesign
         {
-            _dirty           = true;
-            _inputObjBuffer  = nullptr;
-            _outputObjBuffer = nullptr;
+            std::list<std::shared_ptr<Design>>       designs;
+            std::list<std::unique_ptr<Chain>>        chains;
+            std::list<std::unique_ptr<Bus>>          buses;
+            std::unordered_map<uint32_t, objectMeta> objects;
+            std::list<std::unique_ptr<Object>>       objectPointers;
+        };
 
-            _meters.clear();
-            _designs.clear();
-            _chains.clear();
-            _buses.clear();
-            _objects.clear();
-            _objectPointers.clear();
+        _inputObjBuffer  = nullptr;
+        _outputObjBuffer = nullptr;
 
-            processRemoveQueue();
-            topologicalSort();
+        _meters.clear();
+        _renderSequence.publish( std::make_unique<RenderSequence>() );
 
-            setDefaults();
-        }
+        auto cleared            = std::make_shared<ClearedDesign>();
+        cleared->designs        = std::move( _designs );
+        cleared->chains         = std::move( _chains );
+        cleared->buses          = std::move( _buses );
+        cleared->objects        = std::move( _objects );
+        cleared->objectPointers = std::move( _objectPointers );
+        _designs.clear();
+        _chains.clear();
+        _buses.clear();
+        _objects.clear();
+        _objectPointers.clear();
+
+        setDefaults();
+
+        releaseWhenUnused( std::move( cleared ) );
     }
 
     void DesignImpl::handleClearDesignInput()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <vector>
 
@@ -23,15 +24,24 @@ namespace AudIO
             partitionPoolMemory( poolMemPtr, poolsize, blocksize );
         }
 
+        // release() and acquire() of a block already in use are called from
+        // the audio thread (patching) as well as from control threads, so the
+        // counts are atomic. Blocks are only allocated on control threads.
         void release( T* Ptr )
         {
             int index = getPoolIndex( Ptr );
-            if( utils::isBetween( index, -1, refCounts_.size() ) && ( 0 < refCounts_[index] ) )
+            if( utils::isBetween( index, -1, (int)numBlocks_ ) )
             {
-                --refCounts_[index];
-                if( refCounts_[index] <= 0 )
+                auto& count    = refCounts_[index];
+                int   expected = count.load();
+                while( 0 < expected )
                 {
-                    ++free_;
+                    if( count.compare_exchange_weak( expected, expected - 1 ) )
+                    {
+                        if( 1 == expected )
+                            ++free_;
+                        break;
+                    }
                 }
             }
         }
@@ -57,8 +67,8 @@ namespace AudIO
         inline unsigned int getPeakUsed() const { return peak_; }
         inline unsigned int getBlockSize() const { return blockSize_; }
 
-        unsigned int getUsed() const { return ( capacity_ - free_ ); }
-        unsigned int getFree() const { return free_; }
+        unsigned int getUsed() const { return ( capacity_ - free_.load() ); }
+        unsigned int getFree() const { return free_.load(); }
 
         float getUsedMemoryPercentage() const { return (float)( invCapacity_ * getUsed() ); }
         float getFreeMemoryPercentage() const { return (float)( invCapacity_ * getFree() ); }
@@ -78,7 +88,10 @@ namespace AudIO
             // Clear allocated memory space...
             utils::clear( memPtr, poolSize );
             // Compute meta info to manage pools.
-            refCounts_.resize( numblocks, 0 );
+            refCounts_ = std::make_unique<std::atomic<int>[]>( numblocks );
+            numBlocks_ = numblocks;
+            for( unsigned int i = 0; i < numblocks; ++i )
+                refCounts_[i].store( 0 );
             // Update boundaries..
             poolStart = memPtr;
             poolEnd   = ( memPtr + poolSize );
@@ -101,13 +114,17 @@ namespace AudIO
             return -1;
         }
 
-        int findFreeIndex()
+        // Claims a free block: its count goes from 0 to 1.
+        int claimFreeIndex()
         {
-            if( 0 < free_ )
+            if( 0 < free_.load() )
             {
-                for( int i = 0; i < refCounts_.size(); ++i )
-                    if( 0 == refCounts_[i] )
+                for( int i = 0; i < (int)numBlocks_; ++i )
+                {
+                    int expected = 0;
+                    if( refCounts_[i].compare_exchange_strong( expected, 1 ) )
                         return i;
+                }
             }
             return -1;
         }
@@ -120,11 +137,10 @@ namespace AudIO
 
         T* allocate_( void )
         {
-            auto index = findFreeIndex();
+            auto index = claimFreeIndex();
             if( 0 <= index )
             {
-                // obtain memory and as mark aquired...
-                ++refCounts_[index];
+                // obtain memory (marked as acquired by claimFreeIndex())...
                 auto blockAddress = getPoolMemory( index );
 
                 // Update statistics...
@@ -143,12 +159,13 @@ namespace AudIO
         T* poolStart{ nullptr };
         T* poolEnd{ nullptr };
 
-        std::vector<int> refCounts_;
-        unsigned int     blockSize_{ 0 };
-        unsigned int     capacity_{ 0 };
-        unsigned int     peak_{ 0 };
-        unsigned int     free_{ 0 };
-        float            invCapacity_;
+        std::unique_ptr<std::atomic<int>[]> refCounts_;
+        unsigned int                        numBlocks_{ 0 };
+        unsigned int                        blockSize_{ 0 };
+        unsigned int                        capacity_{ 0 };
+        unsigned int                        peak_{ 0 };
+        std::atomic<unsigned int>           free_{ 0 };
+        float                               invCapacity_;
     };
 
     using MemoryPoolFloat = MemoryPool<float>;

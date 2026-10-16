@@ -38,7 +38,7 @@ namespace mt
 
         // Getters.
         inline juce::ValueTree& getRuntimeState() noexcept { return runtimeVT; };
-        inline MTSequence*      getPlayingSequence() { return playingSequence; }
+        inline MTSequence*      getPlayingSequence() { return playingSequence.load(); }
 
         // Transport control API's
         TransportState getTransportState();
@@ -67,7 +67,13 @@ namespace mt
         void setNextSequence( int NextSequence );
         void setNextBarFlag( bool NextBarFlag );
 
+        // Stops playback if Sequence is playing, and returns once the tick
+        // thread no longer uses it: call before deleting a sequence.
+        void detachSequence( MTSequence* Sequence );
+
     private:
+        void waitForTickThread();
+        void handleSongTick();
         void onTick( unsigned int Ticks ) override;
         void onBeat();
         void onBar();
@@ -82,7 +88,8 @@ namespace mt
         CMidiClock&     midiClock{ getMidiClock() };
         juce::ValueTree runtimeVT{ IDs::RUNTIME };
 
-        MTSequence* playingSequence{ nullptr };
+        // Written on the message thread, read by the tick thread.
+        std::atomic<MTSequence*> playingSequence{ nullptr };
 
         struct PlayOnNextBar
         {
@@ -101,11 +108,18 @@ namespace mt
             bool fromBegin{ true };
         };
 
+        // Song mode, on the message thread.
         int                     stepIndex{ -1 };
         int                     lastSeqTicks{ 0 };
         int                     nextSequenceUpdateTicks{ -1 };
         int                     playTime{ 0 };
+        unsigned int            lastSongTick{ 0 };
         std::queue<PlayManager> playQueue;
+
+        // The clock's latest tick, for the message thread.
+        std::atomic<unsigned int> songTick{ 0 };
+        std::atomic<bool>         songTickPending{ false };
+        std::shared_ptr<bool>     transportAlive{ std::make_shared<bool>( true ) };
 
         int                       nextSequenceToPlay{ -1 };
         PlayOnNextBar             _nextBar;

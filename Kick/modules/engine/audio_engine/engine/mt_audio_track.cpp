@@ -77,6 +77,52 @@ namespace mt
         // Connect handler to length change handler.
         lengthChangeHandler();
         progChangeHandler();
+        rebuildNoteSnapshot();
+    }
+
+    void MTTrack::rebuildNoteSnapshot()
+    {
+        noteSnapshotUpdater.cancelPendingUpdate();
+
+        auto snapshot = std::make_shared<NoteSnapshot>();
+        for( const auto& vt : getNoteListVT() )
+        {
+            if( !vt.hasType( IDs::NOTE ) )
+                continue;
+
+            // Read the values as MTNote (the tick thread's former view) does.
+            const MTNote note( vt );
+            snapshot->push_back( { note.start.get(), note.number.get(), note.velocity.get(), note.probability.get(), note.ratchet.get(), note.length.get() } );
+        }
+        std::stable_sort( snapshot->begin(), snapshot->end(), []( const SequencedNote& A, const SequencedNote& B ) { return A.start < B.start; } );
+
+        std::shared_ptr<const NoteSnapshot> previous = std::move( snapshot );
+        {
+            const juce::ScopedLock sl( lock );
+            std::swap( noteSnapshot, previous );
+        }
+    }
+
+    void MTTrack::noteListChanged( const juce::ValueTree& Tree )
+    {
+        const auto& noteList = getNoteListVT();
+        if( Tree == noteList || Tree.getParent() == noteList )
+            noteSnapshotUpdater.triggerAsyncUpdate();
+    }
+
+    void MTTrack::valueTreeChildAdded( juce::ValueTree& Parent, juce::ValueTree& )
+    {
+        noteListChanged( Parent );
+    }
+
+    void MTTrack::valueTreeChildRemoved( juce::ValueTree& Parent, juce::ValueTree&, int )
+    {
+        noteListChanged( Parent );
+    }
+
+    void MTTrack::valueTreeChildOrderChanged( juce::ValueTree& Parent, int, int )
+    {
+        noteListChanged( Parent );
     }
 
     void MTTrack::setName( const juce::String& Name )
@@ -165,6 +211,10 @@ namespace mt
             else if( Property == IDs::program )
                 progChangeHandler();
         }
+        else
+        {
+            noteListChanged( TreeWhosePropertyHasChanged );
+        }
     }
 
     void MTTrack::handleAsyncUpdate()
@@ -192,6 +242,10 @@ namespace mt
 
     void MTTrack::play()
     {
+        // Play the notes as they are now, even if a rebuild is still queued.
+        noteSnapshotUpdater.handleUpdateNowIfNeeded();
+
+        const juce::ScopedLock sl( lock );
         isPlaying = true;
         // The variables are cleared here and in stop as the workflow may be pause->playstart. if Ui calls stop and resume then it may lead to issues.
         trackPlayhead.clear();
@@ -203,6 +257,7 @@ namespace mt
 
     void MTTrack::resume()
     {
+        noteSnapshotUpdater.handleUpdateNowIfNeeded();
         isPlaying = true;
     }
 
@@ -215,6 +270,7 @@ namespace mt
     void MTTrack::stop()
     {
         stopAllMidiNotes();
+        const juce::ScopedLock sl( lock );
         isPlaying = false;
         trackPlayhead.clear();
         trackPlayhead.bnb.bar = seq.isLooping.get() ? juce::jmax<int>( 0, seq.getLoopStart() - 1 ) : 0;
@@ -225,6 +281,7 @@ namespace mt
 
     void MTTrack::seek( int posInTicks )
     {
+        const juce::ScopedLock sl( lock );
         tickPos = posInTicks;
         if( seq.isLooping.get() )
             while( tickPos > lengthInTicks.load() ) // This is cheap modulo
@@ -285,32 +342,31 @@ namespace mt
     void MTTrack::fillMidiMessages( unsigned int tick, unsigned int PrevTick, int MidiChannel )
     {
         //juce::Logger::writeToLog( "prevTick, " + juce::String( PrevTick ) + "PresentTick, " + juce::String(tick));
-        juce::HashMap<int, MTNote*>* map = nullptr;
+        const auto& notes = *noteSnapshot; // The caller holds lock.
         for( auto pos = PrevTick + 1; pos <= tick; pos++ )
         {
-            int posOnTrack = pos % lengthInTicks.load();
-            map            = getNotesAtPos( posOnTrack );
-            if( !map ) continue;
-            for( const auto& it : *map )
+            int  posOnTrack = pos % lengthInTicks.load();
+            auto first      = std::lower_bound( notes.begin(), notes.end(), posOnTrack, []( const SequencedNote& N, int Start ) { return N.start < Start; } );
+            for( auto it = first; it != notes.end() && it->start == posOnTrack; ++it )
             {
-                int noteNo = getEffectiveNoteNo( it->number.get() );
+                int noteNo = getEffectiveNoteNo( it->number );
                 if( !isTrackEffectivelyMuted() && CommonUtils::isValidMidiNote( noteNo ) )
                 {
                     // Check probability of playback.
                     auto rand = AudIO::utils::random<int>( PROBABILITY::MIN, PROBABILITY::MAX );
-                    if( rand <= it->probability.get() )
+                    if( rand <= it->probability )
                     {
-                        int noteVelocity = getEffectiveNoteVelocity( it->velocity.get() );
+                        int noteVelocity = getEffectiveNoteVelocity( it->velocity );
 
                         // Trigger note now.
                         midiMsgs.insert( -1, juce::MidiMessage::noteOn( MidiChannel, noteNo, (juce::uint8)noteVelocity ) );
 
                         // Check Ratchet
-                        auto parts = (int)( it->ratchet.get() );
+                        auto parts = (int)( it->ratchet );
                         if( 1 < parts )
                         {
                             auto time      = tickCtr;
-                            auto partTicks = ( it->length.get() / parts );
+                            auto partTicks = ( it->length / parts );
                             // Queue Retriggers...
                             for( auto i = 2; i <= parts; ++i )
                             {
@@ -320,7 +376,7 @@ namespace mt
                             }
                         }
                         // Queue last note off.
-                        queuedNotes.insert( { ( pos + it->length.get() - 1 ), juce::MidiMessage::noteOff( MidiChannel, noteNo, (juce::uint8)noteVelocity ) } ); // Queue note-off
+                        queuedNotes.insert( { ( pos + it->length - 1 ), juce::MidiMessage::noteOff( MidiChannel, noteNo, (juce::uint8)noteVelocity ) } ); // Queue note-off
                     }
                 }
             }
@@ -432,6 +488,8 @@ namespace mt
     {
         auto msg = juce::MidiMessage::allNotesOff( getMidiOutChannel() );
         processIncomingMidiMessage( msg );
+
+        const juce::ScopedLock sl( lock );
         queuedNotes.clear();
     }
 

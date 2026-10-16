@@ -117,10 +117,39 @@ namespace mt
         inline void reloadMidiMeter( float Level ) { midiMeter.reload( Level ); };
 
     private:
+        // What the tick thread plays: a copy of the note list, sorted by
+        // start. Rebuilt on the message thread when the note list changes
+        // and swapped in under the track's lock, so the tick thread never
+        // reads the note list's ValueTree while the UI edits it.
+        struct SequencedNote
+        {
+            int start;
+            int number;
+            int velocity;
+            int probability;
+            int ratchet;
+            int length;
+        };
+        using NoteSnapshot = std::vector<SequencedNote>;
+
+        struct NoteSnapshotUpdater : public juce::AsyncUpdater
+        {
+            explicit NoteSnapshotUpdater( MTTrack& T )
+                : track( T ) {}
+            void     handleAsyncUpdate() override { track.rebuildNoteSnapshot(); }
+            MTTrack& track;
+        };
+
+        void rebuildNoteSnapshot();
+        void noteListChanged( const juce::ValueTree& Tree );
+
         void        progChangeHandler();
         void        lengthChangeHandler();
         void        recalculateIndex( unsigned int Tick );
         void        valueTreePropertyChanged( juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& property ) override;
+        void        valueTreeChildAdded( juce::ValueTree& Parent, juce::ValueTree& Child ) override;
+        void        valueTreeChildRemoved( juce::ValueTree& Parent, juce::ValueTree& Child, int Index ) override;
+        void        valueTreeChildOrderChanged( juce::ValueTree& Parent, int OldIndex, int NewIndex ) override;
         void        handleAsyncUpdate() override;
         inline void updateTrackPlayhead( unsigned tickpos ) { trackPlayhead.normized = lengthFactor * tickPos; };
         void        fillMidiMessages( unsigned int tick, unsigned int prevTick, int midiChannel );
@@ -145,8 +174,11 @@ namespace mt
         unsigned int          prevTick{ 0 };
         unsigned int          tickCtr{ 0 };
         unsigned int          tickPos{ 0 };
-        double                levelScaler{ 1.f };
-        juce::CriticalSection lock;
+        std::atomic<double>   levelScaler{ 1.f };
+        juce::CriticalSection lock; // The tick thread holds it while it runs the track.
+
+        std::shared_ptr<const NoteSnapshot> noteSnapshot{ std::make_shared<NoteSnapshot>() }; // Guarded by lock.
+        NoteSnapshotUpdater                 noteSnapshotUpdater{ *this };
 
         std::atomic<bool>         soloMuted{ false };
         std::atomic<unsigned int> lengthInTicks{ 0 };

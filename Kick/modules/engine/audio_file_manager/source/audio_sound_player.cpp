@@ -30,34 +30,53 @@ namespace mt
     {
         audioFmtMgr.registerBasicFormats();
         ASliceRenderer::setSlice( &slice );
-        slice.setSource( &sound );
     }
 
     ASoundPlayer::~ASoundPlayer()
     {
+        stopAndWait();
+    }
+
+    // The renderer's state (source buffer, position) belongs to the audio
+    // thread while it plays: stop it, and wait until the block that may
+    // still be rendering has ended, before changing any of it.
+    bool ASoundPlayer::stopAndWait()
+    {
         ASliceRenderer::stop();
+        return AudIO::AudioThreadSync::get().synchronize();
     }
 
     void ASoundPlayer::setSoundToPlay( const juce::String& File, double LengthInSeconds )
     {
-        ASliceRenderer::stop();
-        sound.setSound( File, LengthInSeconds );
+        // Decode into a sound of its own, on this thread, while the current
+        // one may still be playing.
+        ASound::Ptr next = new ASound( File, audioFmtMgr, 1.f, LengthInSeconds );
 
+        if( !stopAndWait() )
+            return; // The audio thread is stuck: leave it alone.
+
+        // The previous sound is freed here, on this thread, if nothing else
+        // holds it.
+        sound = next;
+        slice.setSource( sound );
         slice.refresh();
-        slice.setLoopPoints( 0, sound.getNumSamplesPerChannel() );
+        slice.setLoopPoints( 0, sound->getNumSamplesPerChannel() );
 
         ASliceRenderer::reset();
     }
 
     void ASoundPlayer::removeSound()
     {
-        sound.purge();
+        if( !stopAndWait() )
+            return;
+
         slice.setSource( nullptr );
+        sound = nullptr;
     }
 
     bool ASoundPlayer::isValidSource()
     {
-        return sound.isValid();
+        return sound && sound->isValid();
     }
 
 } // namespace mt

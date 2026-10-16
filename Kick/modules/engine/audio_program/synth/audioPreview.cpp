@@ -43,9 +43,7 @@ namespace mt
 
     void AudioPreview::previewOn( const juce::String& Source )
     {
-        auto cGain = gain.getTargetValue();
-        gain.setCurrentAndTargetValue( 0.0 );
-        gain.setTargetValue( cGain );
+        gainFadeIn.store( true );
         player.setSoundToPlay( Source, -1.0 );
         // Start
         if( player.isValidSource() )
@@ -65,19 +63,15 @@ namespace mt
     void AudioPreview::setGain( double Gain, bool Force )
     {
         auto g = juce::jlimit( 0.0, 1.0, Gain );
+        gainTarget.store( (float)g );
         if( Force )
-            gain.setCurrentAndTargetValue( g );
-        else
-            gain.setTargetValue( g );
+            gainSnap.store( true );
     }
 
     void AudioPreview::setPan( double Pan, bool Force )
     {
         auto p = juce::jlimit( -1.0, 1.0, Pan );
-        if( Force )
-            pan.setCurrentAndTargetValue( p );
-        else
-            pan.setTargetValue( p );
+        panTarget.store( (float)p );
     }
 
     void AudioPreview::setGainAndPan( double Gain, double Pan, bool Force )
@@ -92,6 +86,8 @@ namespace mt
         player.setSampleRate( samplerate );
         gain.reset( (double)samplerate, 1.0 );
         pan.reset( (double)samplerate, 0.01 );
+        gain.setCurrentAndTargetValue( gainTarget.load() );
+        pan.setCurrentAndTargetValue( panTarget.load() );
     }
 
     void AudioPreview::teardown()
@@ -101,6 +97,15 @@ namespace mt
 
     void AudioPreview::process( AudIO::Buffer<float>& buffer )
     {
+        const auto target = gainTarget.load();
+        if( gainFadeIn.exchange( false ) )
+            gain.setCurrentAndTargetValue( 0.f );
+        if( gainSnap.exchange( false ) )
+            gain.setCurrentAndTargetValue( target );
+        else
+            gain.setTargetValue( target );
+        pan.setTargetValue( panTarget.load() );
+
         if( !isBypassed() && !isMuted() && isRunning() )
         {
             auto numSamples = buffer.getBlockSize();

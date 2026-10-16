@@ -1,7 +1,6 @@
 
 #include "DawBus.h"
 #include <algorithm>
-#include <thread>
 
 namespace AudIO
 {
@@ -90,8 +89,6 @@ namespace AudIO
         if( BusType::Object == type_ || BusType::Other == type_ )
         {
             auto retVal = design_.patch( ToId, id_ );
-            // Allow time for audio design to propagate changes in patch info...
-            std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
             return retVal;
         }
         return false;
@@ -106,8 +103,6 @@ namespace AudIO
             {
                 design_.removeFromBus( connectedTo_[connectIndex], id_ );
                 connectedTo_[connectIndex] = 0;
-                // Allow time for audio design to propagate changes in patch info...
-                std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
             }
         }
         else
@@ -115,8 +110,6 @@ namespace AudIO
             connectedTo_.resize( ( connectIndex + 1 ), 0 );
         }
         auto retVal = design_.sendToBus( ToId, id_, Gain );
-        // Allow time for audio design to propagate changes in patch info...
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
         if( retVal )
             connectedTo_[connectIndex] = ToId;
         return retVal;
@@ -251,8 +244,6 @@ namespace AudIO
         {
             design_.sendToBus( sendBus, id_, 0.f );
         }
-        // Allow time for audio design to propagate changes in patch info...
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
     }
 
     void DawRouting::removeFromSends()
@@ -261,8 +252,6 @@ namespace AudIO
         {
             design_.removeFromBus( sendBus, id_ );
         }
-        // Allow time for audio design to propagate changes in patch info...
-        std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
     }
 
     void DawRouting::resetRouting()

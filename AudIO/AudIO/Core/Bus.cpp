@@ -9,7 +9,6 @@ namespace AudIO
     {
         // pre-reserve memory to hold 4 stereo channels.
         _busInputMap.reserve( 8 );
-        _gains.reserve( 4 );
 
         _chain.initializeChain( &_chainMeta );
         // patch mix out to chain in
@@ -24,6 +23,7 @@ namespace AudIO
             return;
         PatchQueue<float>::get().patchOutput( &_chainMeta.getBuffer(), _busmeta->getBuffer().getOutputBuffer( 0 ), 0 );
         PatchQueue<float>::get().patchOutput( &_chainMeta.getBuffer(), _busmeta->getBuffer().getOutputBuffer( 1 ), 1 );
+        publishMix();
     }
 
     void Bus::setName( const std::string& Name )
@@ -40,21 +40,32 @@ namespace AudIO
             auto&    buffer               = _busmeta->getBuffer();
             if( !findFreeIndex( freeFirstMonoChannel ) )
             {
+                // The audio thread applies queued patches to this buffer's
+                // channels: hold that off while the channel list grows.
+                auto& patchQueue = PatchQueue<float>::get();
+                if( !patchQueue.suspend() )
+                    return { false, 0 };
+
                 buffer.resizeInputs( buffer.getNumInputChannels() + 2 );
-                if( !findFreeIndex( freeFirstMonoChannel ) )
+                const auto found = findFreeIndex( freeFirstMonoChannel );
+                if( !found )
                 {
                     // Roll back allocated memory...
                     if( buffer.getNumInputChannels() >= 2 )
                         buffer.resizeInputs( buffer.getNumInputChannels() - 2 );
-                    return { false, 0 };
                 }
+                patchQueue.resume();
+
+                if( !found )
+                    return { false, 0 };
                 // Resize gains to hold additional input.
-                _gains.push_back( 0.f );
+                _gains.emplace_back( 0.f );
             }
             assert( _gains.size() == ( buffer.getNumInputChannels() / 2 ) );
             _busInputMap[&Src]               = freeFirstMonoChannel;
             _gains[freeFirstMonoChannel / 2] = Gain;
             _numInputs                       = buffer.getNumInputChannels();
+            publishMix();
             // Actual patching will be done by the design Meta later
             return { true, freeFirstMonoChannel };
         }
@@ -69,6 +80,7 @@ namespace AudIO
             // Remove this input source and clear meta properties...
             _gains[index / 2] = 0.f;
             _busInputMap.erase( &Src );
+            publishMix();
             // Actual unpatching will be done by the design Meta
             return { true, index };
         }
@@ -209,11 +221,54 @@ namespace AudIO
         _chain.prepareToPlay( SampleRate, BlockSize );
     }
 
+    void Bus::publishMix()
+    {
+        auto  mix    = std::make_unique<MixTable>();
+        auto& inputs = _busmeta->getBuffer().inputs;
+        auto  pairs  = utils::min( _gains.size(), inputs.size() / 2 );
+
+        mix->inputs.resize( pairs );
+        for( size_t i = 0; i < pairs; ++i )
+        {
+            mix->inputs[i].left  = inputs[2 * i];
+            mix->inputs[i].right = inputs[( 2 * i ) + 1];
+            mix->inputs[i].gain  = &_gains[i];
+        }
+        mix->connected = !_busInputMap.empty();
+
+        _mix.publish( std::move( mix ) );
+    }
+
     void Bus::process( Buffer<float>& Buffer )
     {
-        if( _busInputMap.size() )
+        auto mix = _mix.get();
+        if( mix && mix->connected )
         {
-            _mixOutBuffer.stereoMixer( Buffer, _gains );
+            // Same as Buffer<float>::stereoMixer(), from the published inputs.
+            if( _mixOutBuffer.getNumOutputChannels() == 2 && !mix->inputs.empty() )
+            {
+                _mixOutBuffer.clearOutputs();
+
+                const auto size     = _mixOutBuffer.getBlockSize();
+                auto       leftOut  = _mixOutBuffer.getOutputBuffer( 0 );
+                auto       rightOut = _mixOutBuffer.getOutputBuffer( 1 );
+
+                for( const auto& input : mix->inputs )
+                {
+                    auto gain = input.gain->load();
+                    if( utils::isNotEqual( 0.f, gain ) )
+                    {
+                        if( float* leftIn = *input.left )
+                            utils::addWithGain<float>( leftOut, leftIn, size, gain );
+                        if( float* rightIn = *input.right )
+                            utils::addWithGain<float>( rightOut, rightIn, size, gain );
+                    }
+                }
+            }
+            else
+            {
+                Buffer.clearOutputs();
+            }
             _chain.process( _chainMeta.getBuffer() );
         }
         else

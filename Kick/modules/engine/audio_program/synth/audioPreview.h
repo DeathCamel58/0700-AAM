@@ -45,8 +45,8 @@ namespace mt
         void previewOff();
 
         // Overall program control API's
-        double getGain() { return gain.getTargetValue(); };
-        double getPan() { return pan.getTargetValue(); };
+        double getGain() { return gainTarget.load(); };
+        double getPan() { return panTarget.load(); };
 
         bool         isOutMeterEnabled() { return outMeterEnabled.load(); }
         void         enableOutputMetering( bool Enable ) { outMeterEnabled = true; };
@@ -68,8 +68,14 @@ namespace mt
         AudIO::MeterData  meterData;
         AudIO::LevelMeter meter;
 
+        // The smoothed values belong to the audio thread; control threads
+        // set the targets, which process() picks up.
         juce::SmoothedValue<float> gain{ 1.0 };
         juce::SmoothedValue<float> pan{ 0.0 };
+        std::atomic<float>         gainTarget{ 1.f };
+        std::atomic<float>         panTarget{ 0.f };
+        std::atomic<bool>          gainSnap{ false }; // Jump to the target.
+        std::atomic<bool>          gainFadeIn{ false }; // Ramp up from 0.
 
         ASoundPlayer player;
     };

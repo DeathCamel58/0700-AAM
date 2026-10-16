@@ -37,13 +37,26 @@ namespace AudIO
 
     void Design::process( Buffer<float>& Buffer )
     {
-        // Apply ramp to all parameters...
-        if( nullptr == pParent )
+        if( nullptr != pParent )
         {
-            PatchQueue<float>::get().process();
+            pImpl->process( Buffer );
+            return;
         }
 
+        // The top-level design marks its blocks, so that control threads
+        // know when the audio thread has let go of what they replace.
+        auto& sync = AudioThreadSync::get();
+        if( !sync.beginBlock() )
+        {
+            Buffer.clearOutputs();
+            return;
+        }
+
+        // Apply ramp to all parameters...
+        PatchQueue<float>::get().process();
         pImpl->process( Buffer );
+
+        sync.endBlock();
     }
 
     void Design::teardown()
@@ -243,9 +256,15 @@ namespace AudIO
     {
         autolock guard{ lockerMutex };
 
-        auto retVal = pImpl->insertDesign( obj );
-        if( 0 != retVal )
+        // Set before the audio thread can see it: a design without a parent
+        // runs as the top-level one.
+        auto previousParent = obj ? obj->pParent : nullptr;
+        if( obj )
             obj->pParent = this;
+
+        auto retVal = pImpl->insertDesign( obj );
+        if( 0 == retVal && obj )
+            obj->pParent = previousParent;
 
         return retVal;
     }
@@ -568,6 +587,7 @@ namespace AudIO
 
     void Design::clear()
     {
+        autolock guard{ lockerMutex };
         pImpl->clear();
     }
 

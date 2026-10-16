@@ -1,5 +1,6 @@
 #include "DawInserts.h"
 #include "../Includes/ObjectFactory.h"
+#include "../Core/RtSync.h"
 
 namespace AudIO
 {
@@ -13,16 +14,24 @@ namespace AudIO
     int DawInserts::InsertEffects::reset()
     {
         bypassed.store( true );
-        pObj.reset();
+        live.store( nullptr );
+        // The audio thread may be running the effect in this very block.
+        if( pObj )
+            releaseAfterBlock( std::shared_ptr<Object>( std::move( pObj ) ) );
         return 0;
     }
 
-    int DawInserts::InsertEffects::create( const std::string& Effect )
+    int DawInserts::InsertEffects::create( const std::string& Effect, uint32_t Samplerate, uint32_t Blocksize )
     {
         bypassed.store( true );
         pObj = std::move( CREATE_OBJECT( Effect ) );
         if( pObj.get() )
         {
+            // Prepared before the audio thread gets it, if its host has been
+            // (otherwise the host's prepareToPlay() does it).
+            if( 0 != Samplerate )
+                pObj->prepareToPlay( Samplerate, Blocksize );
+            live.store( pObj.get() );
             bypassed.store( false );
             return 0;
         }
@@ -62,7 +71,7 @@ namespace AudIO
             // Remove effect if any exists at this position
             pIns->reset();
             // Create effect
-            return pIns->create( Effect );
+            return pIns->create( Effect, _sampleRate, _blockSize );
         }
         return -1;
     }
@@ -195,6 +204,9 @@ namespace AudIO
 
     void DawInserts::prepareToPlay( uint32_t Samplerate, uint32_t Blocksize )
     {
+        _sampleRate = Samplerate;
+        _blockSize  = Blocksize;
+
         // Run loop to prepare all inserts...
         for( auto& it : _inserts )
             if( it.pObj.get() )
@@ -208,7 +220,7 @@ namespace AudIO
 
         // Run loop to process all inserts...
         for( auto& it : _inserts )
-            if( !it.bypassed.load() && it.pObj.get() )
-                it.pObj->process( Buffer );
+            if( auto effect = it.live.load(); effect && !it.bypassed.load() )
+                effect->process( Buffer );
     }
 };

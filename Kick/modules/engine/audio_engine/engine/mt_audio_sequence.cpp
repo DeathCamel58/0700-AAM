@@ -65,7 +65,6 @@ namespace mt
             if( it.hasType( IDs::TRACK ) )
             {
                 createTrack( it );
-                std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
             }
         }
 
@@ -83,7 +82,10 @@ namespace mt
         vTree.removeListener( this );
         stop();
 
-        tracks.clear();
+        {
+            const juce::ScopedLock sl( lock );
+            tracks.clear();
+        }
 
         // Write MIDI data...
         {
@@ -274,8 +276,13 @@ namespace mt
             VT.setProperty( IDs::name, nameStr, nullptr );
         }
 
-        if( auto& t = tracks.emplace_back( std::make_unique<MTTrack>( manager, *this, undoManager, VT ) ) )
+        if( auto track = std::make_unique<MTTrack>( manager, *this, undoManager, VT ) )
         {
+            {
+                // The tick thread walks the tracks under this lock.
+                const juce::ScopedLock sl( lock );
+                tracks.push_back( std::move( track ) );
+            }
             ++_trkNo;
             updateTrackList();
             return ( (int)tracks.size() - 1 );
@@ -704,8 +711,9 @@ namespace mt
     void MTSequence::onTick( unsigned int Ticks )
     {
         //double start = juce::Time::getMillisecondCounterHiRes();
-        auto diff = Ticks - prevTicks;
-        prevTicks.store( Ticks );
+        // Playing from the start restarts the clock at tick 0: count from there.
+        const auto previous = prevTicks.exchange( Ticks );
+        auto       diff     = ( Ticks >= previous ) ? ( Ticks - previous ) : Ticks;
 
         tickPos += diff;
         beatPos += diff;

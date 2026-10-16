@@ -79,6 +79,7 @@
     #include "Includes/IAudioDevice.h"
     #include "Includes/AudioObject.h"
     #include "Includes/DeviceManager.h"
+    #include "Core/RtSync.h"
 
 // Devices...
 

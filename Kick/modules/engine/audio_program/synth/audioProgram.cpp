@@ -65,12 +65,7 @@ namespace mt
         auto  slice    = assetMgr.getAssetSlice( "" ); // Source
 
         noteOff( Note );
-        if( auto voice = getFreeVoice( Note, 1 ) )
-        {
-            voice->setSlice( slice );
-            voice->noteOn( 0, 127 );
-            addVoiceForPlayback( voice );
-        }
+        postNoteOn( Note, 0, 127, 1, slice );
     }
 
 };

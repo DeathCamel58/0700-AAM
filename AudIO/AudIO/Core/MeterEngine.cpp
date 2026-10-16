@@ -21,7 +21,8 @@ namespace AudIO
         if( auto it = _meters.find( objid ); it == _meters.end() )
         {
             autolock guard{ _lock };
-            _meters.try_emplace( objid, std::make_pair( LevelMeter{}, &srcobj ) );
+            _meters.try_emplace( objid, std::make_shared<LevelMeter>(), &srcobj );
+            publish();
         }
 #if defined( METERING_LOAD_BALANCE ) && ( METERING_LOAD_BALANCE > 0 )
         recalculate();
@@ -32,7 +33,8 @@ namespace AudIO
     bool MeterEngine::removeMeter( uint32_t id )
     {
         autolock guard{ _lock };
-        _meters.erase( id );
+        if( 0 != _meters.erase( id ) )
+            publish();
         return true;
     }
 
@@ -40,6 +42,16 @@ namespace AudIO
     {
         autolock guard{ _lock };
         _meters.clear();
+        publish();
+    }
+
+    void MeterEngine::publish()
+    {
+        auto list = std::make_unique<MeterList>();
+        list->meters.reserve( _meters.size() );
+        for( auto& [id, entry] : _meters )
+            list->meters.push_back( entry );
+        _list.publish( std::move( list ) );
     }
 
     void MeterEngine::prepareToPlay( uint32_t samplerate, uint32_t blocksize )
@@ -59,26 +71,31 @@ namespace AudIO
 
     void MeterEngine::recalculate()
     {
-        _loopCntr       = (int)( _rateMs / blockRate() );
-        _metersPerBlock = (int)( 1 + ( (float)_meters.size() / (float)_loopCntr ) );
+        _loopCntr = (int)( _rateMs / blockRate() );
+        _metersPerBlock.store( (int)( 1 + ( (float)_meters.size() / (float)_loopCntr ) ) );
     }
 #endif
 
     void MeterEngine::process( Buffer<float>& /*buffer*/ )
     {
+        auto list = _list.get();
+        if( !list )
+            return;
+        auto& meters = list->meters;
+
 #if defined( METERING_LOAD_BALANCE ) && ( METERING_LOAD_BALANCE > 0 )
-        auto numMeters = utils::min( _metersPerBlock, ( (int)_meters.size() - _meterIdx ) );
+        auto numMeters = utils::min( _metersPerBlock.load(), ( (int)meters.size() - _meterIdx ) );
         if( 0 < numMeters )
         {
-            auto it = _meters.begin();
+            auto it = meters.begin();
             std::advance( it, _meterIdx );
             for( auto i = 0; i < numMeters; ++i )
             {
-                if( it != _meters.end() )
+                if( it != meters.end() )
                 {
-                    auto& [meter, objMeta] = it->second;
+                    auto& [meter, objMeta] = *it;
                     if( objMeta )
-                        meter.process( objMeta->getBuffer() );
+                        meter->process( objMeta->getBuffer() );
                     ++_meterIdx;
                     ++it;
                 }
@@ -90,9 +107,10 @@ namespace AudIO
             }
         }
 #else
-        for( auto& [id, meter] : _meters )
+        for( auto& [meter, objMeta] : meters )
         {
-            meter.process();
+            if( objMeta )
+                meter->process( objMeta->getBuffer() );
         }
 #endif
     }
@@ -102,7 +120,7 @@ namespace AudIO
         if( auto it = _meters.find( id ); it != _meters.end() )
         {
             auto& [meter, objMeta] = it->second;
-            meter.getMeter( _data );
+            meter->getMeter( _data );
         }
         else
         {
@@ -118,7 +136,7 @@ namespace AudIO
             for( auto& [id, meteringInfo] : _meters )
             {
                 auto& [meter, objMeta] = meteringInfo;
-                meter.getMeter( _data );
+                meter->getMeter( _data );
                 MeterCallback( id, _data );
             }
     }

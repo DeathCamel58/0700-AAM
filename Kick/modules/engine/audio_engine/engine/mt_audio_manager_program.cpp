@@ -43,8 +43,8 @@ namespace mt
         undoManager = nullptr;
 
         MTIProgram::resetSoloingPrograms();
+        // Removing a program's objects waits for the audio thread to let go of them.
         programs.clear();
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         updateProgramList();
     }
 
@@ -61,7 +61,6 @@ namespace mt
                 createProgram( it, false );
             }
         }
-        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
         updateProgramList();
     }
 

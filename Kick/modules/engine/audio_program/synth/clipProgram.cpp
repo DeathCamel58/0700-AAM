@@ -79,25 +79,16 @@ namespace mt
             //DBG( "AA" << Note << " " << Velocity );
             if( const auto clipSound = clipNote->getSourceSlice() )
             {
-                if( auto pVoice = isPlayback( Note ) )
-                {
-                    if( ClipPlayType::CLIP_TOGGLE == clipNote->padPlay.get() )
-                    {
-                        pVoice->noteOff();
-                    }
-                    pVoice->reset();
-                    pVoice->noteOn( Note, Velocity );
-                }
-                else
-                {
-                    // Start playback.
-                    if( auto pVoice = getFreeVoice( Note, 1 ) )
-                    {
-                        pVoice->setSlice( clipSound );
-                        pVoice->noteOn( Note, Velocity );
-                        addVoiceForPlayback( pVoice );
-                    }
-                }
+                // Restart the voice playing it, or start playback.
+                NoteEvent event;
+                event.type      = NoteEvent::Type::ClipNoteOn;
+                event.note      = Note;
+                event.voiceNote = Note;
+                event.velocity  = Velocity;
+                event.polyphony = 1;
+                event.flag      = ( ClipPlayType::CLIP_TOGGLE == clipNote->padPlay.get() );
+                event.slice     = clipSound;
+                postNoteEvent( event );
             }
         }
     }

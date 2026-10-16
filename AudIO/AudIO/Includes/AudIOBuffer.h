@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <deque>
 #include <vector>
 #include <memory>
 
@@ -10,8 +12,11 @@
 
 namespace AudIO
 {
+    // A channel: the block it reads or writes. The audio thread patches
+    // channels (see PatchQueue) while control threads look at them, so the
+    // block pointer is atomic.
     template<typename T>
-    using ChBufferPtr = std::shared_ptr<T*>;
+    using ChBufferPtr = std::shared_ptr<std::atomic<T*>>;
     template<typename T>
     using PortBuffer = std::vector<ChBufferPtr<T>>;
 
@@ -165,15 +170,15 @@ namespace AudIO
         // Addition API's
         void addInputToOutput( uint32_t input, uint32_t output )
         {
-            if( auto out = *outputs[output] )
-                if( auto in = *inputs[input] )
+            if( T* out = *outputs[output] )
+                if( T* in = *inputs[input] )
                     utils::add<T>( out, in, getBlockSize() );
         }
 
         void addInputToOutputWithGain( uint32_t input, uint32_t output, float gain )
         {
-            if( auto out = *outputs[output] )
-                if( auto in = *inputs[input] )
+            if( T* out = *outputs[output] )
+                if( T* in = *inputs[input] )
                     utils::addWithGain<T, float>( out, in, getBlockSize(), gain );
         }
 
@@ -272,12 +277,12 @@ namespace AudIO
 
         inline T* getInputBuffer( uint32_t channel ) const
         {
-            return utils::isBelow( channel, (uint32_t)inputs.size() ) ? *inputs[channel] : nullptr;
+            return utils::isBelow( channel, (uint32_t)inputs.size() ) ? inputs[channel]->load() : nullptr;
         }
 
         inline T* getOutputBuffer( uint32_t channel ) const
         {
-            return utils::isBelow( channel, (uint32_t)outputs.size() ) ? *outputs[channel] : nullptr;
+            return utils::isBelow( channel, (uint32_t)outputs.size() ) ? outputs[channel]->load() : nullptr;
         }
 
         // API's related to connections...
@@ -508,7 +513,7 @@ namespace AudIO
             {
                 for( uint32_t i = oldsize; i < newsize; ++i )
                 {
-                    auto& ref = inputs.emplace_back( std::make_shared<T*>() );
+                    auto& ref = inputs.emplace_back( std::make_shared<std::atomic<T*>>( nullptr ) );
                     inputPatched.emplace_back( false );
                     if( allocateMemory )
                     {
@@ -517,7 +522,7 @@ namespace AudIO
                     }
                 }
             }
-            blockSize = MemoryPool<T>::get().getBlockSize();
+            updateBlockSize();
             refreshInputs();
         }
 
@@ -544,22 +549,31 @@ namespace AudIO
             {
                 for( uint32_t i = oldsize; i < newsize; ++i )
                 {
-                    auto& ref = outputs.emplace_back( std::make_shared<T*>() );
+                    auto& ref = outputs.emplace_back( std::make_shared<std::atomic<T*>>( nullptr ) );
                     if( allocateMemory )
                     {
                         *ref = MemoryPool<T>::get().acquire( nullptr, true );
                     }
                 }
             }
-            blockSize = MemoryPool<T>::get().getBlockSize();
+            updateBlockSize();
             refreshOutputs();
+        }
+
+        // Buses grow while the audio thread reads them: only write the block
+        // size when it changes.
+        void updateBlockSize()
+        {
+            const auto size = MemoryPool<T>::get().getBlockSize();
+            if( blockSize != size )
+                blockSize = size;
         }
 
         bool isInputFree( uint32_t channel )
         {
             if( utils::isBelow( channel, (uint32_t)inputs.size() ) )
             {
-                return ( nullptr == *inputs[channel] ) && ( !inputPatched[channel] );
+                return ( nullptr == inputs[channel]->load() ) && ( !inputPatched[channel] );
             }
             return false;
         }
@@ -585,10 +599,10 @@ namespace AudIO
     private:
         PortBuffer<T>         inputs;
         PortBuffer<T>         outputs;
-        std::vector<bool>     inputPatched;
+        std::deque<std::atomic<bool>> inputPatched; // Set when a patch is queued, too.
         std::vector<const T*> ins;
         std::vector<T*>       outs;
-        uint32_t              blockSize;
+        uint32_t              blockSize{ 0 };
         bool                  isClear{ false };
     };
 

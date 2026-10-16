@@ -114,6 +114,7 @@ namespace AudIO
                 prev.patch( cur.getBuffer() );
                 cur.patch( next.getBuffer() );
             }
+            publishInserts();
             return true;
         }
         return false;
@@ -141,7 +142,8 @@ namespace AudIO
         if( existsInObjects( id ) )
         {
             removeInsertById( id );
-            _objects.erase( id );
+            auto object = std::make_shared<decltype( _objects )::node_type>( _objects.extract( id ) );
+            releaseWhenUnused( std::move( object ) );
             return true;
         }
         return false;
@@ -151,25 +153,41 @@ namespace AudIO
     {
         if( it != _inserts.end() )
         {
-            if( it == _inserts.begin() )
+            const bool first = ( it == _inserts.begin() );
+            const bool last  = ( std::next( it ) == _inserts.end() );
+            const auto next  = std::next( it );
+
+            // Keep the insert (its buffer) until the audio thread is done with it.
+            auto removed = std::make_shared<std::list<insertMeta>>();
+            removed->splice( removed->end(), _inserts, it );
+
+            if( first )
             {
-                _inserts.erase( it );
                 patchChainInputToFirstInput();
             }
-            else if( it == _inserts.end()-- )
+            else if( last )
             {
-                _inserts.erase( it );
                 patchLastOutputToChainOutput();
             }
             else
             {
-                auto next = _inserts.erase( it );
-                auto prev = next--;
-                ( *prev ).patch( ( *next ).getBuffer() );
+                std::prev( next )->patch( next->getBuffer() );
             }
+
+            publishInserts();
+            releaseWhenUnused( std::move( removed ) );
             return true;
         }
         return false;
+    }
+
+    void Chain::publishInserts()
+    {
+        auto list = std::make_unique<InsertList>();
+        list->inserts.reserve( _inserts.size() );
+        for( auto& insert : _inserts )
+            list->inserts.push_back( &insert );
+        _insertList.publish( std::move( list ) );
     }
 
     void Chain::setParameter( int index, float value )
@@ -269,10 +287,11 @@ namespace AudIO
             }
             else // !Muted
             {
-                if( _inserts.size() )
+                auto list = _insertList.get();
+                if( list && !list->inserts.empty() )
                 {
-                    for( auto& insert : _inserts )
-                        insert.process();
+                    for( auto insert : list->inserts )
+                        insert->process();
                 }
                 else
                 {

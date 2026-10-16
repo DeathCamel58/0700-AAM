@@ -69,6 +69,9 @@ namespace mt
 
     MTAudioTransportManager::~MTAudioTransportManager()
     {
+        // Song ticks still waiting in the message queue must not run.
+        transportAlive.reset();
+
         close();
 
         if( tickProcessingThread )
@@ -84,6 +87,23 @@ namespace mt
     {
         stop();
         playingSequence = nullptr;
+        waitForTickThread();
+    }
+
+    void MTAudioTransportManager::detachSequence( MTSequence* Sequence )
+    {
+        if( Sequence && Sequence == playingSequence.load() )
+            close();
+    }
+
+    void MTAudioTransportManager::waitForTickThread()
+    {
+        // The tick thread sets threadIsProcessingTick before it reads
+        // playingSequence, so once that is clear it cannot be using a
+        // sequence it read before playingSequence was cleared.
+        const auto deadline = juce::Time::getMillisecondCounter() + 1000;
+        while( threadIsProcessingTick.load() && juce::Time::getMillisecondCounter() < deadline )
+            std::this_thread::yield();
     }
 
     void MTAudioTransportManager::setup()
@@ -136,20 +156,20 @@ namespace mt
 
         if( auto s = getSequence( Seq ) )
         {
-            if( playingSequence && ( s != playingSequence ) )
+            if( auto playing = playingSequence.load(); playing && ( s != playing ) )
             {
-                playingSequence->stop();
+                playing->stop();
             }
             playingSequence = s;
             //playingSequence->updatePlayhead(); // redundant call as playingSequence->play() updates the playhead.
 
             if( isPaused() )
             {
-                playingSequence->resume();
+                s->resume();
             }
             else
             {
-                playingSequence->play();
+                s->play();
             }
 
             setTransportState( TransportState::Playing );
@@ -170,9 +190,9 @@ namespace mt
         setTransportState( TransportState::Paused );
 
         int retVal = -1;
-        if( playingSequence )
+        if( auto playing = playingSequence.load() )
         {
-            playingSequence->pause();
+            playing->pause();
             retVal = 0;
         }
         return retVal;
@@ -184,9 +204,9 @@ namespace mt
         setTransportState( TransportState::Stopped );
 
         int retVal = -1;
-        if( playingSequence )
+        if( auto playing = playingSequence.load() )
         {
-            playingSequence->stop();
+            playing->stop();
             retVal = 0;
         }
         return retVal;
@@ -210,9 +230,9 @@ namespace mt
 
     void MTAudioTransportManager::seek( int posInTicks )
     {
-        if( playingSequence )
+        if( auto playing = playingSequence.load() )
         {
-            playingSequence->seek( posInTicks );
+            playing->seek( posInTicks );
         }
     }
 
@@ -233,9 +253,37 @@ namespace mt
 
         curTick = Ticks;
         onTickEvent.signal();
-        if( curTick < prevTick )
-            prevTick = 0;
-        playTime += ( curTick - prevTick );
+
+        // Song mode and the switch to the next sequence start and stop
+        // sequences and tell the UI: do that on the message thread. Ticks
+        // that come before it gets to them are taken together.
+        songTick.store( Ticks );
+        if( !songTickPending.exchange( true ) )
+        {
+            juce::MessageManager::callAsync( [this, alive = std::weak_ptr<bool>( transportAlive )]() {
+                if( !alive.expired() )
+                    handleSongTick();
+            } );
+        }
+    }
+
+    void MTAudioTransportManager::handleSongTick()
+    {
+        songTickPending.store( false );
+
+        // A tick posted before the transport stopped is stale.
+        if( midiClock.isStopped() )
+            return;
+
+        const auto tick = songTick.load();
+        if( tick < lastSongTick )
+            lastSongTick = 0;
+        const auto previousTick = lastSongTick;
+        lastSongTick            = tick;
+        if( tick == previousTick )
+            return;
+
+        playTime += (int)( tick - previousTick );
 
         if( !playQueue.empty() )
         {
@@ -250,7 +298,8 @@ namespace mt
                     play( playQueue.front().seq );
                 }
                 playQueue.pop();
-                signals::onSongSequencePlay( playingSequence->getIndex(), -1, stepIndex );
+                if( auto playing = playingSequence.load() )
+                    signals::onSongSequencePlay( playing->getIndex(), -1, stepIndex );
             }
             else if( ( nextSequenceUpdateTicks <= playTime ) && ( nextSequenceUpdateTicks >= 0 ) )
             {
@@ -267,16 +316,20 @@ namespace mt
             }
         }
 
-        //Next Sequence
-        if( playingSequence && nextSequenceToPlay >= 0 )
+        //Next Sequence: when the playing sequence reaches its end (a
+        // multiple of its length), even if that tick was taken together
+        // with others.
+        auto playing = playingSequence.load();
+        if( playing && nextSequenceToPlay >= 0 )
         {
-            auto length        = playingSequence->isLooping.get() ? playingSequence->loopEnd.get() - playingSequence->loopStart.get() : (int)playingSequence->length.get();
-            auto lengthInTicks = length * playingSequence->getTicksPerBar();
-            if( curTick % lengthInTicks == 0 )
+            auto length        = playing->isLooping.get() ? playing->loopEnd.get() - playing->loopStart.get() : (int)playing->length.get();
+            auto lengthInTicks = (unsigned int)( length * playing->getTicksPerBar() );
+            if( 0 < lengthInTicks && ( tick / lengthInTicks ) != ( previousTick / lengthInTicks ) )
             {
                 play( nextSequenceToPlay );
                 nextSequenceToPlay = -1;
-                signals::onNextSequencePlay( playingSequence->getIndex() );
+                if( auto next = playingSequence.load() )
+                    signals::onNextSequencePlay( next->getIndex() );
             }
         }
     }
@@ -294,9 +347,9 @@ namespace mt
 
                 prevTick.store( curTick );
 
-                if( playingSequence )
+                if( auto playing = playingSequence.load() )
                 {
-                    playingSequence->onTick( curTick );
+                    playing->onTick( curTick );
                 }
             } catch( ... )
             {
@@ -307,50 +360,58 @@ namespace mt
 
     void MTAudioTransportManager::updatePlayheads()
     {
-        if( playingSequence )
+        if( auto playing = playingSequence.load() )
         {
-            playingSequence->playheadLocalToGlobal();
+            playing->playheadLocalToGlobal();
 
-            if( MTTrack* pTrack = playingSequence->getSelectedTrackPtr() )
+            if( MTTrack* pTrack = playing->getSelectedTrackPtr() )
                 MTAudioSequenceManager::getTrackPlayhead() = pTrack->playhead();
         }
     }
 
     void MTAudioTransportManager::onBeat()
     {
-        if( playingSequence )
-            playingSequence->onBeat();
+        if( auto playing = playingSequence.load() )
+            playing->onBeat();
     }
 
+    // Called on the tick thread, at a bar.
     void MTAudioTransportManager::onBar()
     {
-        if( playingSequence )
+        if( playingSequence.load() )
         {
-            if( _nextBar.isEnabled.load() )
+            if( _nextBar.isEnabled.exchange( false ) )
             {
-                _nextBar.isEnabled.store( false );
-                _nextBar.fromBegin.load() ? play( _nextBar.seq.load() ) : resume( _nextBar.seq.load() );
-                signals::onNextSequencePlay( _nextBar.seq.load() );
+                // Starting a sequence changes the transport and tells the UI:
+                // do it on the message thread.
+                const auto seq       = _nextBar.seq.load();
+                const auto fromBegin = _nextBar.fromBegin.load();
+                juce::MessageManager::callAsync( [this, seq, fromBegin, alive = std::weak_ptr<bool>( transportAlive )]() {
+                    if( alive.expired() )
+                        return;
+                    fromBegin ? play( seq ) : resume( seq );
+                    signals::onNextSequencePlay( seq );
+                } );
             }
         }
     }
 
     void MTAudioTransportManager::onStart( unsigned int BeginTick )
     {
-        if( playingSequence )
-            playingSequence->onStart( BeginTick );
+        if( auto playing = playingSequence.load() )
+            playing->onStart( BeginTick );
     }
 
     void MTAudioTransportManager::onLoopBegin( unsigned int BeginTick )
     {
-        if( playingSequence )
-            playingSequence->onLoopBegin( BeginTick );
+        if( auto playing = playingSequence.load() )
+            playing->onLoopBegin( BeginTick );
     }
 
     void MTAudioTransportManager::onLoopEnd( unsigned int EndTick, unsigned int LoopCount )
     {
-        if( playingSequence )
-            playingSequence->onLoopEnd( EndTick, LoopCount );
+        if( auto playing = playingSequence.load() )
+            playing->onLoopEnd( EndTick, LoopCount );
     }
 
     void MTAudioTransportManager::setupSong( MTSongInfo SongInfo, int Index )
@@ -417,7 +478,7 @@ namespace mt
     void MTAudioTransportManager::resetSong()
     {
         playTime                = 0;
-        prevTick                = 0;
+        lastSongTick            = 0;
         nextSequenceUpdateTicks = -1;
     }
 
@@ -440,6 +501,6 @@ namespace mt
     void MTAudioTransportManager::setNextBarFlag( bool NextBarFlag )
     {
         _nextBar.isEnabled = NextBarFlag;
-        _nextBar.seq       = nextSequenceToPlay == -1 ? playingSequence->getIndex() : nextSequenceToPlay;
+        _nextBar.seq       = nextSequenceToPlay == -1 ? playingSequence.load()->getIndex() : nextSequenceToPlay;
     }
 }

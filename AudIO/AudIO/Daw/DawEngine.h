@@ -48,6 +48,11 @@ namespace AudIO
 
         // Audio Design
         void reset();
+
+        // Returns once the audio thread has applied the graph changes made
+        // so far and finished the block it was running, if any. False on
+        // timeout (the audio thread is stuck).
+        bool waitForAudioThread();
         bool addAudioDevice( const std::string& name, IAudioDevice* device, bool master );
 
         void startAudioDevice( unsigned int SampleRate, unsigned int BlockSize ) const;
