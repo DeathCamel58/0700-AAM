@@ -79,9 +79,9 @@ namespace AudIO
             }
             else
             {
-                it = _inserts.begin();
-                if( pos > _inserts.size() )
-                    it = std::prev( _inserts.end() );
+                // A position past the end (POS_END) appends.
+                if( pos >= _inserts.size() )
+                    it = _inserts.end();
                 else
                     it = std::next( _inserts.begin(), pos );
 
@@ -100,10 +100,9 @@ namespace AudIO
                 }
                 patchChainInputToFirstInput();
             }
-            else if( it == _inserts.end()-- )
+            else if( std::next( it ) == _inserts.end() )
             {
-                it--;
-                ( *it ).patch( _inserts.back().getBuffer() );
+                std::prev( it )->patch( it->getBuffer() );
                 patchLastOutputToChainOutput();
             }
             else

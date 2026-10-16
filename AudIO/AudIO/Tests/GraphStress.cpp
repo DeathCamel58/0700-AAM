@@ -30,8 +30,9 @@
 //       AudIO/Tests/GraphStress.cpp -o GraphStress -lpthread
 //   ./GraphStress 30
 //
-// It passes when the sanitizer reports nothing and the memory pool holds
-// only the stand-in device's buffers once the design is gone.
+// It first checks a few behaviors on their own (chain inserts). It passes
+// when those checks pass, the sanitizer reports nothing and the memory pool
+// holds only the stand-in device's buffers once the design is gone.
 
 #include "AudIO.h"
 
@@ -54,6 +55,7 @@ namespace AudIO
 #include <cstdlib>
 #include <random>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -101,6 +103,125 @@ namespace
 
         void process( AudIO::Buffer<float>& B ) override { DawInserts::process( B ); }
     };
+
+    // A stand-in audio thread for the checks below. Look at the device's
+    // outputs only while it is stopped.
+    struct Player
+    {
+        Player( AudIO::Design& D, AudIO::Buffer<float>& Device )
+            : design( D ), device( Device ) {}
+
+        ~Player() { stop(); }
+
+        void start()
+        {
+            running.store( true );
+            thread = std::thread( [this] {
+                while( running.load() )
+                {
+                    design.process( device );
+                    ++blocks;
+                    std::this_thread::sleep_for( std::chrono::microseconds( 200 ) );
+                }
+            } );
+        }
+
+        void stop()
+        {
+            running.store( false );
+            if( thread.joinable() )
+                thread.join();
+        }
+
+        void waitBlocks( long Count )
+        {
+            const auto target = blocks.load() + Count;
+            while( blocks.load() < target )
+                std::this_thread::sleep_for( std::chrono::microseconds( 100 ) );
+        }
+
+        AudIO::Design&        design;
+        AudIO::Buffer<float>& device;
+        std::atomic<bool>     running{ false };
+        std::atomic<long>     blocks{ 0 };
+        std::thread           thread;
+    };
+
+    bool check( bool Condition, const char* What )
+    {
+        if( !Condition )
+            std::printf( "FAILED: %s\n", What );
+        return Condition;
+    }
+
+    float outputLevel( AudIO::Buffer<float>& Device )
+    {
+        auto out = Device.getOutputBuffer( 0 );
+        return out ? out[Device.getBlockSize() - 1] : 0.f;
+    }
+
+    // A chain's inserts, added at the head, the middle and the tail (several
+    // times), before and while it plays, must all be wired in: every Gain
+    // halves the level. Burst: change the chain several times between two
+    // blocks.
+    bool checkChainInserts( bool Burst )
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto chain  = design->createChain( true );
+        auto source = design->createObject( std::make_unique<Source>() );
+        design->patch( source, chain );
+        design->setDesignOutput( chain, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        Player               player( *design, device );
+        bool                 ok = true;
+
+        std::vector<uint32_t> inserts;
+        auto                  settle = [&] {
+            if( player.running.load() && !Burst )
+                player.waitBlocks( 2 );
+        };
+        auto add = [&]( uint32_t Pos ) {
+            auto id = design->createInsert( chain, "TestGain" );
+            ok &= check( design->addInsert( chain, id, Pos ), "adding an insert" );
+            inserts.push_back( id );
+            settle();
+        };
+        auto remove = [&]( uint32_t Pos ) {
+            ok &= check( design->removeInsertByPos( chain, Pos ), "removing an insert" );
+            settle();
+        };
+        auto expect = [&]( int Gains, const char* What ) {
+            player.waitBlocks( 4 );
+            player.stop();
+            ok &= check( ( 0.25f / (float)( 1 << Gains ) ) == outputLevel( device ), What );
+            player.start();
+        };
+
+        // Not playing yet: the patches are made at once.
+        add( AudIO::POS_END );
+        add( 1 ); // The tail.
+
+        design->prepareToPlay( 48000, BLOCK );
+        player.start();
+        expect( 2, "two inserts each halve the level" );
+
+        add( 2 ); // The tail.
+        add( AudIO::POS_END );
+        add( 0 ); // The head.
+        add( 2 ); // The middle.
+        add( (uint32_t)inserts.size() ); // The tail.
+        expect( 7, "seven inserts each halve the level" );
+
+        remove( 6 ); // The tail.
+        remove( 0 ); // The head.
+        remove( 2 ); // The middle.
+        expect( 4, "four inserts left each halve the level" );
+
+        player.stop();
+        design->teardown();
+        return ok;
+    }
 } // namespace
 
 int main( int argc, char** argv )
@@ -108,6 +229,9 @@ int main( int argc, char** argv )
     const int seconds = ( argc > 1 ) ? std::atoi( argv[1] ) : 5;
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
+
+    if( !checkChainInserts( false ) )
+        return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
     auto out    = design->createBus();
