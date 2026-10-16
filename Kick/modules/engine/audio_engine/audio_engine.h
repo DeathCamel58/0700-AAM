@@ -59,6 +59,7 @@
 
 // Module include files...
     #include "engine/mt_audio_metronome.h"
+    #include "engine/mt_audio_device.h"
     #include "engine/mt_audio_manager.h"
     #include "engine/mt_audio_note.h"
     #include "engine/mt_audio_sequence.h"

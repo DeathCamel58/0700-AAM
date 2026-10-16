@@ -140,6 +140,18 @@ add_compile_definitions(
     KICK_CV_DAC_I2C_DEVICE="${KICK_CV_DAC_I2C_DEVICE}"
 )
 
+## The audio device the engine plays through (mt_audio_device.cpp): a JUCE
+## device type ("ALSA", "ALSA HW", "JACK") and a device of that type, matched
+## against the names JUCE lists for it (exactly, as a wildcard pattern or as a
+## part of the name). An empty device: the type's default device, which for
+## ALSA is the "default" PCM set up in /etc/asound.conf.
+set(KICK_AUDIO_DEVICE_TYPE "ALSA" CACHE STRING "JUCE audio device type of the engine's audio device")
+set(KICK_AUDIO_DEVICE      ""     CACHE STRING "Engine's audio device; empty: the type's default device")
+add_compile_definitions(
+    KICK_AUDIO_DEVICE_TYPE="${KICK_AUDIO_DEVICE_TYPE}"
+    KICK_AUDIO_DEVICE="${KICK_AUDIO_DEVICE}"
+)
+
 ## A systemd unit that performs the factory reset (kick_Hwpref.cpp); empty:
 ## the application removes its own projects and preferences.
 set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
