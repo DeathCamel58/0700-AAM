@@ -308,13 +308,10 @@ namespace mt
     {
         std::string serialNo = "000000000";
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::string path = "/sys/devices/soc0/serial_number";
-
-        std::ifstream serialFile( path.c_str() );
-        if( serialFile.is_open() )
-        {
-            serialFile >> serialNo;
-        }
+        // The SoC's unique ID, from the kernel's soc bus.
+        const std::string serial = sysfile::readLine( "/sys/devices/soc0/serial_number" );
+        if( !serial.empty() )
+            serialNo = serial;
 #endif
         return juce::String( serialNo );
     }
