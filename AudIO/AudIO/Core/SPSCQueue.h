@@ -28,6 +28,8 @@ public:
         return true;
     }
 
+    bool isEmpty() const { return readPos.load() == writePos.load(); }
+
 private:
     constexpr size_t getNextPosition(size_t pos)
     {
