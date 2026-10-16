@@ -1,3 +1,5 @@
 add_subdirectory(sequencer_stress)
 add_subdirectory(pad_stress)
 add_subdirectory(clock_stress)
+add_subdirectory(mcu_frame)
+add_subdirectory(wifi_manager)
