@@ -89,16 +89,39 @@ namespace mt
     void MTAudioTransportManager::close()
     {
         stop();
-        playingSequence = nullptr;
+        {
+            const std::lock_guard<std::mutex> sl( switchLock );
+            playingSequence = nullptr;
+            nextBarSwitch   = {};
+            endSwitch       = {};
+            songSwitch      = {};
+            songSwitchArmed = false;
+        }
         waitForTickThread();
     }
 
     void MTAudioTransportManager::detachSequence( MTSequence* Sequence )
     {
-        if( Sequence && Sequence == playingSequence.load() )
-            close();
-        else
-            waitForTickThread(); // It may have been playing until just now.
+        if( !Sequence )
+            return;
+
+        bool isPlaying;
+        {
+            // Once it is not armed, the tick thread cannot switch to it.
+            const std::lock_guard<std::mutex> sl( switchLock );
+            for( auto* pending : { &nextBarSwitch, &endSwitch, &songSwitch } )
+                if( pending->sequence == Sequence )
+                    *pending = {};
+            isPlaying = ( Sequence == playingSequence.load() );
+        }
+
+        if( isPlaying )
+        {
+            stop();
+            const std::lock_guard<std::mutex> sl( switchLock );
+            playingSequence = nullptr;
+        }
+        waitForTickThread(); // It may have been playing until just now.
     }
 
     void MTAudioTransportManager::waitForTickThread()
@@ -175,20 +198,10 @@ namespace mt
 
         if( auto s = getSequence( Seq ) )
         {
-            if( auto playing = playingSequence.load(); playing && ( s != playing ) )
+            const auto resume = isPaused();
             {
-                playing->stop();
-            }
-            playingSequence = s;
-            //playingSequence->updatePlayhead(); // redundant call as playingSequence->play() updates the playhead.
-
-            if( isPaused() )
-            {
-                s->resume();
-            }
-            else
-            {
-                s->play();
+                const std::lock_guard<std::mutex> sl( switchLock );
+                startSequence( s, resume );
             }
 
             setTransportState( TransportState::Playing );
@@ -205,29 +218,33 @@ namespace mt
 
     int MTAudioTransportManager::pause()
     {
-        midiClock.stop();
-        setTransportState( TransportState::Paused );
-
         int retVal = -1;
-        if( auto playing = playingSequence.load() )
         {
-            playing->pause();
-            retVal = 0;
+            const std::lock_guard<std::mutex> sl( switchLock );
+            midiClock.stop();
+            if( auto playing = playingSequence.load() )
+            {
+                playing->pause();
+                retVal = 0;
+            }
         }
+        setTransportState( TransportState::Paused );
         return retVal;
     }
 
     int MTAudioTransportManager::stop()
     {
-        midiClock.stop();
-        setTransportState( TransportState::Stopped );
-
         int retVal = -1;
-        if( auto playing = playingSequence.load() )
         {
-            playing->stop();
-            retVal = 0;
+            const std::lock_guard<std::mutex> sl( switchLock );
+            midiClock.stop();
+            if( auto playing = playingSequence.load() )
+            {
+                playing->stop();
+                retVal = 0;
+            }
         }
+        setTransportState( TransportState::Stopped );
         return retVal;
     }
 
@@ -235,24 +252,72 @@ namespace mt
     {
         if( Now )
             return FromBeginning ? play( Seq ) : resume( Seq );
-        else
-        {
-            if( auto s = getSequence( Seq ) )
-            {
-                _nextBar.seq.store( Seq );
-                _nextBar.fromBegin.store( FromBeginning );
-                _nextBar.isEnabled.store( true );
-            }
-        }
+
+        // At the bar the transport is playing, so starting the sequence
+        // from the beginning and resuming it (play()) come to the same.
+        if( getSequence( Seq ) )
+            armSwitch( nextBarSwitch, Seq );
         return -1;
     }
 
     void MTAudioTransportManager::seek( int posInTicks )
     {
+        const std::lock_guard<std::mutex> sl( switchLock );
         if( auto playing = playingSequence.load() )
         {
             playing->seek( posInTicks );
         }
+    }
+
+    // Caller holds switchLock.
+    void MTAudioTransportManager::startSequence( MTSequence* Sequence, bool Resume )
+    {
+        if( auto playing = playingSequence.load(); playing && ( Sequence != playing ) )
+            playing->stop();
+        playingSequence = Sequence;
+
+        if( Resume )
+            Sequence->resume();
+        else
+            Sequence->play();
+    }
+
+    // Message thread.
+    void MTAudioTransportManager::armSwitch( PendingSwitch& Switch, int Index )
+    {
+        // The tick thread cannot read the project: bring the sequence's
+        // notes up to date for it now.
+        auto sequence = ( 0 <= Index ) ? getSequence( Index ) : nullptr;
+        if( sequence )
+            sequence->prepareToPlay();
+
+        const std::lock_guard<std::mutex> sl( switchLock );
+        Switch = { sequence, sequence ? Index : -1 };
+    }
+
+    // Message thread: arm the switch to the song step at the front of the
+    // queue.
+    void MTAudioTransportManager::armSongStep()
+    {
+        PendingSwitch next;
+        unsigned int  after = 0;
+        const auto    armed = !playQueue.empty();
+        if( armed )
+        {
+            const auto& step = playQueue.front();
+            if( auto sequence = step.isEnabled ? getSequence( step.seq ) : nullptr )
+            {
+                sequence->prepareToPlay();
+                next = { sequence, step.seq };
+            }
+            after = (unsigned int)juce::jmax( 0, step.timeInTicks );
+        }
+
+        const std::lock_guard<std::mutex> sl( switchLock );
+        songSwitch           = next;
+        songSwitchArmed      = armed;
+        songSwitchTicks      = after;
+        songSwitchGeneration = songGeneration;
     }
 
     /// Callback functions...
@@ -273,9 +338,8 @@ namespace mt
         curTick = Ticks;
         onTickEvent.signal();
 
-        // Song mode and the switch to the next sequence start and stop
-        // sequences and tell the UI: do that on the message thread. Ticks
-        // that come before it gets to them are taken together.
+        // Song mode's bookkeeping tells the UI: do that on the message
+        // thread. Ticks that come before it gets to them are taken together.
         songTick.store( Ticks );
         if( !songTickPending.exchange( true ) )
         {
@@ -307,20 +371,8 @@ namespace mt
         if( !playQueue.empty() )
         {
             if( nextSequenceUpdateTicks == -1 ) nextSequenceUpdateTicks = playQueue.size() ? playQueue.front().nextSeqUpdateTicks : -1;
-            if( playQueue.front().timeInTicks <= playTime )
-            {
-                ++stepIndex;
-                resetSong();
-                if( playQueue.front().isEnabled )
-                {
-                    setSelectedSequence( playQueue.front().seq );
-                    play( playQueue.front().seq );
-                }
-                playQueue.pop();
-                if( auto playing = playingSequence.load() )
-                    signals::onSongSequencePlay( playing->getIndex(), -1, stepIndex );
-            }
-            else if( ( nextSequenceUpdateTicks <= playTime ) && ( nextSequenceUpdateTicks >= 0 ) )
+            // The tick thread starts the step when it is due (sequenceSwitched()).
+            if( ( playQueue.front().timeInTicks > playTime ) && ( nextSequenceUpdateTicks <= playTime ) && ( nextSequenceUpdateTicks >= 0 ) )
             {
                 nextSequenceUpdateTicks = -2;
                 signals::onNextSeqAboutToPlayInSong( playQueue.front().seq );
@@ -334,22 +386,94 @@ namespace mt
                 resetSong();
             }
         }
+    }
 
-        //Next Sequence: when the playing sequence reaches its end (a
+    // Tick thread, after a tick: make the switch armed for it. Starting a
+    // sequence there, at the tick, keeps the previous one from playing on
+    // until the message thread gets to it; the message thread then does
+    // the rest (song state, selection, telling the UI).
+    void MTAudioTransportManager::processPendingSwitches( unsigned int Tick, unsigned int PreviousTick )
+    {
+        const auto atBar = std::exchange( barReached, false );
+
+        const std::lock_guard<std::mutex> sl( switchLock );
+
+        // Nothing plays, or it was paused or stopped since the tick.
+        auto playing = playingSequence.load();
+        if( !playing || midiClock.isStopped() )
+            return;
+
+        // The clock restarts at 0 when a sequence plays from the start.
+        const auto previous = ( Tick >= PreviousTick ) ? PreviousTick : 0u;
+        songTicks += Tick - previous;
+
+        if( songSwitchArmed && songTicks >= songSwitchTicks )
+        {
+            songSwitchArmed = false;
+            songTicks       = 0;
+            switchSequence( SwitchKind::SongStep, std::exchange( songSwitch, {} ) );
+            return;
+        }
+
+        // Next sequence: when the playing sequence reaches its end (a
         // multiple of its length), even if that tick was taken together
         // with others.
-        auto playing = playingSequence.load();
-        if( playing && nextSequenceToPlay >= 0 )
+        if( endSwitch.sequence )
         {
             auto length        = playing->isLooping.get() ? playing->loopEnd.get() - playing->loopStart.get() : (int)playing->length.get();
             auto lengthInTicks = (unsigned int)( length * playing->getTicksPerBar() );
-            if( 0 < lengthInTicks && ( tick / lengthInTicks ) != ( previousTick / lengthInTicks ) )
+            if( 0 < lengthInTicks && ( Tick / lengthInTicks ) != ( previous / lengthInTicks ) )
             {
-                play( nextSequenceToPlay );
-                nextSequenceToPlay = -1;
-                if( auto next = playingSequence.load() )
-                    signals::onNextSequencePlay( next->getIndex() );
+                switchSequence( SwitchKind::NextSequence, std::exchange( endSwitch, {} ) );
+                return;
             }
+        }
+
+        if( atBar && nextBarSwitch.sequence )
+            switchSequence( SwitchKind::NextBar, std::exchange( nextBarSwitch, {} ) );
+    }
+
+    // Tick thread, holding switchLock.
+    void MTAudioTransportManager::switchSequence( SwitchKind Kind, const PendingSwitch& Switch )
+    {
+        if( Switch.sequence )
+            startSequence( Switch.sequence, false );
+
+        juce::MessageManager::callAsync( [this, Kind, index = Switch.index, generation = songSwitchGeneration, alive = std::weak_ptr<bool>( transportAlive )]() {
+            if( !alive.expired() )
+                sequenceSwitched( Kind, index, generation );
+        } );
+    }
+
+    // Message thread, after the tick thread switched to sequence Index.
+    void MTAudioTransportManager::sequenceSwitched( SwitchKind Kind, int Index, uint32_t Generation )
+    {
+        switch( Kind )
+        {
+            case SwitchKind::SongStep:
+                // A song set up since has its own steps.
+                if( Generation != songGeneration || playQueue.empty() )
+                    return;
+
+                ++stepIndex;
+                resetSong();
+                if( playQueue.front().isEnabled )
+                    setSelectedSequence( playQueue.front().seq );
+                playQueue.pop();
+                armSongStep();
+                if( auto playing = playingSequence.load() )
+                    signals::onSongSequencePlay( playing->getIndex(), -1, stepIndex );
+                break;
+
+            case SwitchKind::NextSequence:
+                if( nextSequenceToPlay == Index )
+                    nextSequenceToPlay = -1;
+                signals::onNextSequencePlay( Index );
+                break;
+
+            case SwitchKind::NextBar:
+                signals::onNextSequencePlay( Index );
+                break;
         }
     }
 
@@ -364,12 +488,15 @@ namespace mt
             {
                 const ScopedAtomicResetter<bool> resetter( threadIsProcessingTick, false, true );
 
-                prevTick.store( curTick );
+                const auto tick     = curTick.load();
+                const auto previous = prevTick.exchange( tick );
 
                 if( auto playing = playingSequence.load() )
                 {
-                    playing->onTick( curTick );
+                    playing->onTick( tick );
                 }
+
+                processPendingSwitches( tick, previous );
             } catch( ... )
             {
                 DBG( "Exception While tick Processing..." );
@@ -396,25 +523,11 @@ namespace mt
             playing->onBeat();
     }
 
-    // Called on the tick thread, at a bar.
+    // Called on the tick thread, at a bar, inside the playing sequence's
+    // onTick(): the switch armed for the bar is made once that returns.
     void MTAudioTransportManager::onBar()
     {
-        if( playingSequence.load() )
-        {
-            if( _nextBar.isEnabled.exchange( false ) )
-            {
-                // Starting a sequence changes the transport and tells the UI:
-                // do it on the message thread.
-                const auto seq       = _nextBar.seq.load();
-                const auto fromBegin = _nextBar.fromBegin.load();
-                juce::MessageManager::callAsync( [this, seq, fromBegin, alive = std::weak_ptr<bool>( transportAlive )]() {
-                    if( alive.expired() )
-                        return;
-                    fromBegin ? play( seq ) : resume( seq );
-                    signals::onNextSequencePlay( seq );
-                } );
-            }
-        }
+        barReached = true;
     }
 
     void MTAudioTransportManager::onStart( unsigned int BeginTick )
@@ -483,6 +596,14 @@ namespace mt
             setSelectedSequence( firstSeq );
             play( firstSeq );
 
+            // Steps of a song set up before must not be taken for these.
+            ++songGeneration;
+            {
+                const std::lock_guard<std::mutex> sl( switchLock );
+                songTicks = 0;
+            }
+            armSongStep();
+
             //Update UI
             if( SongInfo.steps[Index].bars == 1 )
                 signals::onSongSequencePlay( SongInfo.steps[Index].seqNo, Index + 1 < SongInfo.steps.size() ? SongInfo.steps[Index + 1].seqNo : -1, Index );
@@ -515,13 +636,14 @@ namespace mt
 
     void MTAudioTransportManager::setNextSequence( int NextSequence )
     {
-        if( nextSequenceToPlay != NextSequence )
-            nextSequenceToPlay = NextSequence;
+        nextSequenceToPlay = NextSequence;
+        armSwitch( endSwitch, NextSequence );
     }
 
     void MTAudioTransportManager::setNextBarFlag( bool NextBarFlag )
     {
-        _nextBar.isEnabled = NextBarFlag;
-        _nextBar.seq       = nextSequenceToPlay == -1 ? playingSequence.load()->getIndex() : nextSequenceToPlay;
+        auto       playing = playingSequence.load();
+        const auto seq     = nextSequenceToPlay == -1 ? ( playing ? playing->getIndex() : -1 ) : nextSequenceToPlay;
+        armSwitch( nextBarSwitch, NextBarFlag ? seq : -1 );
     }
 }

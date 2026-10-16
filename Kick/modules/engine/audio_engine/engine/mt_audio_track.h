@@ -85,6 +85,7 @@ namespace mt
         MTIProgram* getProgram() const;
         int         setProgram( MTIProgram* p );
 
+        void prepareToPlay(); // Message thread.
         void play();
         void resume();
         void pause();

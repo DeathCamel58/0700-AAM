@@ -600,6 +600,8 @@ namespace mt
     {
         seekSeqenceInternal( posInTicks );
 
+        // Also on the tick thread, when it switches to this sequence.
+        const juce::ScopedLock sl( lock );
         for( const auto& track : tracks )
             track->seek( tickPos );
     }
@@ -636,8 +638,11 @@ namespace mt
         sequencePlayhead.clear();
     }
 
+    // Message thread, before the tick thread may start the sequence.
     void MTSequence::prepareToPlay()
     {
+        for( const auto& it : tracks )
+            it->prepareToPlay();
     }
 
     void MTSequence::play()
@@ -652,8 +657,11 @@ namespace mt
         seek( sequencePlayhead.bnb );
 
         // Set all tracks to play.
-        for( const auto& it : tracks )
-            it->play();
+        {
+            const juce::ScopedLock sl( lock );
+            for( const auto& it : tracks )
+                it->play();
+        }
 
         // Emit signals...
         onStart( tickPos );
@@ -667,8 +675,11 @@ namespace mt
 
     void MTSequence::resume()
     {
-        for( const auto& it : tracks )
-            it->resume();
+        {
+            const juce::ScopedLock sl( lock );
+            for( const auto& it : tracks )
+                it->resume();
+        }
 
         // Start Midi clock...
         isPlaying = true;
@@ -681,6 +692,7 @@ namespace mt
         isPlaying = false;
         getMidiClock().stop();
 
+        const juce::ScopedLock sl( lock );
         for( const auto& it : tracks )
             it->pause();
     }
@@ -690,6 +702,7 @@ namespace mt
         isPlaying = false;
         getMidiClock().stop();
 
+        const juce::ScopedLock sl( lock );
         for( const auto& it : tracks )
             it->stop();
     }

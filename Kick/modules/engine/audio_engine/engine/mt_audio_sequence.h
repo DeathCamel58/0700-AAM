@@ -192,7 +192,7 @@ namespace mt
         juce::File            seqMidiFile;
 
         bool             initialized{ false };
-        bool             isPlaying{ false };
+        std::atomic<bool> isPlaying{ false }; // Also set by the tick thread when it switches sequences.
         int              selectedTrack{ 0 };
         juce::BigInteger soloingTracks;
 

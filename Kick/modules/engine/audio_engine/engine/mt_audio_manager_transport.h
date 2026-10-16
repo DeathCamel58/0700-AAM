@@ -78,6 +78,28 @@ namespace mt
         void waitForTickThread();
 
     private:
+        // A sequence the tick thread switches to at a tick, armed by the
+        // message thread.
+        struct PendingSwitch
+        {
+            MTSequence* sequence{ nullptr };
+            int         index{ -1 };
+        };
+
+        enum class SwitchKind
+        {
+            SongStep,
+            NextSequence,
+            NextBar,
+        };
+
+        void armSwitch( PendingSwitch& Switch, int Index );
+        void armSongStep();
+        void startSequence( MTSequence* Sequence, bool Resume );
+        void stopPlayingSequence( bool Pause );
+        void processPendingSwitches( unsigned int Tick, unsigned int PreviousTick );
+        void switchSequence( SwitchKind Kind, const PendingSwitch& Switch );
+        void sequenceSwitched( SwitchKind Kind, int Index, uint32_t Generation );
         void handleSongTick();
         void onTick( unsigned int Ticks ) override;
         void onBeat();
@@ -93,15 +115,22 @@ namespace mt
         CMidiClock&     midiClock{ getMidiClock() };
         juce::ValueTree runtimeVT{ IDs::RUNTIME };
 
-        // Written on the message thread, read by the tick thread.
+        // Changed under switchLock (by the message thread, or by the tick
+        // thread when it switches sequences); the tick thread reads it.
         std::atomic<MTSequence*> playingSequence{ nullptr };
 
-        struct PlayOnNextBar
-        {
-            std::atomic<bool> isEnabled{ false };
-            std::atomic<bool> fromBegin{ true };
-            std::atomic<int>  seq{ 0 };
-        };
+        // Guards starting and stopping the playing sequence (and the clock),
+        // and the switches below. The tick thread takes it after a tick, never
+        // while it holds a sequence's or a track's lock.
+        std::mutex    switchLock;
+        PendingSwitch nextBarSwitch; // At the playing sequence's next bar.
+        PendingSwitch endSwitch; // When the playing sequence reaches its end.
+        PendingSwitch songSwitch; // The next song step...
+        bool          songSwitchArmed{ false };
+        unsigned int  songSwitchTicks{ 0 }; // ...once the current one has played this long.
+        unsigned int  songTicks{ 0 }; // How long the current step has played.
+        uint32_t      songSwitchGeneration{ 0 };
+        bool          barReached{ false }; // Tick thread only.
 
         struct PlayManager
         {
@@ -114,6 +143,7 @@ namespace mt
         };
 
         // Song mode, on the message thread.
+        uint32_t                songGeneration{ 0 };
         int                     stepIndex{ -1 };
         int                     lastSeqTicks{ 0 };
         int                     nextSequenceUpdateTicks{ -1 };
@@ -127,7 +157,6 @@ namespace mt
         std::shared_ptr<bool>     transportAlive{ std::make_shared<bool>( true ) };
 
         int                       nextSequenceToPlay{ -1 };
-        PlayOnNextBar             _nextBar;
         std::atomic<bool>         stopTickProcessing{ false };
         std::atomic<bool>         threadIsProcessingTick{ false };
         std::atomic<uint32_t>     ticksProcessed{ 0 };
