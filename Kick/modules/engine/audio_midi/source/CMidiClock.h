@@ -21,6 +21,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
+
 namespace mt
 {
     constexpr int MAX_EXT_INTERVALS   = 24;
@@ -41,6 +44,20 @@ namespace mt
         virtual void onPause( unsigned int ) {} // Tick count at Pause
     };
 
+    //
+    // CMidiClock: the sequencer's clock. Its HighResolutionTimer thread runs
+    // tickInternal(); the tick thread and the message thread start, stop and
+    // set the tempo; a MIDI input thread may run tickExternal().
+    //
+    // The control functions (start, stop, tempo, PPQN, sync mode,
+    // tickExternal) are serialized by a lock, which the timer thread never
+    // takes: stopping waits for the timer's tick, so the counters the tick
+    // uses are only reset while the timer is stopped. A new tempo reaches a
+    // running timer as a request it takes up at its next tick, so that the
+    // tempo ramp, the tick factor and the period are the timer thread's
+    // alone while it runs. The state, the sync mode and what tickExternal()
+    // shares with the timer are atomics.
+    //
     class CMidiClock : private juce::HighResolutionTimer
     {
     public:
@@ -82,8 +99,8 @@ namespace mt
         void stop() noexcept;
 
         // Clock state API's...
-        inline bool isRunning() const noexcept { return state != ClockState::STOPPED; }
-        inline bool isStopped() const noexcept { return state == ClockState::STOPPED; }
+        inline bool isRunning() const noexcept { return state.load() != ClockState::STOPPED; }
+        inline bool isStopped() const noexcept { return state.load() == ClockState::STOPPED; }
 
         // PPQN factors...
         void           setInternalPPQN( PPQNResolution resolution );
@@ -101,10 +118,10 @@ namespace mt
         void tickInternal();
 
         // Clock Synchronization mode.
-        void        setClockSyncMode( SyncMode tempo_mode ) noexcept { syncMode = tempo_mode; }
-        SyncMode    getClockSyncMode() const noexcept { return syncMode; };
-        inline bool isInternalClockSync() const noexcept { return syncMode == SyncMode::INTERNAL_CLOCK; };
-        inline bool isExternalClockSync() const noexcept { return syncMode == SyncMode::EXTERNAL_CLOCK; };
+        void        setClockSyncMode( SyncMode tempo_mode ) noexcept { syncMode.store( tempo_mode ); }
+        SyncMode    getClockSyncMode() const noexcept { return syncMode.load(); };
+        inline bool isInternalClockSync() const noexcept { return syncMode.load() == SyncMode::INTERNAL_CLOCK; };
+        inline bool isExternalClockSync() const noexcept { return syncMode.load() == SyncMode::EXTERNAL_CLOCK; };
 
         // Calculations...
         static float tempoToMicros( float Tempo ) noexcept { return ( MICROS_IN_MINUTE / Tempo ); }
@@ -122,6 +139,8 @@ namespace mt
         static void setPlatformTimerInterval( [[maybe_unused]] float microSeconds );
         static void handlePlatformTimer();
 
+        void     takeTempoRequest( bool UpdateInterval );
+        void     applyTempo( float Bpm, int RampSteps, bool UpdateInterval );
         void     resetCounters();
         void     resetExternalClockCounters();
         uint32_t averageOfExternalIntervals() const noexcept;
@@ -138,17 +157,27 @@ namespace mt
         PPQNResolution intPPQN = PPQN_96;
         PPQNResolution extPPQN = PPQN_24;
 
+        // Serializes the control functions; never taken by the timer thread.
+        std::recursive_mutex controlLock;
+
         // External clock control
-        bool extClockFirstInterval{ false };
-        bool syncTempo{ false };
+        bool              extClockFirstInterval{ false };
+        std::atomic<bool> syncTempo{ false };
 
-        ClockState state{ ClockState::STOPPED };
-        SyncMode   syncMode{ SyncMode::INTERNAL_CLOCK };
+        std::atomic<ClockState> state{ ClockState::STOPPED };
+        std::atomic<SyncMode>   syncMode{ SyncMode::INTERNAL_CLOCK };
 
-        uint32_t microsPerQuarterNote{ 0 };
-        uint32_t ticks{ 0 };
-        uint32_t intClockSyncPulses{ 0 };
-        uint32_t extClockSyncPulses{ 0 };
+        // The tempo last asked for, taken up by the timer thread (or by
+        // start(), with the timer stopped).
+        std::atomic<float>    requestedTempo{ 1.f };
+        std::atomic<int>      requestedRampSteps{ 1 };
+        std::atomic<uint32_t> tempoRequest{ 0 };
+        uint32_t              tempoRequestTaken{ 0 };
+
+        uint32_t              microsPerQuarterNote{ 0 };
+        uint32_t              ticks{ 0 };
+        uint32_t              intClockSyncPulses{ 0 };
+        std::atomic<uint32_t> extClockSyncPulses{ 0 };
         uint32_t intClockPulsesPerExtClockPulse{ 0 };
         uint32_t clockCounter{ 0 };
         uint32_t extCounter{ 0 };
@@ -161,7 +190,7 @@ namespace mt
         juce::SmoothedValue<float> tempo{ (float)1.0 };
 
         uint32_t                                extIntervalIdx{ 0 };
-        std::array<uint32_t, MAX_EXT_INTERVALS> extIntervals{};
+        std::array<std::atomic<uint32_t>, MAX_EXT_INTERVALS> extIntervals{};
     };
 
     // Global MIDI Clock Instance
