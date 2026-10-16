@@ -53,7 +53,7 @@ namespace mt
         ~CV() {}
 
         static const int       MaxCVPorts{ 8 };
-        std::map<uint8_t, int> channelNoteMap; // Map to store channel number and note range
+        std::map<uint8_t, int> channelNoteMap; // Each port's (1 to MaxCVPorts) start note
 
         bool           setVoltage( uint8_t channel, uint8_t Note );
         bool           setCentVoltage( uint8_t channel, uint16_t centValue );
