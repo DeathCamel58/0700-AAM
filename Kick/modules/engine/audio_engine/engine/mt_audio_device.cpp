@@ -21,7 +21,6 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include <sys/mman.h>
 #include <sys/resource.h>
 #include <unistd.h>
 
@@ -72,30 +71,6 @@ namespace mt
                     return name;
 
             return {};
-        }
-
-        // Locks the process's pages in memory, once. With a finite memory
-        // lock limit, MCL_FUTURE would make allocations fail once the limit
-        // is reached, so the lock is only taken without one (the Kick unit
-        // sets LimitMEMLOCK=infinity) or as root.
-        void lockMemory()
-        {
-            static bool locked = false;
-            if( locked )
-                return;
-            locked = true;
-
-            rlimit limit{};
-            if( geteuid() != 0 && ( getrlimit( RLIMIT_MEMLOCK, &limit ) != 0 || limit.rlim_cur != RLIM_INFINITY ) )
-            {
-                logAudioDevice( "not locking memory: the memory lock limit is " + juce::String( (juce::int64)limit.rlim_cur ) + " bytes" );
-                return;
-            }
-
-            if( mlockall( MCL_CURRENT | MCL_FUTURE ) != 0 )
-                logAudioDevice( "cannot lock memory: " + juce::String( strerror( errno ) ) );
-            else
-                logAudioDevice( "memory locked" );
         }
 
         juce::String schedulingPolicyName( int Policy )
@@ -233,8 +208,6 @@ namespace mt
         requestedRate = samplerate;
         sampleRate    = samplerate;
         reopenDelayMs = minReopenDelayMs;
-
-        lockMemory();
 
         const auto hasDevice = openDevice( samplerate, (uint32_t)blockSize );
         if( hasDevice )
