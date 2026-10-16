@@ -31,7 +31,7 @@
 //   ./GraphStress 30
 //
 // It first checks a few behaviors on their own (chain inserts, meters,
-// sub-designs). It passes when those checks pass, the sanitizer reports
+// sub-designs, batched removal). It passes when those checks pass, the sanitizer reports
 // nothing and the memory pool holds only the stand-in device's buffers once
 // the design is gone.
 
@@ -123,7 +123,7 @@ namespace
                 {
                     design.process( device );
                     ++blocks;
-                    std::this_thread::sleep_for( std::chrono::microseconds( 200 ) );
+                    std::this_thread::sleep_for( pause );
                 }
             } );
         }
@@ -147,6 +147,8 @@ namespace
         std::atomic<bool>     running{ false };
         std::atomic<long>     blocks{ 0 };
         std::thread           thread;
+
+        std::chrono::microseconds pause{ 200 }; // Between blocks.
     };
 
     bool check( bool Condition, const char* What )
@@ -313,6 +315,65 @@ namespace
         ok &= check( !queue.isRunning(), "the top-level design's teardown stops the patch queue" );
         return ok;
     }
+
+    // Removing many objects at once, while playing, waits for the audio
+    // thread once rather than once per object, and frees them all.
+    bool checkBatchedRemoval()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.pause = std::chrono::microseconds( 2000 ); // Blocks as a device runs them.
+        player.start();
+
+        const auto usedBefore = AudIO::MemoryPool<float>::get().getUsed();
+        auto       create     = [&] {
+            std::vector<uint32_t> ids;
+            for( int i = 0; i < 30; ++i )
+            {
+                auto id = design->createObject( std::make_unique<Source>() );
+                design->sendToBus( out, id, 1.f );
+                design->addMeter( id );
+                ids.push_back( id );
+            }
+            return ids;
+        };
+        auto timed = [&]( auto&& Remove ) {
+            const auto start = std::chrono::steady_clock::now();
+            Remove();
+            return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start ).count();
+        };
+
+        auto       ids = create();
+        const auto one = timed( [&] {
+            for( auto id : ids )
+                design->removeObject( id );
+        } );
+
+        ids             = create();
+        auto       ok   = true;
+        const auto many = timed( [&] { ok &= check( design->removeObjects( ids ), "removing objects together" ); } );
+
+        ids              = create();
+        const auto scope = timed( [&] {
+            AudIO::Design::RemovalBatch batch{ *design };
+            for( auto id : ids )
+                design->removeObject( id );
+        } );
+
+        player.waitBlocks( 2 );
+        player.stop();
+        std::printf( "Removing 30 objects: %.1f ms one by one, %.1f ms together, %.1f ms in a batch\n", one, many, scope );
+        ok &= check( ( many < one ) && ( scope < one ), "removing objects together is faster" );
+        ok &= check( usedBefore == AudIO::MemoryPool<float>::get().getUsed(), "objects removed together are freed" );
+
+        design->teardown();
+        return ok;
+    }
 } // namespace
 
 int main( int argc, char** argv )
@@ -321,7 +382,7 @@ int main( int argc, char** argv )
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
 
-    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() )
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() || !checkBatchedRemoval() )
         return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
@@ -363,8 +424,8 @@ int main( int argc, char** argv )
 
     while( std::chrono::steady_clock::now() < deadline )
     {
-        // Keep within the memory pool: remove when there are many objects.
-        const auto operation = ( objects.size() < 300 ) ? rng() % 9 : 3;
+        // Keep within the memory pool: remove many when there are many objects.
+        const auto operation = ( objects.size() < 300 ) ? rng() % 9 : 9;
         switch( operation )
         {
             case 0:
@@ -431,6 +492,32 @@ int main( int argc, char** argv )
                 if( !objects.empty() )
                     design->setBusInputGain( out, objects[rng() % objects.size()], 0.3f );
                 break;
+            case 9:
+            {
+                // Many at once, together or in a batch.
+                std::vector<uint32_t> ids;
+                for( auto n = 1 + rng() % 100; n && !objects.empty(); --n )
+                {
+                    auto index = rng() % objects.size();
+                    ids.push_back( objects[index] );
+                    objects.erase( objects.begin() + (long)index );
+                }
+                if( rng() & 1 )
+                {
+                    design->removeObjects( ids );
+                }
+                else
+                {
+                    AudIO::Design::RemovalBatch batch{ *design };
+                    for( auto id : ids )
+                    {
+                        if( rng() & 1 )
+                            design->removeFromBus( out, id );
+                        design->removeObject( id );
+                    }
+                }
+                break;
+            }
         }
         ++operations;
     }

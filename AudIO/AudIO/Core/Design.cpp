@@ -131,6 +131,35 @@ namespace AudIO
         return pImpl->removeObject( GET_OBJECT_META( id ) );
     }
 
+    bool Design::removeObjects( const std::vector<uint32_t>& ids )
+    {
+        RemovalBatch batch{ *this };
+        bool         removed = true;
+        for( auto id : ids )
+            removed &= removeObject( id );
+        return removed;
+    }
+
+    Design::RemovalBatch::RemovalBatch( Design& D )
+        : design( D )
+    {
+        autolock guard{ design.lockerMutex };
+        design.pImpl->beginRemovalBatch();
+    }
+
+    Design::RemovalBatch::~RemovalBatch()
+    {
+        std::shared_ptr<void> removed;
+        {
+            autolock guard{ design.lockerMutex };
+            removed = design.pImpl->endRemovalBatch();
+        }
+        // Waited for, and freed, without the design's lock: other control
+        // threads can carry on meanwhile.
+        if( removed )
+            releaseWhenUnused( std::move( removed ) );
+    }
+
     Object* Design::getObject( uint32_t id )
     {
         autolock guard{ lockerMutex };

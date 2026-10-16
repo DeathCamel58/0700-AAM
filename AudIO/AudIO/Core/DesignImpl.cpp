@@ -252,6 +252,17 @@ namespace AudIO
         return false;
     }
 
+    std::shared_ptr<void> DesignImpl::endRemovalBatch()
+    {
+        if( ( 0 < _removalBatches ) && ( 0 == --_removalBatches ) && !_batchedRemovals.empty() )
+        {
+            auto removed = std::make_shared<std::vector<std::shared_ptr<RemovedObject>>>( std::move( _batchedRemovals ) );
+            _batchedRemovals.clear();
+            return removed;
+        }
+        return nullptr;
+    }
+
     uint32_t DesignImpl::insertDesign( std::shared_ptr<Design> obj )
     {
         if( obj )
@@ -475,7 +486,10 @@ namespace AudIO
             removed->meta = _objects.extract( it );
             rebuildRenderSequence();
 
-            releaseWhenUnused( std::move( removed ) );
+            if( 0 < _removalBatches )
+                _batchedRemovals.push_back( std::move( removed ) );
+            else
+                releaseWhenUnused( std::move( removed ) );
 
 #if defined( DEBUG_PRINTS ) && ( DEBUG_PRINTS > 0 )
             std::cout << "Removed object " << std::endl;

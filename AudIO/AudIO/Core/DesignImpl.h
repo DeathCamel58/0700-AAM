@@ -88,6 +88,12 @@ namespace AudIO
         bool insertObject( Object& obj, uint32_t sampleRate, uint32_t blockSize );
         bool removeObject( objectMeta* objMeta );
 
+        // While a batch is open, removed objects are kept instead of being
+        // released one by one; the end of the outermost batch hands them
+        // over, to be released together (null if there are none).
+        void                  beginRemovalBatch() { ++_removalBatches; }
+        std::shared_ptr<void> endRemovalBatch();
+
         uint32_t                insertDesign( std::shared_ptr<Design> obj );
         std::shared_ptr<Design> getDesign( uint32_t id );
 
@@ -156,6 +162,9 @@ namespace AudIO
         std::list<std::unique_ptr<Chain>>        _chains;
         std::list<std::unique_ptr<Bus>>          _buses;
         std::list<std::shared_ptr<Design>>       _designs;
+
+        int                                         _removalBatches{ 0 };
+        std::vector<std::shared_ptr<RemovedObject>> _batchedRemovals;
 
         uint32_t _inputCount{ 0 };
         uint32_t _outputCount{ 0 };

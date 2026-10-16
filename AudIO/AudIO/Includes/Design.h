@@ -4,6 +4,7 @@
 #include "AudioDataTypes.h"
 
 #include <stdint.h>
+#include <vector>
 
 namespace AudIO
 {
@@ -28,6 +29,26 @@ namespace AudIO
         uint32_t createObject( std::unique_ptr<Object> obj );
         bool     removeObject( uint32_t id );
         Object*  getObject( uint32_t id );
+
+        // Removing an object waits for the audio thread to let go of it (up
+        // to a block or two) before freeing it. To remove many objects, use
+        // removeObjects(), or remove them while a RemovalBatch exists: the
+        // removed objects are then kept until the outermost batch ends,
+        // which waits once and frees them all.
+        bool removeObjects( const std::vector<uint32_t>& ids );
+
+        class RemovalBatch
+        {
+        public:
+            explicit RemovalBatch( Design& D );
+            ~RemovalBatch();
+
+            RemovalBatch( const RemovalBatch& )            = delete;
+            RemovalBatch& operator=( const RemovalBatch& ) = delete;
+
+        private:
+            Design& design;
+        };
 
         // Chain API's
         uint32_t createChain( bool stereo = true );
