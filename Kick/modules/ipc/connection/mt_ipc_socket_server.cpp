@@ -31,6 +31,7 @@
 #include "../utils/mt_ipc_message_constructor.h"
 #include "../utils/mt_ipc_message_types.h"
 #include "../utils/mt_ipc_enums.h"
+#include "../utils/mt_ipc_close_on_exec.h"
 
 namespace ipc
 {
@@ -156,7 +157,8 @@ namespace ipc
         // notify server about some clients being disconnected and then start.
         void start()
         {
-            beginWaitingForSocket( serverPort, bindAddress );
+            if( beginWaitingForSocket( serverPort, bindAddress ) )
+                ipc::setListeningSocketCloseOnExec( serverPort );
         }
 
         bool areAllValidClientsConnected()

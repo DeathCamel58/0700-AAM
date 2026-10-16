@@ -31,6 +31,7 @@
 #include "../utils/mt_ipc_message_types.h"
 #include "../utils/mt_ipc_exception.h"
 #include "../utils/mt_ipc_error_codes.h"
+#include "../utils/mt_ipc_close_on_exec.h"
 
 namespace ipc
 {
@@ -93,7 +94,11 @@ namespace ipc
                 {
                     connected = connectToSocket( url, port, IPC_DEFAULT_CONNECTION_TIMEOUT );
                     if( connected )
+                    {
+                        if( auto* socket = getSocket() )
+                            ipc::setCloseOnExec( socket->getRawSocketHandle() );
                         break;
+                    }
                 }
 			}
 			break;
@@ -126,6 +131,12 @@ namespace ipc
 
 		virtual void connectionMade() override 
 		{
+            // A connection the server accepted reports itself on the
+            // server's thread as soon as it has its socket; a client's is
+            // marked in connect().
+            if( auto* socket = getSocket() )
+                ipc::setCloseOnExec( socket->getRawSocketHandle() );
+
             try
             {
                 connectedCB();
