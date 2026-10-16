@@ -97,6 +97,10 @@ namespace mt
 
     void CMidiClock::start( bool ClearCounters ) noexcept
     {
+        // Restarting a running clock: stopping waits for a tick the timer
+        // thread is running, which reads the counters reset below.
+        stopPlatformTimer();
+
         clockCounter       = 0;
         intClockSyncPulses = 0;
 
