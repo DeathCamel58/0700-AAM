@@ -154,14 +154,14 @@ namespace mt
         uint32_t extCounter{ 0 };
         uint32_t syncCounter{ 0 };
 
-        double ts;
-        double te;
-        double prevTime;
+        double ts{ 0 };
+        double te{ 0 };
+        double prevTime{ 0 };
 
         juce::SmoothedValue<float> tempo{ (float)1.0 };
 
         uint32_t                                extIntervalIdx{ 0 };
-        std::array<uint32_t, MAX_EXT_INTERVALS> extIntervals;
+        std::array<uint32_t, MAX_EXT_INTERVALS> extIntervals{};
     };
 
     // Global MIDI Clock Instance
