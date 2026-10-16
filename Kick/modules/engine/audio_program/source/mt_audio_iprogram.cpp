@@ -23,7 +23,7 @@ namespace mt
 {
     // Static variables..
     static std::atomic_int __progCounter = 0;
-    juce::BigInteger       MTIProgram::soloingPrograms;
+    std::atomic<int>       MTIProgram::numSoloingPrograms{ 0 };
 
     ///
     /// MTI Program...
@@ -43,6 +43,14 @@ namespace mt
         if( vTree.getProperty( IDs::name ).toString().isEmpty() )
             vTree.setProperty( IDs::name, "Program " + juce::String( __progCounter ).paddedLeft( '0', 2 ), um );
 
+        // Through the CachedValues' own notifications, whichever listener
+        // of the program's tree handles the change (the MIDI program's
+        // handles its own properties).
+        muteConnection  = MTIProgramData::mute.onValueChange.connect( [this]() { muteForPlaying = MTIProgramData::mute.get(); } );
+        soloConnection  = MTIProgramData::solo.onValueChange.connect( [this]() { soloChangeHandler( MTIProgramData::solo.get() ); } );
+        levelConnection = MTIProgramData::level.onValueChange.connect( [this]() { levelForPlaying = (int)MTIProgramData::level.get(); } );
+        muteForPlaying  = MTIProgramData::mute.get();
+        levelForPlaying = (int)MTIProgramData::level.get();
         soloChangeHandler( MTIProgramData::solo.get() );
 
         iSampleVTree = vTree.getOrCreateChildWithName( IDs::CLIPS, nullptr );
@@ -54,6 +62,7 @@ namespace mt
     MTIProgram::~MTIProgram()
     {
         vTree.removeListener( this );
+        soloChangeHandler( false ); // A deleted program no longer solos.
         playableNotesUpdater.cancelPendingUpdate();
 
         // Nothing should be playing a program that is being destroyed, but a
@@ -188,12 +197,17 @@ namespace mt
             else if( Property == IDs::pan ) onPanChanged();
             else if( Property == IDs::mute ) onMuteChanged();
             else if( Property == IDs::OUT ) onOutChanged();
-            else if( Property == IDs::solo ) soloChangeHandler( MTIProgramData::solo.get() );
         }
         else
         {
             sampleTreeChanged( treeWhosePropertyHasChanged );
         }
+    }
+
+    void MTIProgram::soloChangeHandler( bool Solo )
+    {
+        if( Solo != soloForPlaying.exchange( Solo ) )
+            numSoloingPrograms += Solo ? 1 : -1;
     }
 
     void MTIProgram::rebuildSampleMap()
@@ -394,7 +408,7 @@ namespace mt
         float midiLevel;
         for( auto& it : Msgs )
         {
-            midiLevel = level.get();
+            midiLevel = (float)levelForPlaying.load();
             if( it.isNoteOnOrOff() )
             {
                 auto noteNo   = it.getNoteNumber();

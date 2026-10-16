@@ -28,7 +28,8 @@
 //   sends the same programs note ons and offs;
 // - meanwhile the message thread assigns and clears the pads' samples,
 //   removes pads, changes their mute groups, simultaneous plays and mutes,
-//   solos and mutes them and changes how they pick a layer;
+//   solos and mutes them and changes how they pick a layer, and mutes,
+//   solos and sets the level of the programs;
 // - with "assets", it also removes sample files from the project and adds
 //   them again, so that the last reference to a slice can go while a voice
 //   still plays it or a note on for it is still queued;
@@ -166,7 +167,7 @@ int main( int argc, char** argv )
         {
             const int note = FIRST_PAD + (int)( rng() % NUM_PADS );
             auto*     p    = programs[rng() % 3];
-            switch( rng() % 12 )
+            switch( rng() % 13 )
             {
                 case 0:
                 case 1:
@@ -185,6 +186,15 @@ int main( int argc, char** argv )
                 case 9:
                     if( auto d = dynamic_cast<mt::MTDrumProgram*>( p ) )
                         d->setNoteLayerPlay( note, (mt::LayerPlayType)( rng() % 3 ) );
+                    break;
+                case 12:
+                    // The program's own mute, solo and level.
+                    switch( rng() % 3 )
+                    {
+                        case 0: p->setMute( 0 == rng() % 3 ); break;
+                        case 1: p->setSolo( 0 == rng() % 3 ); break;
+                        case 2: p->setLevel( (int)( rng() % 128 ) ); break;
+                    }
                     break;
                 case 10:
                 case 11:

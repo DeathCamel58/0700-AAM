@@ -48,7 +48,6 @@ namespace mt
         vTree       = juce::ValueTree{ IDs::PROGRAMS };
         undoManager = nullptr;
 
-        MTIProgram::resetSoloingPrograms();
         {
             // Removing a program's objects waits for the audio thread to let
             // go of them: remove them all, then wait once (or let an

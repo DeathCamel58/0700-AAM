@@ -267,7 +267,8 @@ namespace mt
         void setPan( double Pan );
 
         // API's related to mute status...
-        inline bool      isProgramEffectivelyMuted() { return MTIProgramData::mute.get() || isMutedDueToSolo(); }
+        // Any thread (the tick thread plays notes through it).
+        inline bool      isProgramEffectivelyMuted() { return muteForPlaying.load() || isMutedDueToSolo(); }
         inline bool      isNoteEffectivelyMuted( int Note ) { return isNoteMute( Note ) || isNoteMutedDueToSolo( Note ); }
         std::vector<int> getNotesInSameMuteGroup( int Note );
 
@@ -290,8 +291,7 @@ namespace mt
         /// SOLO API's
         ///
         /// Program
-        bool        isMutedDueToSolo() { return !soloingPrograms.isZero() && !soloingPrograms[MTIProgramData::index]; }
-        static void resetSoloingPrograms() { soloingPrograms.clear(); }
+        bool isMutedDueToSolo() { return 0 < numSoloingPrograms.load() && !soloForPlaying.load(); }
 
         /// Program Note
         bool isNoteSolo( int Note ) { return soloingNotes[Note]; }
@@ -349,6 +349,7 @@ namespace mt
         void       publishPlayableNotes();
 
         inline void reloadMidiMeter( float normLevel ) { midiMeter.reload( normLevel ); }
+        inline int  getLevelForPlaying() const noexcept { return levelForPlaying.load(); } // Any thread.
 
         virtual std::unique_ptr<MTISample> iSampleCreator( int Note ) { return nullptr; };
         virtual std::unique_ptr<MTISample> iSampleCreator( juce::ValueTree& VT, juce::UndoManager* UM ) { return nullptr; };
@@ -358,10 +359,7 @@ namespace mt
         void                               valueTreeChildOrderChanged( juce::ValueTree& Parent, int OldIndex, int NewIndex ) override;
 
     private:
-        inline void soloChangeHandler( bool Solo )
-        {
-            soloingPrograms.setBit( MTIProgramData::index, Solo );
-        }
+        void soloChangeHandler( bool Solo );
 
         struct PlayableNotesUpdater : public juce::AsyncUpdater
         {
@@ -385,7 +383,17 @@ namespace mt
     private:
         std::atomic<bool>       outMeterEnabled{ false };
         juce::BigInteger        soloingNotes;
-        static juce::BigInteger soloingPrograms;
+
+        // The program's mute, solo and level, for the threads that play notes:
+        // the CachedValues belong to the message thread, which updates these
+        // when they change.
+        std::atomic<bool>          muteForPlaying{ false };
+        std::atomic<bool>          soloForPlaying{ false };
+        std::atomic<int>           levelForPlaying{ MIDI::LEVEL_DEFAULT };
+        static std::atomic<int>    numSoloingPrograms;
+        sigslot::scoped_connection muteConnection;
+        sigslot::scoped_connection soloConnection;
+        sigslot::scoped_connection levelConnection;
 
         MTMidiMeter midiMeter{ 40 };
 

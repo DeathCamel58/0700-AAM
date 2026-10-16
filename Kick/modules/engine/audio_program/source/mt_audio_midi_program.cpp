@@ -99,7 +99,7 @@ namespace mt
 
         const PlayableNotesReader notes( *this );
 
-        auto progGain = MIDI::SCALER * level.get();
+        auto progGain = MIDI::SCALER * (float)getLevelForPlaying();
         for( auto& it : Msgs )
         {
             auto noteLevel = MIDI::SCALER * ( it.isNoteOnOrOff() ? it.getVelocity() : 127 );
