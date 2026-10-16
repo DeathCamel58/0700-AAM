@@ -513,7 +513,7 @@ namespace mt
             playing->playheadLocalToGlobal();
 
             if( MTTrack* pTrack = playing->getSelectedTrackPtr() )
-                MTAudioSequenceManager::getTrackPlayhead() = pTrack->playhead();
+                pTrack->copyPlayheadTo( MTAudioSequenceManager::getTrackPlayhead() );
         }
     }
 

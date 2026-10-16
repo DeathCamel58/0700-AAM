@@ -110,6 +110,11 @@ namespace mt
         inline int               getEffectiveNoteNo( int Note ) { return Note + seq.getTranspose() + getTranspose(); };
         inline int               getEffectiveNoteVelocity( int Velocity ) { return (int)( Velocity * levelScaler ); };
         inline const MTPlayhead& playhead() { return trackPlayhead; }
+        inline void              copyPlayheadTo( MTPlayhead& Playhead ) // The tick thread updates it under the lock.
+        {
+            const juce::ScopedLock sl( lock );
+            Playhead = trackPlayhead;
+        }
 
         // Solo Mute; don't call this API's directly without careful analysis.
         inline void setSoloMute( bool Mute ) { soloMuted = Mute; }

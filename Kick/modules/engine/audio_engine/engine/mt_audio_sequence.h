@@ -102,7 +102,11 @@ namespace mt
         // Playhead...
         inline MTPlayhead& playhead() { return sequencePlayhead; }
         inline void        playheadGlobalToLocal() { sequencePlayhead = globalPlayhead; }
-        inline void        playheadLocalToGlobal() { globalPlayhead = sequencePlayhead; }
+        inline void        playheadLocalToGlobal()
+        {
+            const juce::ScopedLock sl( lock );
+            globalPlayhead = sequencePlayhead;
+        }
 
         // Positioning
         void setBBT( int knob, int value );
