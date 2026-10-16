@@ -62,7 +62,7 @@ namespace mt
             return;
 
         auto& assetMgr = getAudioInterface().getAssetManager();
-        auto  slice    = assetMgr.getAssetSlice( "" ); // Source
+        auto  slice    = assetMgr.getSharedAssetSlice( "" ); // Source
 
         noteOff( Note );
         postNoteOn( Note, 0, 127, 1, slice );

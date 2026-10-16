@@ -58,7 +58,9 @@ namespace mt
     void Metronome::noteOn( int Note, int Velocity )
     {
         noteOff( Note );
-        postNoteOn( Note, Velocity, 1, &slice );
+        // The metronome owns its slice, and outlives its voices: no reference
+        // counting needed.
+        postNoteOn( Note, Velocity, 1, std::shared_ptr<ASoundSlice>( std::shared_ptr<ASoundSlice>(), &slice ) );
     }
 
 };

@@ -181,12 +181,12 @@ namespace mt
         postNoteEvent( event );
     }
 
-    void ISynthObject::postNoteOn( int Note, int Velocity, int Polyphony, ASoundSlice* Slice )
+    void ISynthObject::postNoteOn( int Note, int Velocity, int Polyphony, std::shared_ptr<ASoundSlice> Slice )
     {
-        postNoteOn( Note, Note, Velocity, Polyphony, Slice );
+        postNoteOn( Note, Note, Velocity, Polyphony, std::move( Slice ) );
     }
 
-    void ISynthObject::postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, ASoundSlice* Slice )
+    void ISynthObject::postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, std::shared_ptr<ASoundSlice> Slice )
     {
         NoteEvent event;
         event.type      = NoteEvent::Type::NoteOn;
@@ -194,7 +194,7 @@ namespace mt
         event.voiceNote = VoiceNote;
         event.velocity  = Velocity;
         event.polyphony = Polyphony;
-        event.slice     = Slice;
+        event.slice     = std::move( Slice );
         postNoteEvent( event );
     }
 
@@ -205,17 +205,28 @@ namespace mt
         // all (no device, or the program is not being processed).
         const std::lock_guard<std::mutex> lock( noteQueueLock );
 
+        collectReleasedSlices();
+
+        // The entry about to be overwritten may hold the last reference to
+        // the slice of an event the audio thread has handled.
+        auto write = [this, &Event]( int Index ) {
+            auto& entry = noteQueue[(size_t)Index];
+            if( entry.slice )
+                releasedSlices.push_back( std::move( entry.slice ) );
+            entry = Event;
+        };
+
         if( !noteQueueFull.load() )
         {
             const auto scope = noteFifo.write( 1 );
             if( scope.blockSize1 > 0 )
             {
-                noteQueue[(size_t)scope.startIndex1] = Event;
+                write( scope.startIndex1 );
                 return;
             }
             if( scope.blockSize2 > 0 )
             {
-                noteQueue[(size_t)scope.startIndex2] = Event;
+                write( scope.startIndex2 );
                 return;
             }
 
@@ -258,6 +269,48 @@ namespace mt
                 droppedNoteEvents.fetch_add( 1 );
                 break;
         }
+    }
+
+    void ISynthObject::collectReleasedSlices()
+    {
+        const auto ready = releaseFifo.getNumReady();
+        if( 0 < ready )
+        {
+            const auto scope = releaseFifo.read( ready );
+            for( auto i = 0; i < scope.blockSize1; ++i )
+                releasedSlices.push_back( std::move( releaseQueue[(size_t)( scope.startIndex1 + i )] ) );
+            for( auto i = 0; i < scope.blockSize2; ++i )
+                releasedSlices.push_back( std::move( releaseQueue[(size_t)( scope.startIndex2 + i )] ) );
+        }
+
+        if( !releasedSlices.empty() )
+            sliceReleaser.triggerAsyncUpdate();
+    }
+
+    void ISynthObject::freeReleasedSlices()
+    {
+        std::vector<std::shared_ptr<ASoundSlice>> slices;
+        {
+            const std::lock_guard<std::mutex> lock( noteQueueLock );
+            collectReleasedSlices();
+            std::swap( slices, releasedSlices );
+        }
+        // Freed here, on the message thread, outside the lock.
+    }
+
+    bool ISynthObject::startVoiceOnSlice( ISynthVoice* Voice, const std::shared_ptr<ASoundSlice>& Slice )
+    {
+        // Hand the voice's previous slice over to be freed off the audio
+        // thread; there is always room (see releaseFifo), but if there were
+        // not, the note would be dropped rather than the slice freed here.
+        const auto scope = releaseFifo.write( 1 );
+        auto*      entry = ( scope.blockSize1 > 0 ) ? &releaseQueue[(size_t)scope.startIndex1]
+                                                    : ( ( scope.blockSize2 > 0 ) ? &releaseQueue[(size_t)scope.startIndex2] : nullptr );
+        if( nullptr == entry )
+            return false;
+
+        *entry = Voice->exchangeSlice( Slice );
+        return true;
     }
 
     void ISynthObject::processNoteEvents()
@@ -331,9 +384,13 @@ namespace mt
             case NoteEvent::Type::NoteOn:
                 if( auto voice = getFreeVoice( note, Event.polyphony ) )
                 {
-                    voice->setSlice( Event.slice );
-                    voice->noteOn( Event.voiceNote, Event.velocity );
-                    addVoiceForPlayback( voice );
+                    if( startVoiceOnSlice( voice, Event.slice ) )
+                    {
+                        voice->noteOn( Event.voiceNote, Event.velocity );
+                        addVoiceForPlayback( voice );
+                    }
+                    else
+                        freeVoice( voice );
                 }
                 break;
 
@@ -347,9 +404,13 @@ namespace mt
                 }
                 else if( auto free = getFreeVoice( note, Event.polyphony ) )
                 {
-                    free->setSlice( Event.slice );
-                    free->noteOn( Event.voiceNote, Event.velocity );
-                    addVoiceForPlayback( free );
+                    if( startVoiceOnSlice( free, Event.slice ) )
+                    {
+                        free->noteOn( Event.voiceNote, Event.velocity );
+                        addVoiceForPlayback( free );
+                    }
+                    else
+                        freeVoice( free );
                 }
                 break;
 

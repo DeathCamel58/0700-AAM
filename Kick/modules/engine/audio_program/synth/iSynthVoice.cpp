@@ -32,6 +32,13 @@ namespace mt
         ASliceRenderer::setSlice( Slice );
     }
 
+    std::shared_ptr<ASoundSlice> ISynthVoice::exchangeSlice( std::shared_ptr<ASoundSlice> Slice )
+    {
+        ASliceRenderer::setSlice( Slice.get() );
+        std::swap( sliceRef, Slice );
+        return Slice;
+    }
+
     void ISynthVoice::prepareToPlay( double SampleRate, int Blocksize )
     {
         sampleRate = SampleRate;

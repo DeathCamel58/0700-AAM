@@ -34,7 +34,13 @@ namespace mt
 
     MTAudioProgramManager::~MTAudioProgramManager()
     {
-        programs.clear();
+        // MTAudioManager closes the project, and with it the programs, while
+        // the engine still exists: the engine is its member, gone by now.
+        if( !programs.empty() )
+        {
+            AudIO::Design::RemovalBatch removal{ engine };
+            programs.clear();
+        }
     }
 
     void MTAudioProgramManager::close()
@@ -42,9 +48,13 @@ namespace mt
         vTree       = juce::ValueTree{ IDs::PROGRAMS };
         undoManager = nullptr;
 
-        MTIProgram::resetSoloingPrograms();
-        // Removing a program's objects waits for the audio thread to let go of them.
-        programs.clear();
+        {
+            // Removing a program's objects waits for the audio thread to let
+            // go of them: remove them all, then wait once (or let an
+            // enclosing batch, as closing the project has, do it).
+            AudIO::Design::RemovalBatch removal{ engine };
+            programs.clear();
+        }
         updateProgramList();
     }
 

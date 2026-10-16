@@ -353,16 +353,18 @@ namespace mt
 
     void MTAudioAssetManager::removeAssetSlice( const juce::String& File, int Index )
     {
-        if( sliceMap.find( File ) != sliceMap.end() )
+        auto it = sliceMap.find( File );
+        if( it != sliceMap.end() )
         {
-            auto& slices     = sliceMap[File];
-            int   maxEntries = slices.size();
+            auto& slices = it->second;
 
-            auto parent = slices.at( 0 )->getState().getParent();
-            if( 0 > Index && Index < maxEntries )
+            // Slice 0 is the file's own, which the other functions (and
+            // removeAllSlices()) keep.
+            if( 0 < Index && Index < (int)slices.size() )
             {
+                auto parent = slices[0]->getState().getParent();
                 parent.removeChild( Index, um );
-                slices.erase( slices.begin() + Index, slices.begin() + Index + 1 );
+                slices.erase( slices.begin() + Index );
             }
         }
     }

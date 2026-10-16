@@ -62,6 +62,11 @@ namespace mt
         virtual void prepareToPlay( double SampleRate, int blocksize );
         virtual void process( juce::AudioBuffer<float>& Buffer );
 
+        // Audio thread: plays Slice from now on, and keeps it alive while it
+        // does. Returns the slice it played before, which the caller must not
+        // let go of on the audio thread (it may be the last reference).
+        std::shared_ptr<ASoundSlice> exchangeSlice( std::shared_ptr<ASoundSlice> Slice );
+
     protected:
         enum class State
         {
@@ -80,6 +85,9 @@ namespace mt
         double sampleRate{ 48000 };
 
         std::atomic<State> state{ State::FREE };
+
+    private:
+        std::shared_ptr<ASoundSlice> sliceRef; // The slice set by exchangeSlice().
     };
 
 } // namespace mt

@@ -102,17 +102,19 @@ namespace mt
                 NoteReset,
             };
 
-            Type         type{ Type::NoteOff };
-            int          note{ -1 }; // Note the voice is allocated for.
-            int          voiceNote{ -1 }; // Note the voice is started with.
-            int          velocity{ 0 };
-            int          polyphony{ 1 };
-            bool         flag{ false }; // NoteMute: mute; ClipNoteOn: note off first.
-            ASoundSlice* slice{ nullptr };
+            Type                         type{ Type::NoteOff };
+            int                          note{ -1 }; // Note the voice is allocated for.
+            int                          voiceNote{ -1 }; // Note the voice is started with.
+            int                          velocity{ 0 };
+            int                          polyphony{ 1 };
+            bool                         flag{ false }; // NoteMute: mute; ClipNoteOn: note off first.
+            std::shared_ptr<ASoundSlice> slice; // Kept alive by the event, then by the voice playing it.
         };
 
-        void postNoteOn( int Note, int Velocity, int Polyphony, ASoundSlice* Slice );
-        void postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, ASoundSlice* Slice );
+        // The caller must hold a reference to the slice it posts until the
+        // call returns, so that the last one is never let go of here.
+        void postNoteOn( int Note, int Velocity, int Polyphony, std::shared_ptr<ASoundSlice> Slice );
+        void postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, std::shared_ptr<ASoundSlice> Slice );
         void postNoteEvent( const NoteEvent& Event );
 
     private:
@@ -121,9 +123,12 @@ namespace mt
         void teardown();
 
         void keepNoteEvent( const NoteEvent& Event ); // Caller holds noteQueueLock.
+        void collectReleasedSlices(); // Caller holds noteQueueLock.
+        void freeReleasedSlices(); // Message thread.
         void processNoteEvents(); // Audio thread.
         void processKeptNoteEvents(); // Audio thread.
         void handleNoteEvent( const NoteEvent& Event ); // Audio thread.
+        bool startVoiceOnSlice( ISynthVoice* Voice, const std::shared_ptr<ASoundSlice>& Slice ); // Audio thread.
 
     protected:
         MTIAtomicProgramMaster master;
@@ -148,6 +153,26 @@ namespace mt
         std::bitset<128>      keptNoteOffs;
         std::bitset<128>      keptNoteResets;
         std::atomic<uint32_t> droppedNoteEvents{ 0 };
+
+        // Slices the voices stopped playing: the audio thread must not let go
+        // of them (freeing a slice frees its sound), so it hands them over
+        // here; the producers collect them under noteQueueLock, with the
+        // slices of overwritten queue entries, and the message thread frees
+        // them. A voice only lets go of a slice when it starts another, so
+        // fewer than a full queue's worth arrive between two posts.
+        struct SliceReleaser : public juce::AsyncUpdater
+        {
+            explicit SliceReleaser( ISynthObject& O )
+                : object( O ) {}
+            void          handleAsyncUpdate() override { object.freeReleasedSlices(); }
+            ISynthObject& object;
+        };
+
+        static constexpr int                                         RELEASE_QUEUE_SIZE{ 2 * NOTE_QUEUE_SIZE };
+        juce::AbstractFifo                                           releaseFifo{ RELEASE_QUEUE_SIZE };
+        std::array<std::shared_ptr<ASoundSlice>, RELEASE_QUEUE_SIZE> releaseQueue;
+        std::vector<std::shared_ptr<ASoundSlice>>                    releasedSlices; // Guarded by noteQueueLock.
+        SliceReleaser                                                sliceReleaser{ *this };
 
         AudIO::MeterData  outMeterData;
         AudIO::LevelMeter meter;

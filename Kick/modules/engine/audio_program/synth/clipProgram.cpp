@@ -82,7 +82,7 @@ namespace mt
                 return;
 
             //DBG( "AA" << Note << " " << Velocity );
-            if( const auto clipSound = clipNote.layers[0].slice.get() )
+            if( const auto& clipSound = clipNote.layers[0].slice )
             {
                 // Restart the voice playing it, or start playback.
                 NoteEvent event;
