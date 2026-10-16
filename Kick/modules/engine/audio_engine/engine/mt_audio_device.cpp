@@ -32,6 +32,16 @@ namespace mt
 {
     namespace
     {
+        // The watchdog's period; a device that has not called back for the
+        // stall time is closed and opened again, first after the shortest
+        // reopen delay and then after twice the previous one, up to the
+        // longest. A device that ran for the stable time starts over.
+        constexpr int watchdogIntervalMs = 500;
+        constexpr int stallTimeMs        = 2000;
+        constexpr int minReopenDelayMs   = 1000;
+        constexpr int maxReopenDelayMs   = 30000;
+        constexpr int stableTimeMs       = 60000;
+
         void logAudioDevice( const juce::String& Message )
         {
             juce::Logger::writeToLog( "AudioDevice: " + Message );
@@ -130,8 +140,12 @@ namespace mt
         pendingOutputs.clear();
         fifoPos = 0;
 
-        auto sampleRate = samplerate;
-        if( openDevice( samplerate, (uint32_t)blockSize ) )
+        requestedRate = samplerate;
+        sampleRate    = samplerate;
+        reopenDelayMs = minReopenDelayMs;
+
+        const auto hasDevice = openDevice( samplerate, (uint32_t)blockSize );
+        if( hasDevice )
         {
             if( auto* device = deviceManager.getCurrentAudioDevice() )
             {
@@ -154,6 +168,14 @@ namespace mt
 
         // Callbacks run from here on, but play silence until resume().
         deviceManager.addAudioCallback( this );
+
+        if( !hasDevice )
+        {
+            dummyClock.startThread();
+            scheduleReopen();
+        }
+
+        startTimer( watchdogIntervalMs );
     }
 
     void AudioDevice::resume()
@@ -173,7 +195,9 @@ namespace mt
         if( !opened )
             return;
 
+        stopTimer();
         setState( AudIO::AudioDeviceState::stopped );
+        dummyClock.stopThread( 2000 );
         deviceManager.removeAudioCallback( this );
         deviceManager.closeAudioDevice();
         opened = false;
@@ -327,7 +351,24 @@ namespace mt
 
     void AudioDevice::audioDeviceAboutToStart( juce::AudioIODevice* Device )
     {
-        // Callbacks are not running yet: safe to reset the re-blocking state.
+        // The device calls the engine from here on, so the clock must not.
+        dummyClock.stopThread( 2000 );
+
+        // Callbacks are not running yet: safe to reset the re-blocking state,
+        // and to prepare the engine for a device that runs at another rate.
+        const auto rate = Device != nullptr ? (uint32_t)juce::roundToInt( Device->getCurrentSampleRate() ) : 0;
+        if( opened && rate > 0 && rate != sampleRate )
+        {
+            logAudioDevice( "preparing the engine for " + juce::String( rate ) + " Hz instead of " + juce::String( sampleRate ) + " Hz" );
+            sampleRate = rate;
+            prepareToPlay( sampleRate, (uint32_t)blockSize );
+        }
+
+        lastNumCallbacks = numCallbacks.load();
+        lastCallbackTime = deviceStartTime = juce::Time::getMillisecondCounterHiRes();
+        lastXRunCount    = Device != nullptr ? juce::jmax( 0, Device->getXRunCount() ) : 0;
+        stuckLogged      = false;
+
         const auto deviceBlock = Device != nullptr ? Device->getCurrentBufferSizeSamples() : 0;
 
         inPlace = blockSize > 0 && deviceBlock > 0 && 0 == ( deviceBlock % blockSize );
@@ -347,6 +388,133 @@ namespace mt
     void AudioDevice::audioDeviceError( const juce::String& ErrorMessage )
     {
         logAudioDevice( "device error: " + ErrorMessage );
+        deviceError = true;
+    }
+
+    void AudioDevice::timerCallback()
+    {
+        if( !opened )
+            return;
+
+        const auto now    = juce::Time::getMillisecondCounterHiRes();
+        auto*      device = deviceManager.getCurrentAudioDevice();
+
+        if( device == nullptr )
+        {
+            if( now >= nextReopenTime )
+                reopenDevice();
+            return;
+        }
+
+        const auto count = numCallbacks.load();
+        if( count != lastNumCallbacks )
+        {
+            lastNumCallbacks = count;
+            lastCallbackTime = now;
+        }
+
+        if( deviceError.exchange( false ) )
+        {
+            closeLostDevice( "it reported an error" );
+            return;
+        }
+
+        if( !device->isPlaying() )
+        {
+            closeLostDevice( "it stopped" );
+            return;
+        }
+
+        if( now - lastCallbackTime > stallTimeMs )
+        {
+            // Closing the device would kill a thread that is stuck in the
+            // engine, not one that waits for the device.
+            if( inCallback )
+            {
+                if( !stuckLogged )
+                    logAudioDevice( "the audio callback has not returned for " + juce::String( juce::roundToInt( now - lastCallbackTime ) ) + " ms" );
+                stuckLogged = true;
+                return;
+            }
+
+            closeLostDevice( "it has not called back for " + juce::String( juce::roundToInt( now - lastCallbackTime ) ) + " ms" );
+            return;
+        }
+
+        const auto xruns = juce::jmax( 0, device->getXRunCount() );
+        if( xruns != lastXRunCount )
+        {
+            logAudioDevice( juce::String( xruns - lastXRunCount ) + " xrun(s), " + juce::String( xruns ) + " since the device opened" );
+            lastXRunCount = xruns;
+        }
+    }
+
+    void AudioDevice::closeLostDevice( const juce::String& Reason )
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if( now - deviceStartTime >= stableTimeMs )
+            reopenDelayMs = minReopenDelayMs;
+
+        auto* device = deviceManager.getCurrentAudioDevice();
+        logAudioDevice( "closing \"" + ( device != nullptr ? device->getName() : juce::String() ) + "\": " + Reason
+                        + "; opening it again in " + juce::String( reopenDelayMs / 1000.0, 1 ) + " s" );
+
+        // The callback stays registered with the device manager, and is
+        // called again once a device opens.
+        deviceManager.closeAudioDevice();
+        deviceError = false;
+
+        dummyClock.startThread();
+        scheduleReopen();
+    }
+
+    void AudioDevice::reopenDevice()
+    {
+        dummyClock.stopThread( 2000 );
+
+        if( openDevice( requestedRate, (uint32_t)blockSize ) )
+            return;
+
+        dummyClock.startThread();
+        scheduleReopen();
+    }
+
+    void AudioDevice::scheduleReopen()
+    {
+        nextReopenTime = juce::Time::getMillisecondCounterHiRes() + reopenDelayMs;
+        reopenDelayMs  = juce::jmin( reopenDelayMs * 2, maxReopenDelayMs );
+    }
+
+    void AudioDevice::processWithoutDevice()
+    {
+        if( !isPlaying() || blockSize <= 0 )
+            return;
+
+        juce::ScopedNoDenormals noDenormals;
+
+        _buffer.clearInputs();
+        process( _buffer );
+    }
+
+    void AudioDevice::DummyClock::run()
+    {
+        const auto period = 1000.0 * owner.blockSize / juce::jmax( 1u, owner.sampleRate );
+        auto       next   = juce::Time::getMillisecondCounterHiRes();
+
+        while( !threadShouldExit() )
+        {
+            owner.processWithoutDevice();
+
+            next += period;
+            const auto now = juce::Time::getMillisecondCounterHiRes();
+
+            // After a long stall, carry on from now rather than catch up.
+            if( next < now - 100 * period )
+                next = now;
+
+            if( next > now )
+                wait( next - now );
+        }
     }
 
     void AudioDevice::readInputs( const float* const* InputData, int NumInputChannels, int SrcOffset, int DstOffset, int NumSamples )
@@ -368,6 +536,8 @@ namespace mt
         juce::ignoreUnused( Context );
         juce::ScopedNoDenormals noDenormals;
 
+        numCallbacks.fetch_add( 1, std::memory_order_relaxed );
+
         if( !isPlaying() || blockSize <= 0 )
         {
             for( int ch = 0; ch < NumOutputChannels; ++ch )
@@ -375,6 +545,8 @@ namespace mt
                     juce::FloatVectorOperations::clear( OutputData[ch], NumSamples );
             return;
         }
+
+        inCallback.store( true, std::memory_order_relaxed );
 
         int done = 0;
         while( done < NumSamples )
@@ -435,5 +607,7 @@ namespace mt
                 fifoPos = 0;
             }
         }
+
+        inCallback.store( false, std::memory_order_relaxed );
     }
 } // namespace mt

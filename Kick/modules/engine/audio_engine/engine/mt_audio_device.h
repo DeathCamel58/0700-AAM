@@ -49,9 +49,18 @@ namespace mt
     /// whole multiples of it the blocks are processed in place, otherwise
     /// they are re-blocked through a FIFO, which adds one block of latency.
     ///
+    /// A watchdog on the message thread notices a device that stops calling
+    /// back (JUCE's ALSA thread just ends on a read or write error) or
+    /// reports an error, closes it and opens it again, waiting longer after
+    /// each failure. While there is no device, a clock thread runs the
+    /// engine on silence at the engine's rate, so that the engine still
+    /// takes what the message thread queues for its audio thread. The
+    /// engine is prepared again when a device opens at another rate.
+    ///
     class AudioDevice
         : public AudIO::IAudioDevice
         , private juce::AudioIODeviceCallback
+        , private juce::Timer
     {
     public:
         AudioDevice( int NumInputs, int NumOutputs, const juce::String& DeviceName );
@@ -74,11 +83,32 @@ namespace mt
         void audioDeviceStopped() override;
         void audioDeviceError( const juce::String& ErrorMessage ) override;
 
+        // juce::Timer: the device watchdog.
+        void timerCallback() override;
+
+        void closeLostDevice( const juce::String& Reason );
+        void reopenDevice();
+        void scheduleReopen();
+        void processWithoutDevice();
+
         bool         openDevice( uint32_t SampleRate, uint32_t BlockSize );
         juce::String openDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, uint32_t SampleRate, uint32_t BlockSize );
         juce::String initialiseDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, int Inputs, int Outputs, uint32_t SampleRate, uint32_t BlockSize );
         int          numOutputChannelsFor( juce::AudioIODeviceType& Type, const juce::String& Output ) const;
         void readInputs( const float* const* InputData, int NumInputChannels, int SrcOffset, int DstOffset, int NumSamples );
+
+        // Calls the engine at its rate while no device does.
+        class DummyClock final : public juce::Thread
+        {
+        public:
+            explicit DummyClock( AudioDevice& Owner )
+                : juce::Thread( "Kick audio clock" ), owner( Owner ) {}
+
+            void run() override;
+
+        private:
+            AudioDevice& owner;
+        };
 
         // A device manager that offers the configured device type first, so
         // that it is the one initialise() picks.
@@ -108,6 +138,24 @@ namespace mt
         int                      fifoPos{ 0 };
         bool                     inPlace{ true };
         bool                     opened{ false };
+
+        // The rate the engine is asked for, and the rate it is prepared at.
+        uint32_t requestedRate{ 0 };
+        uint32_t sampleRate{ 0 };
+
+        DummyClock dummyClock{ *this };
+
+        // Watchdog state; the counter and flags are set by the audio thread.
+        std::atomic<uint32_t> numCallbacks{ 0 };
+        std::atomic<bool>     inCallback{ false };
+        std::atomic<bool>     deviceError{ false };
+        uint32_t              lastNumCallbacks{ 0 };
+        double                lastCallbackTime{ 0 };
+        double                deviceStartTime{ 0 };
+        double                nextReopenTime{ 0 };
+        int                   reopenDelayMs{ 0 };
+        int                   lastXRunCount{ 0 };
+        bool                  stuckLogged{ false };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( AudioDevice )
     };
