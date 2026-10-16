@@ -29,6 +29,8 @@
 #include "contracts/main/system_signals.h"
 #include "ipc/utils/mt_ipc_json.h"
 
+#include <csignal>
+
 // start a hearbeat thread. 
 
 namespace contracts
@@ -210,6 +212,11 @@ namespace contracts
                                         logToServer,
                                         version ) )
     {
+        // The IPC writes to sockets whose peer may have exited. Without this
+        // the write raises SIGPIPE and kills this process as well, so one
+        // crash takes the others down; ignored, the write fails with EPIPE
+        // and the connection's reader reports the disconnect.
+        std::signal( SIGPIPE, SIG_IGN );
     }
 
     IPCApplication::~IPCApplication()

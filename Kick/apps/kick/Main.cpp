@@ -25,6 +25,8 @@
 #include "kick_audio_engine_adapter.h"
 #include "kick_audio_interface.h"
 
+#include <csignal>
+
 #ifdef PERFETTO
     #include "melatonin_perfetto/melatonin_perfetto.h"
 #endif
@@ -109,6 +111,13 @@ private:
 class AudioEngineApplication : public juce::JUCEApplication
 {
 public:
+    AudioEngineApplication()
+    {
+        // A write to a closed socket or pipe should fail with EPIPE, not
+        // kill the application.
+        std::signal( SIGPIPE, SIG_IGN );
+    }
+
     //==============================================================================
     const juce::String getApplicationName() override
     {
