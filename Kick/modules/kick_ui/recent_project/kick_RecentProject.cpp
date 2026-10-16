@@ -374,7 +374,7 @@ namespace ui
 
     void RecentProject::knobClicked()
     {
-        if( selectedIndex >= 0 )
+        if( juce::isPositiveAndBelow( selectedIndex, recentItems.size() ) )
             if( recentItems[selectedIndex]->onMouseDown )
                 recentItems[selectedIndex]->onMouseDown( selectedIndex, juce::File() );
     }
@@ -434,7 +434,9 @@ namespace ui
             selectedIndex          = ( 0 < ( projectList.getSize() ) ) ? projectStartIndex : 0;
 
             clearAllShowBorder();
-            recentItems[selectedIndex]->showBorder( true );
+            // Without demos, templates or projects the list is empty.
+            if( juce::isPositiveAndBelow( selectedIndex, recentItems.size() ) )
+                recentItems[selectedIndex]->showBorder( true );
 
             // Check if we have come here on first launch,
             if( bFirstLaunch )

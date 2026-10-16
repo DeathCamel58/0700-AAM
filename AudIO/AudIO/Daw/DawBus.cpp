@@ -252,7 +252,7 @@ namespace AudIO
         }
 
         // Create Output ports...
-        for( auto i = 0; i < numStereoIns; ++i )
+        for( auto i = 0; i < numStereoOuts; ++i )
         {
             auto twoX = ( i * 2 );
             name      = "OutPort-" + std::to_string( 1 + twoX ) + "," + std::to_string( 2 + twoX );

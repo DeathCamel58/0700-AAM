@@ -63,10 +63,8 @@ namespace mt
     /// takes what the message thread queues for its audio thread. The
     /// engine is prepared again when a device opens at another rate.
     ///
-    /// Starting the engine locks the process's memory (mlockall) when the
-    /// memory lock limit allows it, so that nothing the audio thread
-    /// touches is paged out. Whether the audio thread got real-time
-    /// scheduling is logged once a device runs.
+    /// Whether the audio thread got real-time scheduling is logged once a
+    /// device runs.
     ///
     class AudioDevice
         : public AudIO::IAudioDevice
