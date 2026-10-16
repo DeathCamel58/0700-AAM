@@ -64,20 +64,25 @@ namespace mt
         // Return if no audio synth available or invalid midi length
         if( !pClip || !CommonUtils::isValidMidiNote( Note ) ) return;
 
+        // Read the clips from the program's published copy: this runs on the
+        // sequencer's tick thread too, while the UI edits the clips.
+        const MTIProgram::PlayableNotesReader notes( *pClip );
+
         // Get clip note.
-        if( auto clipNote = pClip->getClip( Note ) )
+        const auto& clipNote = ( *notes )[Note];
+        if( clipNote.assigned )
         {
             // Stop clips in same mute group.
-            pClip->forSamplesInSameMuteGroup( Note, clipNote->muteGroup.get(), [&]( int Note ) {
-                noteOff( Note );
+            notes->forNotesInMuteGroup( Note, clipNote.muteGroup, [this]( int Other ) {
+                noteOff( Other );
             } );
 
             // Note muted,
-            if( pClip->isNoteEffectivelyMuted( Note ) && !pClip->isNoteSolo( Note ) )
+            if( notes->isNoteEffectivelyMuted( Note ) && !notes->isNoteSolo( Note ) )
                 return;
 
             //DBG( "AA" << Note << " " << Velocity );
-            if( const auto clipSound = clipNote->getSourceSlice() )
+            if( const auto clipSound = clipNote.layers[0].slice.get() )
             {
                 // Restart the voice playing it, or start playback.
                 NoteEvent event;
@@ -86,7 +91,7 @@ namespace mt
                 event.voiceNote = Note;
                 event.velocity  = Velocity;
                 event.polyphony = 1;
-                event.flag      = ( ClipPlayType::CLIP_TOGGLE == clipNote->padPlay.get() );
+                event.flag      = ( ClipPlayType::CLIP_TOGGLE == clipNote.padPlay );
                 event.slice     = clipSound;
                 postNoteEvent( event );
             }

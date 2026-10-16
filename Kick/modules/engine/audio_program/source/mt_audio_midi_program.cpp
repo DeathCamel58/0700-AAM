@@ -97,6 +97,8 @@ namespace mt
         if( isProgramEffectivelyMuted() )
             return;
 
+        const PlayableNotesReader notes( *this );
+
         auto progGain = MIDI::SCALER * level.get();
         for( auto& it : Msgs )
         {
@@ -104,7 +106,7 @@ namespace mt
             // In Meter...
             reloadMidiMeter( noteLevel );
 
-            if( !isNoteEffectivelyMuted( it.getNoteNumber() ) )
+            if( !notes->isNoteEffectivelyMuted( it.getNoteNumber() ) )
             {
                 auto gainLevel = progGain * noteLevel;
 

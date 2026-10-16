@@ -46,11 +46,129 @@ namespace mt
         soloChangeHandler( MTIProgramData::solo.get() );
 
         iSampleVTree = vTree.getOrCreateChildWithName( IDs::CLIPS, nullptr );
+
+        // Programs with samples publish again once they have built their map.
+        publishPlayableNotes();
     }
 
     MTIProgram::~MTIProgram()
     {
         vTree.removeListener( this );
+        playableNotesUpdater.cancelPendingUpdate();
+
+        // Nothing should be playing a program that is being destroyed, but a
+        // reader that is still inside must not lose its copy.
+        playableNotes.store( nullptr );
+        while( 0 != playableNotesReaders.load() )
+            std::this_thread::yield();
+    }
+
+    MTIProgram::PlayableNotesReader::PlayableNotesReader( const MTIProgram& Program )
+        : program( Program )
+    {
+        // Count in before loading: the message thread only frees a replaced
+        // copy once it has seen no reader after replacing it.
+        program.playableNotesReaders.fetch_add( 1 );
+        notes = program.playableNotes.load();
+        if( nullptr == notes )
+        {
+            static const PlayableNotes none{};
+            notes = &none;
+        }
+    }
+
+    MTIProgram::PlayableNotesReader::~PlayableNotesReader()
+    {
+        program.playableNotesReaders.fetch_sub( 1 );
+    }
+
+    void MTIProgram::publishPlayableNotes()
+    {
+        playableNotesUpdater.cancelPendingUpdate();
+
+        auto next = std::make_unique<PlayableNotes>();
+        for( const auto& it : iSampleMap )
+        {
+            const auto sample = it.second.get();
+            if( !sample || !CommonUtils::isValidMidiNote( it.first ) )
+                continue;
+
+            auto& note            = next->notes[(size_t)it.first];
+            note.assigned         = true;
+            note.mute             = sample->mute.get();
+            note.keyNote          = (int)sample->keyNote.get();
+            note.muteGroup        = (int)sample->muteGroup.get();
+            note.polyphony        = (int)sample->polyPhony.get();
+            note.simultaneousPlay = sample->sPlay.getActions();
+            note.simultaneousMute = sample->sMute.getActions();
+
+            if( auto drum = dynamic_cast<MTIDrum*>( sample ) )
+                note.layerPlay = drum->layerPlay.get();
+            else if( auto keys = dynamic_cast<MTIKeys*>( sample ) )
+                note.layerPlay = keys->layerPlay.get();
+            if( auto clip = dynamic_cast<MTIClip*>( sample ) )
+                note.padPlay = clip->padPlay.get();
+
+            for( auto i = 0; i < MAX_LAYERS; ++i )
+            {
+                if( const auto& layer = sample->layers[(size_t)i] )
+                {
+                    auto& l     = note.layers[(size_t)i];
+                    l.hasSource = layer->source.get().isNotEmpty();
+                    l.slice     = layer->srcRef;
+                    l.velStart  = (int)layer->velStart.get();
+                    l.velEnd    = (int)layer->velEnd.get();
+                }
+            }
+        }
+
+        for( auto i = MIDI::MIN; i < MIDI::NUMERIC_MAX; ++i )
+        {
+            next->samplePlay[(size_t)i] = getNoteSamplePlay( i );
+            next->soloNotes[(size_t)i]  = soloingNotes[i];
+        }
+
+        playableNotes.store( next.get() );
+        if( currentPlayableNotes )
+            retiredPlayableNotes.push_back( std::move( currentPlayableNotes ) );
+        currentPlayableNotes = std::move( next );
+
+        freeRetiredPlayableNotes();
+    }
+
+    void MTIProgram::freeRetiredPlayableNotes()
+    {
+        if( retiredPlayableNotes.empty() )
+            return;
+
+        // No reader now means none still holds a copy replaced before now.
+        if( 0 == playableNotesReaders.load() )
+            retiredPlayableNotes.clear();
+        else
+            playableNotesUpdater.triggerAsyncUpdate(); // Try again later.
+    }
+
+    void MTIProgram::sampleTreeChanged( const juce::ValueTree& Tree )
+    {
+        // The samples' values change through their ValueTrees (edits, undo
+        // and redo); publish once the change and its listeners are done.
+        if( Tree == iSampleVTree || Tree.isAChildOf( iSampleVTree ) )
+            playableNotesUpdater.triggerAsyncUpdate();
+    }
+
+    void MTIProgram::valueTreeChildAdded( juce::ValueTree& Parent, juce::ValueTree& )
+    {
+        sampleTreeChanged( Parent );
+    }
+
+    void MTIProgram::valueTreeChildRemoved( juce::ValueTree& Parent, juce::ValueTree&, int )
+    {
+        sampleTreeChanged( Parent );
+    }
+
+    void MTIProgram::valueTreeChildOrderChanged( juce::ValueTree& Parent, int, int )
+    {
+        sampleTreeChanged( Parent );
     }
 
     void MTIProgram::valueTreePropertyChanged( juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& Property )
@@ -72,6 +190,10 @@ namespace mt
             else if( Property == IDs::OUT ) onOutChanged();
             else if( Property == IDs::solo ) soloChangeHandler( MTIProgramData::solo.get() );
         }
+        else
+        {
+            sampleTreeChanged( treeWhosePropertyHasChanged );
+        }
     }
 
     void MTIProgram::rebuildSampleMap()
@@ -85,6 +207,8 @@ namespace mt
             if( auto clip = iSampleCreator( vt, um ) )
                 iSampleMap[clip->keyNote.get()] = std::move( clip );
         }
+
+        publishPlayableNotes();
     }
 
     MTISample* MTIProgram::createSample( int Note )
@@ -95,6 +219,7 @@ namespace mt
             iSampleVTree.addChild( clip->vTree, -1, getUndoManager() );
             // Add to clip Map for quick reference.
             iSampleMap[Note] = std::move( clip );
+            publishPlayableNotes();
         }
         // return if note is created.
         return getSample( Note );
@@ -106,6 +231,7 @@ namespace mt
         {
             iSampleVTree.removeChild( p->vTree, nullptr );
             iSampleMap.erase( Note );
+            publishPlayableNotes();
         }
     }
 
@@ -263,6 +389,8 @@ namespace mt
         if( isProgramEffectivelyMuted() )
             return;
 
+        const PlayableNotesReader notes( *this );
+
         float midiLevel;
         for( auto& it : Msgs )
         {
@@ -270,7 +398,7 @@ namespace mt
             if( it.isNoteOnOrOff() )
             {
                 auto noteNo   = it.getNoteNumber();
-                auto playType = getNoteSamplePlay( noteNo );
+                auto playType = CommonUtils::isValidMidiNote( noteNo ) ? notes->samplePlay[(size_t)noteNo] : SamplePlayType::ONE_SHOT;
                 midiLevel     = it.getVelocity();
 
                 if( it.isNoteOn() )
@@ -562,11 +690,18 @@ namespace mt
         return count;
     }
 
+    void MTIProgram::setNoteSolo( int Note, bool Solo )
+    {
+        soloingNotes.setBit( Note, Solo );
+        publishPlayableNotes();
+    }
+
     int MTIProgram::resetNotesSolo()
     {
         if( getNumSoloNotes() != 0 )
         {
             soloingNotes.clear();
+            publishPlayableNotes();
             return 0;
         }
         return -1;

@@ -60,7 +60,10 @@ namespace mt
         if( !pKeys || !CommonUtils::isValidMidiNote( Note ) )
             return;
 
-        if( pKeys->isNoteEffectivelyMuted( Note ) ) return;
+        // Read the program's published copy, as the drum program does (this
+        // runs on the sequencer's tick thread too).
+        const MTIProgram::PlayableNotesReader notes( *pKeys );
+        if( notes->isNoteEffectivelyMuted( Note ) ) return;
 
         //if( !pKeys->isSourceAssigned( Note ) ) return;
 

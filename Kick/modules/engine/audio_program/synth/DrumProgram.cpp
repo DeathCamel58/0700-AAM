@@ -60,39 +60,45 @@ namespace mt
         // Return if no audio synth available or invalid midi length
         if( !pDrum || !CommonUtils::isValidMidiNote( Note ) ) return;
 
-        if( auto pNote = pDrum->getDrumClip( Note ) )
+        // Read the pads from the program's published copy: this runs on the
+        // sequencer's tick thread too, while the UI edits the pads.
+        const MTIProgram::PlayableNotesReader notes( *pDrum );
+        noteOn( *notes, Note, Velocity );
+    }
+
+    void DrumProgram::noteOn( const MTIProgram::PlayableNotes& Notes, int Note, int Velocity )
+    {
+        if( !CommonUtils::isValidMidiNote( Note ) ) return;
+
+        const auto& pNote = Notes[Note];
+        if( pNote.assigned )
         {
             // Stop clips in same mute group.
-            {
-                auto notes = pDrum->getNotesInSameMuteGroup( Note );
-                for( auto it : notes )
-                    if( CommonUtils::isValidMidiNote( it ) )
-                        noteOff( it );
-            }
+            Notes.forNotesInMuteGroup( Note, pNote.muteGroup, [this]( int It ) {
+                if( CommonUtils::isValidMidiNote( It ) )
+                    noteOff( It );
+            } );
 
             // Stop playback of clips simultaneously.
-            {
-                auto notes = pNote->sMute.getActions();
-                for( auto it : notes )
-                    noteOff( it );
-            }
+            for( auto it : pNote.simultaneousMute )
+                noteOff( it );
 
-            if( !pDrum->isNoteEffectivelyMuted( Note ) && pNote->getSource( 0 ).length() || pDrum->isNoteSolo( Note ) && pNote->getSource( 0 ).length() )
+            const auto hasSource = pNote.layers[0].hasSource;
+            if( !Notes.isNoteEffectivelyMuted( Note ) && hasSource || Notes.isNoteSolo( Note ) && hasSource )
             {
-                auto notePoly = pNote->polyPhony.get();
+                auto notePoly = pNote.polyphony;
 
                 // Get layers that have valid source.
                 std::vector<int> validSourceIndex;
-                auto             sources = pNote->getSources();
-                for( auto i = 0; i < sources.size(); ++i )
+                for( auto i = 0; i < MAX_LAYERS; ++i )
                 {
-                    if( sources[i].isNotEmpty() )
+                    if( pNote.layers[(size_t)i].hasSource )
                         validSourceIndex.push_back( i );
                 }
 
                 // Choose a layer to play sound
                 auto layerToPlay = 0;
-                switch( pNote->layerPlay.get() )
+                switch( pNote.layerPlay )
                 {
                     break;
                     case LayerPlayType::RANDOM:
@@ -110,7 +116,8 @@ namespace mt
                     {
                         for( const auto& it : validSourceIndex )
                         {
-                            if( pNote->layers[it]->velStart.get() <= Velocity && Velocity < pNote->layers[it]->velEnd.get() )
+                            const auto& layer = pNote.layers[(size_t)it];
+                            if( layer.velStart <= Velocity && Velocity < layer.velEnd )
                             {
                                 layerToPlay = it;
                                 break;
@@ -119,7 +126,7 @@ namespace mt
                     }
                 }; // switch
 
-                if( auto soundSlice = pNote->layers[layerToPlay]->src )
+                if( auto soundSlice = pNote.layers[(size_t)layerToPlay].slice.get() )
                 {
                     // Start playback.
                     postNoteOn( Note, Velocity, notePoly, soundSlice );
@@ -127,11 +134,8 @@ namespace mt
             }
 
             // Trigger playback of clips simultaneously.
-            {
-                auto notes = pNote->sPlay.getActions();
-                for( auto it : notes )
-                    noteOn( it, Velocity );
-            }
+            for( auto it : pNote.simultaneousPlay )
+                noteOn( Notes, it, Velocity );
         }
     }
 };
