@@ -28,6 +28,13 @@
     #define KICK_POWER_KEY_DEVICE "/dev/input/event2"
 #endif
 
+// The backlight, by its name in /sys/class/backlight or its sysfs
+// directory; the build system can set it (see CMakeLists.txt). Empty: the
+// first backlight there is.
+#ifndef KICK_BACKLIGHT_DEVICE
+    #define KICK_BACKLIGHT_DEVICE ""
+#endif
+
 // A systemd unit that performs the factory reset, or empty if the
 // application only removes its own state; the build system can set it.
 #ifndef KICK_FACTORY_RESET_UNIT
@@ -57,12 +64,10 @@ namespace mt
         while( !threadShouldExit() )
         {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-            if( !inputDevice.is_open() ) // Check if inputDevice is not valid
+            if( powerKeyFd < 0 )
             {
-                // Open the input device file
-                inputDevice.clear();
-                inputDevice.open( devicePath, std::ios::binary );
-                if( !inputDevice.is_open() )
+                powerKeyFd = open( devicePath, O_RDONLY | O_CLOEXEC | O_NONBLOCK );
+                if( powerKeyFd < 0 )
                 {
                     DBG( "Error opening Input device " << devicePath );
                     // It may appear later, or not exist on this hardware:
@@ -73,14 +78,42 @@ namespace mt
                 }
             }
 
-            // Read the input event
-            struct input_event ev;
-            if( inputDevice.read( reinterpret_cast<char*>( &ev ), sizeof( struct input_event ) ) )
-            {
-                retryMs = 500;
+            // Wait for events, but not so long that a request to stop the
+            // thread goes unnoticed.
+            struct pollfd pfd {};
+            pfd.fd     = powerKeyFd;
+            pfd.events = POLLIN;
+            const int ready = poll( &pfd, 1, 200 );
+            if( ready == 0 || ( ready < 0 && errno == EINTR ) )
+                continue;
 
-                // Process the input event. The key is KEY_STOP or, from a
-                // power key driver such as the i.MX SNVS one, KEY_POWER.
+            // The device delivers whole events, several at a time if they
+            // queued up.
+            struct input_event events[16];
+            const ssize_t      n = ready > 0 ? read( powerKeyFd, events, sizeof( events ) ) : -1;
+            if( n < 0 && ( errno == EAGAIN || errno == EINTR ) )
+                continue;
+
+            if( n <= 0 || ( pfd.revents & ( POLLERR | POLLHUP | POLLNVAL ) ) != 0 )
+            {
+                // The device went away or cannot be read: open it again
+                // after a while.
+                DBG( "Error reading Input device " << devicePath );
+                close( powerKeyFd );
+                powerKeyFd = -1;
+                wait( retryMs );
+                retryMs = juce::jmin( retryMs * 2, 30000 );
+                continue;
+            }
+
+            retryMs = 500;
+
+            for( size_t i = 0; i < (size_t)n / sizeof( struct input_event ); ++i )
+            {
+                const auto& ev = events[i];
+
+                // The key is KEY_STOP or, from a power key driver such as
+                // the i.MX SNVS one, KEY_POWER.
                 if( ev.type == EV_KEY && ( ev.code == KEY_STOP || ev.code == KEY_POWER ) )
                 {
                     if( ev.value == 1 )
@@ -95,19 +128,18 @@ namespace mt
                     }
                 }
             }
-            else
-            {
-                // The device went away or cannot be read: open it again
-                // after a while.
-                DBG( "Error reading Input device " << devicePath );
-                inputDevice.close();
-                wait( retryMs );
-                retryMs = juce::jmin( retryMs * 2, 30000 );
-                continue;
-            }
+#else
+            wait( 1000 );
 #endif
-            juce::Thread::sleep( 300 );
         }
+
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        if( powerKeyFd >= 0 )
+        {
+            close( powerKeyFd );
+            powerKeyFd = -1;
+        }
+#endif
     }
 
     // The system's network manager owns the Ethernet interface: it brings
@@ -135,6 +167,14 @@ namespace mt
         if( std::string( KICK_FACTORY_RESET_UNIT ).size() > 0 )
             return process::run( { "systemctl", "start", "--no-block", KICK_FACTORY_RESET_UNIT } );
 
+        // Forget the Wi-Fi networks, which wpa_supplicant keeps.
+        int result = 0;
+        if( !WifiManager::getWifiInterface()->removeAllNetworks() )
+        {
+            DBG( "Factory reset: could not remove the Wi-Fi networks" );
+            result = -1;
+        }
+
         // Remove the projects and the preferences from the state directory
         // (what "rm -rf <state>/projects* <state>/prefs" did).
         std::error_code       ec;
@@ -147,7 +187,6 @@ namespace mt
                 paths.push_back( entry.path() );
         }
 
-        int result = 0;
         for( const auto& path : paths )
         {
             fs::remove_all( path, ec );
@@ -269,13 +308,10 @@ namespace mt
     {
         std::string serialNo = "000000000";
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::string path = "/sys/devices/soc0/serial_number";
-
-        std::ifstream serialFile( path.c_str() );
-        if( serialFile.is_open() )
-        {
-            serialFile >> serialNo;
-        }
+        // The SoC's unique ID, from the kernel's soc bus.
+        const std::string serial = sysfile::readLine( "/sys/devices/soc0/serial_number" );
+        if( !serial.empty() )
+            serialNo = serial;
 #endif
         return juce::String( serialNo );
     }
@@ -289,6 +325,15 @@ namespace mt
         getLinuxVersion( path, linfo );
         juce::String FwVersion = juce::String::formatted( "%d.%d.%d",linfo.major, linfo.minor, linfo.patch );
         return FwVersion;
+    }
+
+    juce::String HwPref::getSystemVersion()
+    {
+        // The image's version from os-release; the updates still compare
+        // the one in version.txt (getLinuxVersion()), which systems
+        // without os-release's IMAGE_VERSION or VERSION_ID show too.
+        const auto version = osrelease::displayVersion( osrelease::read() );
+        return version.empty() ? getFirmwareVersion() : juce::String::fromUTF8( version.c_str() );
     }
 
     bool HwPref::getLinuxVersion( std::string& path, mt::linuxFwInfo& linfo )
@@ -637,12 +682,7 @@ namespace mt
 
     bool HwPref::isEthernetCableConnected()
     {
-#if( JUCE_LINUX || __linux__ )
-        std::ifstream carrier( "/sys/class/net/eth0/carrier" );
-        int           detected = 0;
-        return ( carrier >> detected ) && detected == 1;
-#endif
-        return false;
+        return net::hasCarrier( net::ethernetInterface() );
     }
 
     bool HwPref::ethernetEnable( bool status )
@@ -660,20 +700,7 @@ namespace mt
     bool HwPref::isInterfaceUp()
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string   path = "/sys/class/net/eth0/operstate";
-        std::ifstream file( path );
-
-        if( !file.is_open() )
-        {
-            std::cerr << "Error: Could not open " << path << std::endl;
-            return false;
-        }
-
-        std::string state;
-        file >> state;
-        file.close();
-
-        return state == "up";
+        return net::isUp( net::ethernetInterface() );
 #else
         return true;
 #endif
@@ -694,142 +721,45 @@ namespace mt
 
     std::string HwPref::getSubnetMask( const std::string& interface )
     {
-        std::string subnetMask = "0.0.0.0";
-#if( JUCE_LINUX || __linux__ )
-        int          sockfd;
-        struct ifreq ifr;
-
-        // Create a socket to use for the ioctl call
-        sockfd = socket( AF_INET, SOCK_DGRAM, 0 );
-        if( sockfd == -1 )
-        {
-            std::cerr << "Failed to create socket\n";
-            return "";
-        }
-
-        // Prepare the struct for the ioctl call
-        ifr.ifr_addr.sa_family = AF_INET;
-        std::strncpy( ifr.ifr_name, interface.c_str(), IFNAMSIZ - 1 );
-
-        // Perform the ioctl to get the subnet mask
-        if( ioctl( sockfd, SIOCGIFNETMASK, &ifr ) == -1 )
-        {
-            std::cerr << "Failed to get subnet mask\n";
-            close( sockfd );
-            return "";
-        }
-
-        // Convert the result to a readable string
-        struct sockaddr_in* netmask = reinterpret_cast<struct sockaddr_in*>( &ifr.ifr_netmask );
-        subnetMask                  = inet_ntoa( netmask->sin_addr );
-
-        // Close the socket
-        close( sockfd );
-#endif
-        return subnetMask;
+        return net::ipv4Address( interface ).netmask;
     }
 
     std::string HwPref::getGateway( const std::string& interface )
     {
-#if( JUCE_LINUX || __linux__ )
-        // Retrieve routing information
-        juce::String output;
-        if( process::run( { "ip", "route", "show" }, &output ) < 0 )
-        {
-            std::cerr << "Failed to run command\n";
-            return "";
-        }
-        std::string result = output.toStdString();
-
-        // Parse the result to find the line corresponding to the desired interface
-        std::istringstream iss( result );
-        std::string        line;
-        while( std::getline( iss, line ) )
-        {
-            if( line.find( "default via" ) != std::string::npos && line.find( interface ) != std::string::npos )
-            {
-                // Extract the gateway IP from the line
-                std::istringstream lineStream( line );
-                std::string        word;
-                lineStream >> word; // Skip "default"
-                lineStream >> word; // Skip "via"
-                std::string gatewayIP;
-                lineStream >> gatewayIP; // Gateway IP
-
-                return gatewayIP;
-            }
-        }
-#endif
-        return "0.0.0.0";
+        const std::string gateway = net::defaultGateway( interface );
+        return gateway.empty() ? "0.0.0.0" : gateway;
     }
 
     void HwPref::getIP( const std::string interface, sysEthInfo& info )
     {
-        DBG( "GetIP Fucntion Called" );
-        std::string ipAddress = "0.0.0.0";
-
-#if( JUCE_LINUX || __linux__ )
-
-        // Get the local IP address: the "inet <address>/<prefix>" of
-        // "ip -4 -o addr show dev <interface>"
-        juce::String output;
-        process::run( { "ip", "-4", "-o", "addr", "show", "dev", interface }, &output );
-        const auto fields = juce::StringArray::fromTokens( output, " \t\n", "" );
-        const auto inet   = fields.indexOf( "inet" );
-        if( inet >= 0 && inet + 1 < fields.size() )
-            ipAddress = fields[inet + 1].upToFirstOccurrenceOf( "/", false, false ).toStdString();
-        info.IP = ipAddress;
-
-        // Get the adapter status
-        std::ifstream operstate( "/sys/class/net/" + interface + "/operstate" );
-        std::string   state;
-        if( ( operstate >> state ) && state == "up" )
-        {
-            info.status = true;
-            DBG( "Ethernet Adapter Status: Operational" );
-        }
-        else
-        {
-            info.status = false;
-            DBG( "Ethernet Adapter Status: Not Operational" );
-        }
-
-        // Get the gateway
-        std::string gateway = getGateway( interface );
-        DBG( "Gateway: " << gateway );
-        info.gateway = gateway;
-
-        // Get the subnet mask
-        std::string subnetMask = getSubnetMask( interface );
-        info.subnet            = subnetMask;
-        DBG( "Subnet Mask: " << subnetMask );
-#endif
+        const auto address = net::ipv4Address( interface );
+        info.IP            = address.address;
+        info.subnet        = address.netmask;
+        info.status        = net::isUp( interface );
+        info.gateway       = getGateway( interface );
+        DBG( "Network " << interface << ": " << info.IP << "/" << info.subnet << " via " << info.gateway << ( info.status ? ", up" : ", down" ) );
     }
 
-    int HwPref::getDateTime( dateInfo& date, timeInfo& time, const juce::String& timezone )
+    int HwPref::getDateTime( dateInfo& date, timeInfo& time )
     {
         DBG( "GetDate Fucntion Called" );
 
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        setenv( "TZ", timezone.toRawUTF8(), 1 );
-#endif
-
-        // Use tzset to update the timezone information
+        // The system's time zone, /etc/localtime: tzset() reads it again if
+        // it has changed since (TZ being unset), and localtime_r(), unlike
+        // localtime(), is safe with other threads.
         tzset();
 
         std::time_t currentTime = std::time( nullptr );
+        std::tm     timeInfo {};
 
-        // Convert the time to a struct tm
-        std::tm* timeInfo = std::localtime( &currentTime );
-
-        if( timeInfo != nullptr )
+        if( localtime_r( &currentTime, &timeInfo ) != nullptr )
         {
             // Extract and display each component separately
-            date.YYYY = timeInfo->tm_year + 1900; // Add 1900 to get the actual year
-            date.MM   = timeInfo->tm_mon + 1; // Add 1 since months are 0-based
-            date.DD   = timeInfo->tm_mday;
-            time.HH   = timeInfo->tm_hour;
-            time.MM   = timeInfo->tm_min;
+            date.YYYY = timeInfo.tm_year + 1900; // Add 1900 to get the actual year
+            date.MM   = timeInfo.tm_mon + 1; // Add 1 since months are 0-based
+            date.DD   = timeInfo.tm_mday;
+            time.HH   = timeInfo.tm_hour;
+            time.MM   = timeInfo.tm_min;
 
             DBG( "Date-> " << date.YYYY << "/" << date.MM << "/" << date.DD );
             DBG( "Time-> " << time.HH << "/" << time.MM );
@@ -837,6 +767,35 @@ namespace mt
             return 1;
         }
         return 0;
+    }
+
+    juce::String HwPref::getTimeZone()
+    {
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // /etc/localtime links to the zone's file in the time zone database
+        // (.../zoneinfo/Europe/Berlin), which is how systemd's timedated
+        // sets and reports it.
+        char          target[PATH_MAX];
+        const ssize_t n = readlink( "/etc/localtime", target, sizeof( target ) - 1 );
+        if( n > 0 )
+        {
+            std::string zone( target, (size_t)n );
+            const auto  pos = zone.find( "zoneinfo/" );
+            if( pos != std::string::npos )
+            {
+                zone = zone.substr( pos + 9 );
+                for( const char* prefix : { "posix/", "right/" } )
+                    if( zone.rfind( prefix, 0 ) == 0 )
+                        zone = zone.substr( std::strlen( prefix ) );
+                return zone;
+            }
+        }
+
+        // Debian's way; also written by some builds.
+        return sysfile::readLine( "/etc/timezone" );
+#else
+        return {};
+#endif
     }
 
     int HwPref::setTimeZone( juce::String& str )
@@ -854,26 +813,55 @@ namespace mt
         return 0;
     }
 
+    // The backlight's sysfs directory, or an empty string if there is none.
+    static std::string findBacklight()
+    {
+        const std::string configured = KICK_BACKLIGHT_DEVICE;
+        const std::string classDir   = "/sys/class/backlight";
+
+        if( !configured.empty() )
+            return configured[0] == '/' ? configured : classDir + "/" + configured;
+
+        std::vector<std::string> names;
+        std::error_code          ec;
+        for( const auto& entry : fs::directory_iterator( classDir, ec ) )
+            names.push_back( entry.path().filename().string() );
+
+        if( names.empty() )
+            return {};
+
+        std::sort( names.begin(), names.end() );
+        return classDir + "/" + names.front();
+    }
+
     int HwPref::setBrightness( int value )
     {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        if( value < 20 )
-        {
-            value = 20;
-        }
-        std::string setBrightness = "echo  " + std::to_string( value ) + " > /sys/devices/platform/backlight/backlight/backlight/brightness";
-        DBG( "Command = " << setBrightness );
+        // The setting is a percentage. Below 20% the screen is too dark to
+        // find the setting again, so it goes no lower.
+        value = juce::jlimit( 20, 100, value );
 
-        int returnCode = system( setBrightness.c_str() );
-        if( returnCode == 0 )
+        const std::string backlight = findBacklight();
+        if( backlight.empty() )
         {
-            DBG( "Command executed successfully." );
+            DBG( "No backlight found" );
+            return 0;
+        }
+
+        // The levels go from 0 to max_brightness, which depends on the
+        // driver (from a handful of PWM steps to thousands).
+        const long maxBrightness = std::strtol( sysfile::readLine( backlight + "/max_brightness" ).c_str(), nullptr, 10 );
+        if( maxBrightness <= 0 )
+        {
+            DBG( "Cannot read the maximum brightness of " << backlight );
+            return 0;
+        }
+
+        const long level = juce::jmax( 1L, ( value * maxBrightness + 50 ) / 100 );
+        if( sysfile::write( backlight + "/brightness", std::to_string( level ) ) )
             return 1;
-        }
-        else
-        {
-            DBG( "Command execution failed or returned non-zero: " );
-        }
+
+        DBG( "Cannot set the brightness of " << backlight << " to " << level << ": " << strerror( errno ) );
 #endif
         return 0;
     }
@@ -926,27 +914,13 @@ namespace mt
         return info;
     }
 
-    bool HwPref::isStorageconnected( std::string id ) // flash-> usb , sdcard->SDCARD
+    bool HwPref::isStorageconnected( std::string id ) // the mount point of a removable disk
     {
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::fstream versionFile;
-        versionFile.open( "/proc/mounts", std::ios::in );
-
-        if( versionFile.is_open() )
-        {
-            std::string str;
-            while( getline( versionFile, str ) )
-            {
-                if( str.find( id ) != std::string::npos )
-                {
-                    DBG( "USB Storage is connected" );
-                    return true;
-                }
-            }
-        }
-#endif
-        DBG( " " << id << " Storage is not connected" );
-        return false;
+        // The mount point exactly: a substring of /proc/mounts would also
+        // match other mount points, devices and mount options.
+        const bool connected = !id.empty() && isMountPoint( id );
+        DBG( " " << id << ( connected ? " Storage is connected" : " Storage is not connected" ) );
+        return connected;
     }
 
     void HwPref::setDate( int day, int month, int year )
@@ -998,9 +972,20 @@ namespace mt
 
         // A clock set by hand would be overwritten by network time, and
         // timedated refuses to set it while network time is on, so turn it
-        // off first.
-        process::run( { "timedatectl", "set-ntp", "false" } );
-        return process::run( { "timedatectl", "set-time", localTime } ) == 0;
+        // off first; back on if the time cannot be set after all.
+        juce::String ntp;
+        process::run( { "timedatectl", "show", "--property=NTP", "--value" }, &ntp );
+        const bool ntpWasOn = ntp.trim() == "yes";
+
+        if( ntpWasOn )
+            process::run( { "timedatectl", "set-ntp", "false" } );
+
+        if( process::run( { "timedatectl", "set-time", localTime } ) == 0 )
+            return true;
+
+        if( ntpWasOn )
+            process::run( { "timedatectl", "set-ntp", "true" } );
+        return false;
     }
 
     // Get the number of days in a month, considering leap years

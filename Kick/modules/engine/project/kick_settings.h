@@ -186,7 +186,7 @@ namespace mt
 
         Atomic<bool> enabled;
         AtomicString ssid;
-        AtomicString pwd;
+        // No passphrase: wpa_supplicant keeps it with the network.
     };
 
     /// ///////////////////////////////////

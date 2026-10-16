@@ -131,6 +131,11 @@ add_compile_definitions(KICK_MEDIA_DIR="${KICK_MEDIA_DIR}")
 set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
 add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
 
+## The backlight (kick_Hwpref.cpp): its name in /sys/class/backlight or its
+## sysfs directory; empty: the first backlight there is.
+set(KICK_BACKLIGHT_DEVICE "" CACHE STRING "Backlight name or sysfs directory; empty: the first one")
+add_compile_definitions(KICK_BACKLIGHT_DEVICE="${KICK_BACKLIGHT_DEVICE}")
+
 ## The front-panel MCU's serial port (input_events.cpp) and the CV DAC's I2C
 ## bus (kick_I2c.cpp).
 set(KICK_MCU_SERIAL_DEVICE "/dev/ttymxc0" CACHE FILEPATH "Front-panel MCU serial port")
@@ -156,6 +161,15 @@ add_compile_definitions(
 ## the application removes its own projects and preferences.
 set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
 add_compile_definitions(KICK_FACTORY_RESET_UNIT="${KICK_FACTORY_RESET_UNIT}")
+
+## The Ethernet and Wi-Fi interfaces (kick_NetInfo.h); empty: the first one
+## of each kind the kernel has.
+set(KICK_ETH_IFACE  "" CACHE STRING "Ethernet interface; empty: the first one")
+set(KICK_WIFI_IFACE "" CACHE STRING "Wi-Fi interface; empty: the first one")
+add_compile_definitions(
+    KICK_ETH_IFACE="${KICK_ETH_IFACE}"
+    KICK_WIFI_IFACE="${KICK_WIFI_IFACE}"
+)
 
 ## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
 set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")

@@ -381,7 +381,10 @@ namespace mt
 
         enabled.attachTo( vTree, IDs::wifienabled, Undo, false );
         ssid.attachTo( vTree, IDs::wifissid, Undo, "" );
-        pwd.attachTo( vTree, IDs::wifipasswd, Undo, "" );
+
+        // Earlier versions kept the Wi-Fi passphrase here in clear text;
+        // drop it from the preferences they wrote (the change saves them).
+        vTree.removeProperty( IDs::wifipasswd, nullptr );
     }
 
     bool KickWifi::isValid() { return vTree.hasType( IDs::WIFI ); }

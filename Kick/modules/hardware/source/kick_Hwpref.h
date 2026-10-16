@@ -32,6 +32,8 @@
     #include <cstdlib>
     #include <linux/input.h>
     #include <sys/types.h>
+    #include <fcntl.h>
+    #include <poll.h>
     #include <termios.h>
     #include <sys/ioctl.h>
     #include <netinet/in.h>
@@ -39,6 +41,7 @@
     #include <net/if.h>
     #include <unistd.h>
 #endif
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -46,6 +49,9 @@
 #include <regex>
 #include <functional>
 #include "kick_Process.h"
+#include "kick_NetInfo.h"
+#include "kick_OsRelease.h"
+#include "kick_SysFile.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
 #define BAUDRATE   B115200
@@ -133,7 +139,8 @@ namespace mt
         std::string                                      getGateway( const std::string& interface );
         int                                              setIP( const std::string& interface, const std::string& ipAddress, const std::string& subnetMask, const std::string& gateway );
         std::string                                      getSubnetMask( const std::string& interface );
-        int                                              getDateTime( dateInfo& date, timeInfo& time, const juce::String& timezone );
+        int                                              getDateTime( dateInfo& date, timeInfo& time );
+        juce::String                                     getTimeZone();
         int                                              setTimeZone( juce::String& str );
         int                                              setBrightness( int value );
         int                                              getDaysInMonth( int month, int year );
@@ -149,7 +156,7 @@ namespace mt
         void                                             setDate( int Day, int Month, int year );
         void                                             setTime( int hour, int minute );
         DeviceInfo                                       getDeviceInfo();
-        bool                                             isStorageconnected( std::string id );
+        bool                                             isStorageconnected( std::string id ); // id: a mount point
         bool                                             isImgFile( std::string filepath );
         std::string                                      isImageFound( juce::String Path, juce::String format );
         bool                                             getFwVersion( std::string& path, linuxFwInfo& linfo, mcuFwInfo& minfo );
@@ -174,6 +181,7 @@ namespace mt
         void        setSurfaceVersion( juce::String str ) { surfaceVerison = str; }
 
         juce::String getFirmwareVersion();
+        juce::String getSystemVersion(); // for display only
         juce::String getSurfaceVersion() { return surfaceVerison; }
 
     private:
@@ -190,7 +198,7 @@ namespace mt
         int           idecrptKey   = 123;
         int           fw_ver_index = -1;
         int           serialComPortHandler;
-        std::ifstream inputDevice;
+        int           powerKeyFd = -1;
         PowerButtonUI powerButtonUI;
         // Setter for the function pointer
         bool        setDateTime( int year, int month, int day, int hour, int minute, int second );

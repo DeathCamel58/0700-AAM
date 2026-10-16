@@ -107,7 +107,7 @@ namespace kick_ui
         };
         date_YYYY.onValueChanged = [&]( int Value ) {
             DBG( "date_YYYY " << Value );
-            int days = mt::HwPref::getHwPref().getDaysInMonth( Value, date_YYYY.getValue() );
+            int days = mt::HwPref::getHwPref().getDaysInMonth( date_MM.getValue(), Value );
             date_DD.setRange( 1, days, 1 );
             setDate();
         };
@@ -119,9 +119,12 @@ namespace kick_ui
             DBG( "time_MM " << Value );
             setTime();
         };
+        // The system's time zone is the one that counts: it is only
+        // changed when the user picks another one.
         timezone.onSelectionChanged = [&]( int index, juce::String str ) {
             settings.hardware.timezone = ( str );
-            mt::HwPref::getHwPref().setTimeZone( str );
+            if( mt::HwPref::getHwPref().setTimeZone( str ) )
+                updateDateTime();
         };
 
         taps.onSelectionChanged = [&]( int index, juce::String str ) {
@@ -131,8 +134,6 @@ namespace kick_ui
         //need to send this settings only 1 time to hardware.
         int value = settings.hardware.brightness();
         mt::HwPref::getHwPref().setBrightness( value );
-        juce::String zone = settings.hardware.timezone();
-        mt::HwPref::getHwPref().setTimeZone( zone );
         SendPadSettings();
     }
 
@@ -165,7 +166,9 @@ namespace kick_ui
         enabled.setToggleState( settings.hardware.tempoLEDStatus(), juce::dontSendNotification );
         taps.setSelected( test, juce::dontSendNotification );
 
-        juce::String zone = settings.hardware.timezone();
+        juce::String zone = mt::HwPref::getHwPref().getTimeZone();
+        if( zone.isEmpty() )
+            zone = settings.hardware.timezone();
         timezone.setSelected( zone, juce::dontSendNotification );
     }
 
@@ -182,7 +185,7 @@ namespace kick_ui
     {
         mt::timeInfo time;
         mt::dateInfo date;
-        mt::HwPref::getHwPref().getDateTime( date, time, settings.hardware.timezone() );
+        mt::HwPref::getHwPref().getDateTime( date, time );
         date_DD.setValue( date.DD, juce::dontSendNotification );
         date_MM.setValue( date.MM, juce::dontSendNotification );
         date_YYYY.setValue( date.YYYY, juce::dontSendNotification );

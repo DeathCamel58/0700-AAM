@@ -53,17 +53,31 @@ namespace kick_ui
         };
 
         scanWifi.onClick = [&]() {
-            if( scanWifi.getToggleState() )
+            if( scanWifi.getToggleState() && !scanning )
             {
                 DBG( "Scanning Wifi" );
-                std::vector<juce::String> list = mt::WifiManager().scanWiFiNetworks();
-                wifiList.setListOptions( list );
+                scanning = true;
+
+                // A scan takes seconds: wait for it on a thread of its own,
+                // and show the result if this page is still there.
+                juce::Component::SafePointer<SettingsWifi> self( this );
+                juce::Thread::launch( [self]() {
+                    auto list = mt::WifiManager::getWifiInterface()->scanWiFiNetworks();
+                    juce::MessageManager::callAsync( [self, list]() {
+                        if( self != nullptr )
+                        {
+                            self->wifiList.setListOptions( list );
+                            self->scanning = false;
+                        }
+                    } );
+                } );
             }
         };
 
+        // The passphrase is only kept until it is handed to wpa_supplicant,
+        // which stores it with the network; it is not a preference.
         password.onTextChange = [&]() {
-            juce::String text = password.getText();
-            settings.wifi.pwd = ( text );
+            passphrase = password.getText();
         };
 
         wifiList.onSelectionChanged = [&]( int value, juce::String str ) {
@@ -78,9 +92,12 @@ namespace kick_ui
     void SettingsWifi::connectWifi( bool Connect )
     {
         if( Connect )
-            mt::WifiManager().getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), settings.wifi.pwd() );
+        {
+            if( mt::WifiManager::getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), passphrase ) )
+                passphrase.clear();
+        }
         else
-            mt::WifiManager().getWifiInterface()->disconnectWiFi();
+            mt::WifiManager::getWifiInterface()->disconnectWiFi();
     }
 
     void SettingsWifi::handleEnabledClick()
@@ -88,20 +105,20 @@ namespace kick_ui
         bool status = enabled.getToggleState();
         if( status )
         {
-            mt::WifiManager().enableWiFi();
+            mt::WifiManager::getWifiInterface()->enableWiFi();
         }
         else
-            mt::WifiManager().disableWiFi();
+            mt::WifiManager::getWifiInterface()->disableWiFi();
     }
 
     void SettingsWifi::refresh()
     {
         mt::sysEthInfo info;
-        mt::HwPref::getHwPref().getIP( "wlan0", info );
+        mt::HwPref::getHwPref().getIP( mt::net::wifiInterface(), info );
 
         wifIP.setText( info.IP, juce::dontSendNotification );
         subnet.setText( info.subnet, juce::dontSendNotification );
-        gateway.setText( info.subnet, juce::dontSendNotification );
+        gateway.setText( info.gateway, juce::dontSendNotification );
 #if 0
         // Assuming wifiList is a custom UI component or structure managing the list of networks
         juce::String previouslySelectedSSID = wifiList.getSelected(); // Step 1: Store the currently selected SSID
@@ -127,7 +144,7 @@ namespace kick_ui
     {
         if( settings.wifi.enabled() )
         {
-            mt::WifiManager().getWifiInterface()->connectToWiFi( settings.wifi.ssid(), settings.wifi.pwd() );
+            mt::WifiManager::getWifiInterface()->connectToWiFi( settings.wifi.ssid(), {} );
         }
     }
 

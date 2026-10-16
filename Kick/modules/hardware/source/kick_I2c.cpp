@@ -37,7 +37,7 @@
 namespace mt
 {
     I2CDevice::I2CDevice()
-        : devicePath_( KICK_CV_DAC_I2C_DEVICE ), address_( 0xc ), file_( -1 ), isDeviceOpen_( false )
+        : file_( -1 ), devicePath_( KICK_CV_DAC_I2C_DEVICE ), address_( 0xc ), isDeviceOpen_( false )
     {
         if( openDevice() )
         {
@@ -47,6 +47,7 @@ namespace mt
 
     I2CDevice::~I2CDevice()
     {
+        closeDevice();
     }
 
     bool I2CDevice::isOpen() const
@@ -57,7 +58,7 @@ namespace mt
     bool I2CDevice::openDevice()
     {
 #if( JUCE_LINUX || __linux__ )
-        file_ = open( devicePath_.c_str(), O_RDWR );
+        file_ = open( devicePath_.c_str(), O_RDWR | O_CLOEXEC );
         if( file_ < 0 )
         {
             DBG( "Failed to open the I2C device " << devicePath_.c_str() );
@@ -133,17 +134,21 @@ namespace mt
 
     bool CV::setCentVoltage( uint8_t channel, uint16_t centValue )
     {
-        bool retVal = false;
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        bool      retVal = false;
+        const int dac    = toChannelmap( channel );
+        if( dac >= 0 )
         {
+            // The cents above the port's start note: the table holds the
+            // levels of its 61 notes, so this interpolates between two of
+            // them (at most the last two).
             auto startNote = (int)getChannelNoteMap( channel );
-            auto checkCent = (int)( centValue - ( startNote * 100 ) );
-            auto noteIndex = centValue / 100;
+            auto checkCent = (int)centValue - startNote * 100;
             if( juce::isPositiveAndBelow( checkCent, 6000 ) )
             {
-                uint16_t regValue = claibValue[noteIndex] + ( claibValue[noteIndex + 1] - claibValue[noteIndex] ) * std::fmod( centValue, 100 ) / 100;
-                uint8_t  buffer[3];
-                buffer[0] = ( 0x30 | ( toChannelmap( channel ) ) );
+                const int noteIndex = checkCent / 100;
+                uint16_t  regValue  = (uint16_t)( claibValue[noteIndex] + ( claibValue[noteIndex + 1] - claibValue[noteIndex] ) * ( checkCent % 100 ) / 100 );
+                uint8_t   buffer[3];
+                buffer[0] = (uint8_t)( 0x30 | dac );
                 buffer[1] = ( regValue >> 4 ) & 0xFF;
                 buffer[2] = ( regValue << 4 ) & 0xF0;
 
@@ -160,8 +165,9 @@ namespace mt
 
     bool CV::setVoltage( uint8_t channel, uint8_t Note )
     {
-        bool retVal = false;
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        bool      retVal = false;
+        const int dac    = toChannelmap( channel );
+        if( dac >= 0 )
         {
             auto startNote = (int)getChannelNoteMap( channel );
             auto note      = (int)Note - startNote;
@@ -169,7 +175,7 @@ namespace mt
             {
                 uint8_t  buffer[3];
                 uint16_t regValue = claibValue[note];
-                buffer[0]         = ( 0x30 | ( toChannelmap( channel ) ) );
+                buffer[0]         = (uint8_t)( 0x30 | dac );
                 buffer[1]         = ( regValue >> 4 ) & 0xFF;
                 buffer[2]         = ( regValue << 4 ) & 0xF0;
 
@@ -186,13 +192,14 @@ namespace mt
 
     bool CV::setstepVoltage( uint8_t channel, uint16_t step )
     {
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        const int dac = toChannelmap( channel );
+        if( dac >= 0 )
         {
             uint8_t buffer[3];
             if( step > 0 )
             {
                 int bufVal = ( 4095 / step );
-                buffer[0]  = ( 0x30 | ( toChannelmap( channel ) ) );
+                buffer[0]  = (uint8_t)( 0x30 | dac );
                 buffer[1]  = ( bufVal >> 4 ) & 0xFF;
                 buffer[2]  = ( bufVal << 4 ) & 0xF0;
 
@@ -209,10 +216,11 @@ namespace mt
 
     bool CV::setVoltageOn( uint8_t channel )
     {
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        const int dac = toChannelmap( channel );
+        if( dac >= 0 )
         {
             uint8_t buffer[3];
-            buffer[0] = ( 0x30 | ( toChannelmap( channel ) ) ); //beacuse cv channle start with 0
+            buffer[0] = (uint8_t)( 0x30 | dac );
             buffer[1] = 0xFF;
             buffer[2] = 0xFF;
             if( !i2c.writeBytes( buffer, sizeof( buffer ) ) )
@@ -227,10 +235,11 @@ namespace mt
 
     bool CV::setVoltageOff( uint8_t channel )
     {
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        const int dac = toChannelmap( channel );
+        if( dac >= 0 )
         {
             uint8_t buffer[3];
-            buffer[0] = ( 0x30 | ( toChannelmap( channel ) ) );
+            buffer[0] = (uint8_t)( 0x30 | dac );
             buffer[1] = 0x00;
             buffer[2] = 0x00;
 
@@ -294,15 +303,21 @@ namespace mt
 
     bool CV::setChannelNoteMap( uint8_t channel, int startNote )
     {
-        uint8_t mappedchannel         = toChannelmap( channel );
-        channelNoteMap[mappedchannel] = startNote;
+        // The settings number the ports from 0, the programs (and the rest
+        // of this class) from 1.
+        const int port = channel + 1;
+        if( toChannelmap( port ) < 0 )
+            return false;
+
+        channelNoteMap[(uint8_t)port] = startNote;
         return true; // Indicate successful operation
     }
 
-    // Function to get the note range for a given channel
+    // Function to get the note range for a given port
     inline uint8_t CV::getChannelNoteMap( uint8_t channel )
     {
-        return channelNoteMap[channel];
+        const auto it = channelNoteMap.find( channel );
+        return it != channelNoteMap.end() ? (uint8_t)it->second : 0;
     }
 
     uint16_t CV::calculateValue( uint8_t note )
@@ -348,17 +363,20 @@ namespace mt
         return true;
     }
 
+    // The DAC channel of a port (1 to MaxCVPorts), or -1 for any other
+    // value, such as 0, which is "no port".
     inline int CV::toChannelmap( int port )
     {
-        return juce::isPositiveAndBelow( port, 9 ) ? CVPortIndex[port] : -1;
+        return port >= 1 && port <= MaxCVPorts ? CVPortIndex[(size_t)port] : -1;
     }
 
     bool CV::readVoltage( uint8_t channel, float& voltage )
     {
-        if( juce::isPositiveAndBelow( channel, MaxCVPorts ) )
+        const int dac = toChannelmap( channel );
+        if( dac >= 0 )
         {
             uint8_t rxBuffer[2] = { 0, 0 }; // To store the read data
-            if( initRead( ( toChannelmap( channel ) ) ) )
+            if( initRead( (uint8_t)dac ) )
             {
                 if( !i2c.readBytes( rxBuffer, sizeof( rxBuffer ) ) )
                 {
@@ -403,6 +421,9 @@ namespace mt
 
     bool CV::writeAllChannelVoltage( const std::vector<uint16_t>& data )
     {
+        if( data.size() < MaxCVPorts )
+            return false;
+
         uint8_t buffer[3];
         for( int channel = 0; channel < 8; channel++ )
         {

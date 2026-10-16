@@ -8,6 +8,7 @@
 #include "kick_SimulatorInterface.h"
 
 #include "ComConfig.hpp"
+#include "kick_McuFrame.h"
 
 // The front-panel MCU's serial port; the build system can override it (see
 // CMakeLists.txt).
@@ -74,6 +75,7 @@ namespace Controls
                     output.reset( nullptr );
                     sPort.reset( nullptr );
                 }
+                rxPending.clear();
                 {
     #if( JUCE_LINUX || __linux__ )
                     CPktMgr::HWMsg_t hwMsg;
@@ -115,7 +117,17 @@ namespace Controls
         }
 
         void sendMessageToControlSurface( CPktMgr::HWMsg_t& f_HwMsg )
-        { // Enqueue in the queue...
+        {
+            // A frame's size byte counts the data and the CRC: a longer
+            // message would go out with a wrong size and be misread.
+            if( f_HwMsg.data.size() > Controls::mcu::maxDataSize )
+            {
+                juce::Logger::writeToLog( "Not sending a message with " + juce::String( (int)f_HwMsg.data.size() ) + " data bytes to the control surface: the most is "
+                                          + juce::String( (int)Controls::mcu::maxDataSize ) );
+                return;
+            }
+
+            // Enqueue in the queue...
             txQueue.enqueue( f_HwMsg );
             //semaphoreQueue.signal();
             triggerAsyncUpdate();
@@ -124,7 +136,7 @@ namespace Controls
         void messageReceivedFromControlSurface( CPktMgr::HWMsg_t& f_rxMsg )
         {
             juce::String log;
-            log += " Data[0] : " + juce::String( f_rxMsg.data[0] ) + " Cmd : " + juce::String( f_rxMsg.pktCmd ) + +" type : " + juce::String( f_rxMsg.pktType );
+            log += " Data[0] : " + ( f_rxMsg.data.empty() ? juce::String( "-" ) : juce::String( f_rxMsg.data[0] ) ) + " Cmd : " + juce::String( f_rxMsg.pktCmd ) + +" type : " + juce::String( f_rxMsg.pktType );
             juce::Logger::writeToLog( log );
 
             Controls::InputEvents::dispatchHardwareEvent( f_rxMsg );
@@ -135,140 +147,61 @@ namespace Controls
         void sendSerialOutData( const std::vector<char>& data )
         {
 #if( JUCE_LINUX || __linux__ )
-            if( !output )
+            if( !output || data.empty() )
                 return;
 
-            juce::MemoryBlock outData;
-            uint8_t           f_txSize = data.size();
-            //if(f_txSize > 0)
-            //{
-            //p + (4 int size) + (hw id) + data + \n
-            outData.ensureSize( f_txSize );
-            //DBG("======TX==Message======");
-            for( unsigned int i = 0; i < f_txSize; i++ )
-            {
-                outData[i] = data[i];
-                //DBG("TxData: " << (int)outData[i]);
-            }
-
-            output->write( outData.getData(), outData.getSize() );
+            output->write( data.data(), data.size() );
             output->flush();
-            //}
 #endif
         }
 
         void changeListenerCallback( juce::ChangeBroadcaster* source ) override
         {
-            int rxLength = (int)input->getTotalLength();
-            // DBG("Receive Length: " << rxLength);
-            if( rxLength < 6 )
+            if( !input )
                 return;
 
-            // The reader thread keeps appending to the input buffer, so take
-            // its length once: a later, larger length would overrun serialData.
-            juce::MemoryBlock serialData( (size_t)rxLength, true );
-            size_t            len = (size_t)rxLength;
-
-            input->read( serialData.getData(), rxLength );
-
-            if( len < 4 )
+            // Take what the reader thread has received so far. A frame can
+            // arrive in pieces, so the start of one is kept for the next
+            // time.
+            const int available = (int)input->getTotalLength();
+            if( available > 0 )
             {
-                DBG( "Size is less then 3 bytes" );
-                return;
+                const auto kept = rxPending.size();
+                rxPending.resize( kept + (size_t)available );
+                const int got = input->read( rxPending.data() + kept, available );
+                rxPending.resize( kept + (size_t)juce::jmax( 0, got ) );
             }
 
-            char* byteArray = serialData.begin();
-
-            CPktMgr& refobjFrameHdl = ms_objPktMgrUsb;
-
-            while( rxLength )
+            for( const auto& frame : Controls::mcu::extractFrames( rxPending, []( std::vector<char>& bytes ) { return CPktMgr::CrcGen( bytes ); } ) )
             {
-                int pktIndex     = 0;
-                int pktOffset    = 0;
-                int packetLength = byteArray[5 + pktIndex] + 7;
-                // DBG("Packet Length: " << packetLength);
+                CPktMgr::HWMsg_t rxMsg;
+                rxMsg.pktType = (CPktMgr::enumPacketType)frame.type;
+                rxMsg.pktCmd  = frame.command;
+                rxMsg.pktDir  = (CPktMgr::enumPacketDir)frame.direction;
+                for( auto byte : frame.data )
+                    rxMsg.data.push_back( (int)byte );
 
-                if( ( rxLength >= packetLength ) && ( byteArray[0] == 'M' ) && ( byteArray[1] == 'T' ) )
+                if( rxMsg.pktDir == CPktMgr::enumPacketDir::EN_PKT_REQUEST )
                 {
-                    while( packetLength )
+                    if( contracts::DclContractsHelper::isButtonMessage( rxMsg ) )
                     {
-                        if( packetLength > 1 )
-                        {
-                            refobjFrameHdl.PushByteToRxFifo( byteArray[0] );
-                        }
-                        byteArray++;
-                        packetLength--;
-                        rxLength--;
+                        DBG( "Button state = " << contracts::DclContractsHelper::getButtonState( rxMsg ) );
+                        if( ( contracts::DeviceControlContracts::EN_SHIFT == contracts::DclContractsHelper::getButtonCode( rxMsg ) ) )
+                            Controls::shiftBtnState.store( contracts::DclContractsHelper::getButtonState( rxMsg ) );
                     }
+                    messageReceivedFromControlSurface( rxMsg );
                 }
                 else
                 {
-                    rxLength = 0;
-                }
-
-                if( refobjFrameHdl.IsFrameRcvComplete() == TRUE )
-                {
-                    refobjFrameHdl.SetFrameRcvComplete( FALSE );
-                    CPktMgr::HWMsg_t rxMsg;
-                    std::vector<int> tempData;
-                    tempData.push_back( 1 );
-                    rxMsg.pktType = refobjFrameHdl.GetRxPktType();
-                    rxMsg.pktCmd  = refobjFrameHdl.GetRxCommand();
-                    rxMsg.pktDir  = refobjFrameHdl.GetPktDir();
-
-                    int size = (int)refobjFrameHdl.GetRxFrameSize();
-
-                    /*DBG( "===========RX Message==========" );
-                    DBG( "Rx Type: " << rxMsg.pktType << "Rx pktId: " << rxMsg.pktCmd << "Rx size: " << size );
-                   */
-                    //juce::Logger::writeToLog( "Rx Type: " + juce::String(rxMsg.pktType) + "Rx pktId: " + juce::String(rxMsg.pktCmd) + "Rx size: " + juce::String(size ));
-
-                    int index = 0;
-                    while( size - 1 )
-                    {
-                        rxMsg.data.push_back( (int)refobjFrameHdl.PopUint8FromRxFifo() );
-                        index++;
-                        size--;
-                    }
-                    refobjFrameHdl.ClearReceiver();
-                    // DBG("Pad Num: "<<  rxMsg.data[0]);
-
-                    if( rxMsg.pktDir == CPktMgr::enumPacketDir::EN_PKT_REQUEST )
-                    {
-                        CPktMgr::HWMsg_t ackTxMsg;
-                        //ackTxMsg.pktType = rxMsg.pktType;
-                        //ackTxMsg.pktDir  = CPktMgr::enumPacketDir::EN_PKT_RESPONSE;
-                        //ackTxMsg.pktId     = rxMsg.pktId;
-                        //ackTxMsg.data      = rxMsg.data;
-
-                        //DBG("Ack Msg");
-                        //sendMessageToHardware( ackTxMsg );
-
-                        if( contracts::DclContractsHelper::isButtonMessage( rxMsg ) )
-                        {
-                            DBG( "Button state = " << contracts::DclContractsHelper::getButtonState( rxMsg ) );
-                            if( ( contracts::DeviceControlContracts::EN_SHIFT == contracts::DclContractsHelper::getButtonCode( rxMsg ) ) )
-                                Controls::shiftBtnState.store( contracts::DclContractsHelper::getButtonState( rxMsg ) );
-                        }
-                        // juce::String log;
-                        // log += "Cmd:" + juce::String( rxMsg.pktCmd ) + " " + "type:" + juce::String( rxMsg.pktType );
-                        // juce::Logger::writeToLog( log );
-                        messageReceivedFromControlSurface( rxMsg );
-                    }
-                    else
-                    {
-                        //If the data is Ack (response) for the App message, ignore
-                        // Do Nothing
-                    }
-                }
-                else
-                {
-#if defined( DEBUG_PRINTS ) && ( DEBUG_PRINTS > 0 )
-                    DBG( "Data Frame Error" );
-#endif
-                    refobjFrameHdl.ClearReceiver();
+                    //If the data is Ack (response) for the App message, ignore
+                    // Do Nothing
                 }
             }
+
+            // Whatever is left is at most the start of a frame; more than
+            // the longest frame is noise.
+            if( rxPending.size() > Controls::mcu::headerSize + Controls::mcu::maxDataSize + 1 )
+                rxPending.clear();
         }
 
         void run() override
@@ -299,6 +232,9 @@ namespace Controls
         std::unique_ptr<SerialPort>             sPort;
         std::unique_ptr<SerialPortInputStream>  input;
         std::unique_ptr<SerialPortOutputStream> output;
+
+        // Received bytes that are not a complete frame yet.
+        std::vector<uint8_t> rxPending;
 
         moodycamel::ConcurrentQueue<CPktMgr::HWMsg_t> txQueue;
     };

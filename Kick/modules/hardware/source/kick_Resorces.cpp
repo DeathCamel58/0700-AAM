@@ -20,31 +20,41 @@
  */
 
 #include "kick_Resorces.h"
-#include "kick_Process.h"
+#include "kick_SysFile.h"
+
+#if( JUCE_LINUX || __linux__ )
+    #include <sys/statvfs.h>
+#endif
+
+#include <filesystem>
 
 namespace mt
 {
     void SystemResource::cpuInfo( double& cpuUsage )
     {
 #if( JUCE_LINUX || __linux__ )
-        std::ifstream statFile( "/proc/stat" );
-        std::string   line;
+        // The first line of /proc/stat holds the time all CPUs have spent
+        // in each state since boot; the usage is the share of non-idle time
+        // since the previous call.
+        std::string stat;
+        sysfile::read( "/proc/stat", stat );
+        std::istringstream iss( stat.substr( 0, stat.find( '\n' ) ) );
 
-        // Read the first line of /proc/stat, which contains total CPU time information
-        std::getline( statFile, line );
+        std::string cpuLabel;
+        long long   user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0;
+        iss >> cpuLabel >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
 
-        // Parse the line to extract CPU time values
-        std::istringstream iss( line );
-        std::string        cpuLabel;
-        long               user, nice, system, idle, iowait, irq, softirq, steal, guest, guest_nice;
+        // guest and guest_nice are already counted in user and nice.
+        const long long totalTime = user + nice + system + idle + iowait + irq + softirq + steal;
+        const long long idleTime  = idle + iowait;
 
-        iss >> cpuLabel >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal >> guest >> guest_nice;
+        static long long lastTotal = 0, lastIdle = 0;
+        const long long  total     = totalTime - lastTotal;
+        const long long  idled     = idleTime - lastIdle;
+        lastTotal                  = totalTime;
+        lastIdle                   = idleTime;
 
-        // Calculate the total CPU time
-        long totalTime = user + nice + system + idle + iowait + irq + softirq + steal + guest + guest_nice;
-
-        // Calculate CPU usage as a percentage
-        cpuUsage = static_cast<double>( totalTime - idle ) / totalTime * 100.0;
+        cpuUsage = total > 0 ? static_cast<double>( total - idled ) / static_cast<double>( total ) * 100.0 : 0.0;
 #elif( defined( _WIN32 ) || defined( _WIN64 ) )
         // Dummy data for Windows
         static double dummyCpuUsage = 0.0;
@@ -62,39 +72,31 @@ namespace mt
 
     void SystemResource::sizeInfo( std::string& path, sysSizeInfo& info )
     {
-        info.status = false;
+        info.status    = false;
+        info.avaSize   = 0;
+        info.usedSize  = 0;
+        info.totalSize = 0;
+        info.perSize   = 0;
 #if( JUCE_LINUX || __linux__ )
-        juce::File fileToCheck( path );
-        if( fileToCheck.exists() )
-        {
-            info.status = true;
+        // The sizes of the file system path is on, in whole MiB, as df counts
+        // them: available is what an unprivileged user can still write,
+        // which leaves out the blocks reserved for root, and the percentage
+        // used is of the space users can have.
+        struct statvfs fs {};
+        if( path.empty() || statvfs( path.c_str(), &fs ) != 0 || fs.f_blocks == 0 )
+            return;
 
-            // Run `df -h <path>` (without a shell: path can be a mount
-            // point named after a removable disk's label) and capture its
-            // output
-            juce::String output;
-            if( process::run( { "df", "-h", path }, &output ) < 0 )
-            {
-                std::cerr << "Error executing command." << std::endl;
-                return;
-            }
+        const auto mebibytes = [&fs]( unsigned long long blocks ) { return (double)( blocks * fs.f_frsize / ( 1024 * 1024 ) ); };
+        const auto used      = fs.f_blocks - fs.f_bfree;
 
-            std::istringstream lines( output.toStdString() );
-            std::string        filesystem, size, used, available, usePercentage, mountPoint;
-            for( std::string line; std::getline( lines, line ); )
-            {
-                if( line.find( path ) != std::string::npos )
-                {
-                    std::istringstream iss( line );
-                    iss >> filesystem >> size >> used >> available >> usePercentage >> mountPoint;
-                    DBG( " " << filesystem << "Size -> " << size << "Used" << used << "Availd" << available << "Used Per" << usePercentage );
-                    info.avaSize   = juce::String( available ).getIntValue();
-                    info.usedSize  = juce::String( used ).getIntValue();
-                    info.totalSize = juce::String( size ).getIntValue();
-                    info.perSize   = juce::String( usePercentage ).getIntValue();
-                }
-            }
-        }
+        info.status    = true;
+        info.totalSize = mebibytes( fs.f_blocks );
+        info.usedSize  = mebibytes( used );
+        info.avaSize   = mebibytes( fs.f_bavail );
+
+        const auto usable = used + fs.f_bavail;
+        info.perSize      = usable > 0 ? (int)( ( used * 100 + usable - 1 ) / usable ) : 0;
+        DBG( path << ": " << info.totalSize << " MiB, " << info.usedSize << " used, " << info.avaSize << " available, " << info.perSize << "%" );
 #elif( defined( _WIN32 ) || defined( _WIN64 ) )
         // Dummy data for Windows
         info.status    = true;
@@ -108,19 +110,32 @@ namespace mt
     void SystemResource::ramInfo( sysRamInfo& info )
     {
 #if( JUCE_LINUX || __linux__ )
-        struct sysinfo memInfo;
-        sysinfo( &memInfo );
+        // MemAvailable is the kernel's estimate of what can be allocated
+        // without swapping, page cache and reclaimable memory included;
+        // MemFree leaves those out, so memory looked nearly full whenever
+        // files had been read.
+        std::string meminfo;
+        sysfile::read( "/proc/meminfo", meminfo );
 
-        // Calculate total RAM, used RAM, and available RAM
-        unsigned long long totalRAM = memInfo.totalram * memInfo.mem_unit;
-        unsigned long long freeRAM  = memInfo.freeram * memInfo.mem_unit;
-        unsigned long long usedRAM  = totalRAM - freeRAM;
+        unsigned long long totalKiB = 0, availableKiB = 0;
+        std::istringstream lines( meminfo );
+        for( std::string line; std::getline( lines, line ); )
+        {
+            std::istringstream fields( line );
+            std::string        name;
+            unsigned long long value = 0;
+            if( !( fields >> name >> value ) )
+                continue;
+            if( name == "MemTotal:" )
+                totalKiB = value;
+            else if( name == "MemAvailable:" )
+                availableKiB = value;
+        }
 
-        unsigned long long availableRAM = freeRAM;
-        info.totalRam                   = totalRAM / ( 1024 * 1024 );
-        info.usedRam                    = usedRAM / ( 1024 * 1024 );
-        info.freeRam                    = availableRAM / ( 1024 * 1024 );
-        info.perRam                     = ( ( info.usedRam * 100 ) / info.totalRam );
+        info.totalRam = (double)( totalKiB / 1024 );
+        info.freeRam  = (double)( availableKiB / 1024 );
+        info.usedRam  = (double)( ( totalKiB - std::min( availableKiB, totalKiB ) ) / 1024 );
+        info.perRam   = totalKiB > 0 ? (int)( ( totalKiB - std::min( availableKiB, totalKiB ) ) * 100 / totalKiB ) : 0;
 #elif( defined( _WIN32 ) || defined( _WIN64 ) )
         // Dummy data for Windows
         info.totalRam = 100;
@@ -132,30 +147,23 @@ namespace mt
 
     void SystemResource::folderSize( std::string path )
     {
-#if( JUCE_LINUX || __linux__ )
-        const char* folderPath = path.c_str();
+        // The size of the files in the folder and below it (what du counts,
+        // less the space directories themselves take).
+        namespace fs = std::filesystem;
 
-        // Run du -sh on the specified folder (without a shell) and capture
-        // its output
-        juce::String output;
-        if( process::run( { "du", "-sh", path }, &output ) < 0 )
+        std::error_code ec;
+        std::uintmax_t  size = 0;
+        for( fs::recursive_directory_iterator it( path, fs::directory_options::skip_permission_denied, ec ), end; !ec && it != end; it.increment( ec ) )
         {
-            std::cerr << "Error executing du command." << std::endl;
-            return;
+            if( it->is_regular_file( ec ) && !it->is_symlink( ec ) )
+            {
+                const auto fileSize = it->file_size( ec );
+                if( !ec )
+                    size += fileSize;
+            }
+            ec.clear();
         }
-        std::string result = output.toStdString();
 
-        // Parse the result to extract the size
-        char sizeStr[16];
-        if( sscanf( result.c_str(), "%s", sizeStr ) == 1 )
-        {
-            std::cout << "Size of folder '" << folderPath << "': " << sizeStr << std::endl;
-        }
-        else
-        {
-            std::cerr << "Error parsing du command output." << std::endl;
-            return;
-        }
-#endif
+        std::cout << "Size of folder '" << path << "': " << size << " bytes" << std::endl;
     }
 }
