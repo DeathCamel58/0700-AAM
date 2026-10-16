@@ -116,6 +116,7 @@ namespace mt
         juce::ListenerList<MTAudioInterfaceListener> listeners;
 
         std::unique_ptr<AudioDevice> dm;
+        std::shared_ptr<bool>        alive{ std::make_shared<bool>( true ) };
         std::unique_ptr<MTMetronome> _metronome;
 
         MTBusManager busMgr{ *engine.getBusManager() };

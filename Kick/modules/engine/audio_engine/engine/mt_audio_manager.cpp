@@ -52,14 +52,17 @@ namespace mt
         _metronome = std::make_unique<MTMetronome>( engine, getSettings().metronome.vTree );
 
         // Initialize Audio device...
-        juce::MessageManager::callAsync( [&]() {
-            dm = std::make_unique<AudioDevice>( AUDIO_NUM_INPUTS, AUDIO_NUM_OUTPUTS, juce::String() );
+        // The device object exists from here on, so getAudioDeviceManager()
+        // always has a manager to return; opening the device is still left
+        // to the message loop.
+        dm = std::make_unique<AudioDevice>( AUDIO_NUM_INPUTS, AUDIO_NUM_OUTPUTS, juce::String() );
 
-            if( dm.get() )
-            {
-                engine.addAudioDevice( "Master", dm.get(), true );
-                engine.startAudioDevice( AUDIO_SAMPLE_RATE, AUDIO_BLOCK_SIZE );
-            }
+        juce::MessageManager::callAsync( [this, alive = std::weak_ptr<bool>( alive )]() {
+            if( alive.expired() )
+                return;
+
+            engine.addAudioDevice( "Master", dm.get(), true );
+            engine.startAudioDevice( AUDIO_SAMPLE_RATE, AUDIO_BLOCK_SIZE );
         } );
 
         // MIDI messages handler
@@ -138,6 +141,9 @@ namespace mt
 
     MTAudioManager::~MTAudioManager()
     {
+        // A device start still waiting in the message queue must not run.
+        alive.reset();
+
         MTAudioRecorderManager::closeRecorder();
         internalTimer.stopTimer();
         _previewer = nullptr;
