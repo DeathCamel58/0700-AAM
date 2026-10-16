@@ -32,6 +32,9 @@ namespace mt
         setName( Name.toStdString() );
         setProgram( PDrum );
 
+        for( auto& it : noteLayerIdx )
+            it.store( -1 );
+
         // Pre-reseve Memory...
         for( auto i = 0; i < getPolyphony(); ++i )
         {
@@ -105,13 +108,13 @@ namespace mt
                         layerToPlay = AudIO::utils::random<int>( 0, ( (int)validSourceIndex.size() - 1 ) );
                         break;
                     case LayerPlayType::CYCLE:
-                        if( noteLayerIdx.find( Note ) == noteLayerIdx.end() )
-                            noteLayerIdx[Note] = 0;
-                        else
-                            noteLayerIdx[Note] = juce::jlimit( 0, (int)( validSourceIndex.size() - 1 ), ++noteLayerIdx[Note] );
-
-                        layerToPlay = noteLayerIdx[Note];
+                    {
+                        auto&      index = noteLayerIdx[(size_t)Note];
+                        const auto last  = index.load();
+                        layerToPlay      = ( last < 0 ) ? 0 : juce::jlimit( 0, (int)( validSourceIndex.size() - 1 ), last + 1 );
+                        index.store( layerToPlay );
                         break;
+                    }
                     case LayerPlayType::VELOCITY:
                     {
                         for( const auto& it : validSourceIndex )
