@@ -135,6 +135,14 @@ namespace mt
         if( std::string( KICK_FACTORY_RESET_UNIT ).size() > 0 )
             return process::run( { "systemctl", "start", "--no-block", KICK_FACTORY_RESET_UNIT } );
 
+        // Forget the Wi-Fi networks, which wpa_supplicant keeps.
+        int result = 0;
+        if( !WifiManager::getWifiInterface()->removeAllNetworks() )
+        {
+            DBG( "Factory reset: could not remove the Wi-Fi networks" );
+            result = -1;
+        }
+
         // Remove the projects and the preferences from the state directory
         // (what "rm -rf <state>/projects* <state>/prefs" did).
         std::error_code       ec;
@@ -147,7 +155,6 @@ namespace mt
                 paths.push_back( entry.path() );
         }
 
-        int result = 0;
         for( const auto& path : paths )
         {
             fs::remove_all( path, ec );

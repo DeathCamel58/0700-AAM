@@ -74,9 +74,10 @@ namespace kick_ui
             }
         };
 
+        // The passphrase is only kept until it is handed to wpa_supplicant,
+        // which stores it with the network; it is not a preference.
         password.onTextChange = [&]() {
-            juce::String text = password.getText();
-            settings.wifi.pwd = ( text );
+            passphrase = password.getText();
         };
 
         wifiList.onSelectionChanged = [&]( int value, juce::String str ) {
@@ -91,7 +92,10 @@ namespace kick_ui
     void SettingsWifi::connectWifi( bool Connect )
     {
         if( Connect )
-            mt::WifiManager::getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), settings.wifi.pwd() );
+        {
+            if( mt::WifiManager::getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), passphrase ) )
+                passphrase.clear();
+        }
         else
             mt::WifiManager::getWifiInterface()->disconnectWiFi();
     }
@@ -140,7 +144,7 @@ namespace kick_ui
     {
         if( settings.wifi.enabled() )
         {
-            mt::WifiManager::getWifiInterface()->connectToWiFi( settings.wifi.ssid(), settings.wifi.pwd() );
+            mt::WifiManager::getWifiInterface()->connectToWiFi( settings.wifi.ssid(), {} );
         }
     }
 

@@ -49,6 +49,10 @@ namespace mt
         bool connectToWiFi( const juce::String& ssid, const juce::String& password, int priority = 5 );
         bool disconnectWiFi();
 
+        /** Removes every network from wpa_supplicant's configuration, and
+            saves it: part of a factory reset. */
+        bool removeAllNetworks();
+
         // Used from the scanning thread too, so created thread-safely.
         static WifiManager* getWifiInterface()
         {

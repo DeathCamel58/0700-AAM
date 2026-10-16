@@ -310,4 +310,19 @@ namespace mt
         wpa::WpaCtrl ctrl;
         return ctrl.open( controlPath() ) && ctrl.command( "DISCONNECT" );
     }
+
+    bool WifiManager::removeAllNetworks()
+    {
+        // No Wi-Fi, nothing to forget.
+        const std::string path = controlPath();
+        if( path.empty() )
+            return true;
+
+        wpa::WpaCtrl ctrl;
+        if( !ctrl.open( path ) )
+            return false;
+
+        const bool removed = ctrl.command( "REMOVE_NETWORK all" );
+        return ctrl.command( "SAVE_CONFIG" ) && removed;
+    }
 }

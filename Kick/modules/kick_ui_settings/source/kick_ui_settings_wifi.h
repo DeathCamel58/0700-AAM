@@ -43,6 +43,7 @@ namespace kick_ui
     private:
         mt::KickSettings&    settings{ mt::getSettings() };
         bool                 scanning = false;
+        juce::String         passphrase;
         ui::KickToggleButton enabled{ "Wifi", "ENABLED", "DISABLED" };
 
         ui::KickLabel        password{ "", "" };
