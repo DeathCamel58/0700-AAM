@@ -32,8 +32,12 @@ namespace contracts
         AudioEngineIPCInterface( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher, const int connectionId )
             : IPCInterface( dispatcher, connectionId )
         {
-            contracts::AudioEngineSignals::SendRequestToAudioEngine.connect(
+            // Disconnected when this is destroyed: the signal outlives it.
+            connection = contracts::AudioEngineSignals::SendRequestToAudioEngine.connect(
                 [&]( std::shared_ptr<ipc::MTIPCJson> message ) { send( message ); } );
         }
+
+    private:
+        sigslot::scoped_connection connection;
     };
 }

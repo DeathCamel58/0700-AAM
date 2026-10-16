@@ -174,7 +174,7 @@ namespace ipc
                 if( pm )
                 {
                     pm->stop();
-                    juce::MessageManager::callAsync( [&, pm]() { pm->start(); } );
+                    juce::MessageManager::callAsync( [pm]() { pm->start(); } );
                 }
             }
             return true;

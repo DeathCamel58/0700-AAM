@@ -20,6 +20,7 @@
  */
 
 #pragma once
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -93,6 +94,9 @@ namespace ipc
         void connected( int connectionId, const juce::String& connName ) { handleConnect( connectionId, connName ); };
         void processMessage( int connectionId, std::shared_ptr<ipc::MTIPCJson> message );
         void onRestartAttemptCompleted( int processId, bool status );
+        // Posts the function to the message thread; it does not run if the
+        // subsystem has stopped by then.
+        void callAsync( std::function<void()> function );
 
     protected:
         std::shared_ptr<ipc::MTIPCBaseSubsystemData> data{ nullptr };

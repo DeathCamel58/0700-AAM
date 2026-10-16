@@ -40,7 +40,11 @@ namespace contracts
         SystemIPCIterface( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher, const int connectionId )
             : IPCInterface( dispatcher, connectionId )
         {
-            contracts::SystemSignals::SendSystemCommand.connect( [&]( std::shared_ptr<ipc::MTIPCJson> message ) { this->send( message ); } );
+            // Disconnected when this is destroyed: the signal outlives it.
+            connection = contracts::SystemSignals::SendSystemCommand.connect( [&]( std::shared_ptr<ipc::MTIPCJson> message ) { this->send( message ); } );
         }
+
+    private:
+        sigslot::scoped_connection connection;
     };
 }

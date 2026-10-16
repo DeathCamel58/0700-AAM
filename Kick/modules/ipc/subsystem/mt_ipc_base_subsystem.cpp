@@ -70,7 +70,7 @@ namespace ipc
             if( restartOnKill )
             {
                 //juce::Logger::writeToLog(juce::String(processIdentifier) + " exited with code " + juce::String(exitCode));
-                juce::MessageManager::callAsync( [&, processIdentifier]() { restartChildProcess( processIdentifier ); } );
+                juce::MessageManager::callAsync( [restart = restartChildProcess, processIdentifier]() { restart( processIdentifier ); } );
             }
         }
 
@@ -126,6 +126,30 @@ namespace ipc
         juce::HashMap<int, int>                                         connectionIdtoConnectedHost;
 
     };
+
+    namespace
+    {
+        // Wraps a call into the subsystem made from another thread or posted
+        // to the message thread, so that it does nothing once the subsystem
+        // has stopped (stop() drops its data) or been destroyed.
+        template<typename... Args>
+        struct Function
+        {
+            using type = std::function<void( Args... )>;
+        };
+
+        // Args are given explicitly: Function<> keeps them from being deduced
+        // from the argument.
+        template<typename... Args>
+        std::function<void( Args... )> whileRunning( const std::shared_ptr<MTIPCBaseSubsystemData>& data, typename Function<Args...>::type function )
+        {
+            std::weak_ptr<MTIPCBaseSubsystemData> weakData = data;
+            return [weakData, function]( Args... args ) {
+                if( !weakData.expired() )
+                    function( args... );
+            };
+        }
+    }
 
     class MTIPCSubsystemConnectionCallback : public MTIIPCConnectionCallback
     {
@@ -215,10 +239,10 @@ namespace ipc
                 new ipc::MTIPCConnectionManager( connectionConfig,
                                                  std::shared_ptr<ipc::MTIIPCConnectionCallback>(
                                                      new MTIPCSubsystemConnectionCallback(
-                                                         std::bind( &MTIPCBaseSubsystem::disconnected, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                         std::bind( &MTIPCBaseSubsystem::connected, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                         std::bind( &MTIPCBaseSubsystem::processMessage, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                         std::bind( &MTIPCBaseSubsystem::connectFailed, this, std::placeholders::_1, std::placeholders::_2 ) ) ) ) );
+                                                         whileRunning<int, const juce::String&>( data, std::bind( &MTIPCBaseSubsystem::disconnected, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                         whileRunning<int, const juce::String&>( data, std::bind( &MTIPCBaseSubsystem::connected, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                         whileRunning<int, std::shared_ptr<ipc::MTIPCJson>>( data, std::bind( &MTIPCBaseSubsystem::processMessage, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                         whileRunning<int, const juce::String&>( data, std::bind( &MTIPCBaseSubsystem::connectFailed, this, std::placeholders::_1, std::placeholders::_2 ) ) ) ) ) );
             data->messageDispatcher.reset( new ipc::MTIPCMessageDispatcher( data->connectionManager ) );
             data->handlerStore.reset( new ipc::MTIPCHandlerStore( handlers ) );
             data->messageProcessor.reset( new ipc::MTIPCMessageProcessor( data->messageDispatcher, data->handlerStore ) );
@@ -229,10 +253,10 @@ namespace ipc
         {
             juce::Logger::writeToLog( "Initializing Processes..." );
             data->pmCallback.reset(
-                new ipc::MTIPCProcessManagerCallback( std::bind( &ipc::MTIPCBaseSubsystem::childProcessStarted, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                      std::bind( &ipc::MTIPCBaseSubsystem::childProcessStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3 ),
-                                                      std::bind( &ipc::MTIPCBaseSubsystem::childProcessStartFailed, this, std::placeholders::_1, std::placeholders::_2 ),
-                                                      std::bind( &ipc::MTIPCBaseSubsystem::restartChildProcess, this, std::placeholders::_1 ) ) );
+                new ipc::MTIPCProcessManagerCallback( whileRunning<int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStarted, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                      whileRunning<int, int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3 ) ),
+                                                      whileRunning<int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStartFailed, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                      whileRunning<int>( data, std::bind( &ipc::MTIPCBaseSubsystem::restartChildProcess, this, std::placeholders::_1 ) ) ) );
 
             std::shared_ptr<juce::var> processConfig( new juce::var( config.getProperty( ipc::IPC_KEY_PROCESS_CONFIG, juce::var() ) ) );
             data->processManager.reset( new ipc::MTIPCProcessManager( data->pmCallback ) );
@@ -314,6 +338,8 @@ namespace ipc
 
     MTIPCBaseSubsystem::~MTIPCBaseSubsystem()
     {
+        // Closes the connections, whose threads call into this, first.
+        stop();
         data.reset();
     }
 
@@ -427,15 +453,20 @@ namespace ipc
             return;
         }
 
-       juce::MessageManager::callAsync( [&, connectionId]() { tryReconnect( connectionId ); } );
-       juce::MessageManager::callAsync( [&, connectionId, connName]() { handleDisconnect( connectionId, connName ); } );
+       callAsync( [this, connectionId]() { tryReconnect( connectionId ); } );
+       callAsync( [this, connectionId, connName]() { handleDisconnect( connectionId, connName ); } );
     }
 
     // Unlike a lost connection, this does not end the process when it is the
     // parent's: the parent may simply not be listening yet.
     void MTIPCBaseSubsystem::connectFailed( const int connectionId, const juce::String& connName )
     {
-        juce::MessageManager::callAsync( [&, connectionId]() { tryReconnect( connectionId ); } );
+        callAsync( [this, connectionId]() { tryReconnect( connectionId ); } );
+    }
+
+    void MTIPCBaseSubsystem::callAsync( std::function<void()> function )
+    {
+        juce::MessageManager::callAsync( whileRunning<>( data, std::move( function ) ) );
     }
 
     void MTIPCBaseSubsystem::tryReconnect( int connectionId )
@@ -445,10 +476,10 @@ namespace ipc
             if( data->delayedConnectors.contains( connectionId ) ) return;
 
             std::shared_ptr<ipc::MTIPCDelayedConnector> conn( new ipc::MTIPCDelayedConnector( data->connectionManager, connectionId,
-                                                                                              std::bind( &ipc::MTIPCBaseSubsystem::onConnectionAttemptCompleted, this, std::placeholders::_1, std::placeholders::_2 ) ) );
+                                                                                              whileRunning<int, bool>( data, std::bind( &ipc::MTIPCBaseSubsystem::onConnectionAttemptCompleted, this, std::placeholders::_1, std::placeholders::_2 ) ) ) );
 
             data->delayedConnectors.set( connectionId, conn );
-            juce::MessageManager::callAsync( [&, conn]() { conn->connect(); } );
+            callAsync( [conn]() { conn->connect(); } );
         }
     }
 
@@ -489,6 +520,6 @@ namespace ipc
             return;
 
         data->processManager->waitForProcessToExit( hostId );
-        juce::MessageManager::callAsync( [&, hostId]() { data->processManager->startProcess( hostId ); } );
+        callAsync( [this, hostId]() { data->processManager->startProcess( hostId ); } );
     }
 }

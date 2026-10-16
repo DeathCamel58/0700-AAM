@@ -35,7 +35,8 @@ namespace kick
         KickHardwareEventPublisher::KickHardwareEventPublisher( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher )
             : dispatcher( dispatcher )
         {
-            Controls::InputEvents::dispatchHardwareEvent.connect( [&]( CPktMgr::HWMsg_t& f_HwMsg ) {
+            // Disconnected when this is destroyed: the signal outlives it.
+            connection = Controls::InputEvents::dispatchHardwareEvent.connect( [&]( CPktMgr::HWMsg_t& f_HwMsg ) {
                 publish( f_HwMsg );
             } );
         }
