@@ -148,7 +148,7 @@ namespace ipc
     };
     void MTIPCSubsystem::childProcessStopped( [[maybe_unused]] int processIdentifier, [[maybe_unused]] int exitCode, const juce::String& name )
     {
-        juce::Logger::writeToLog( name + " Exited with Code " + juce::String( exitCode ) );
+        // The process manager has logged how the process exited.
     };
 
     void MTIPCSubsystem::childProcessStarted( [[maybe_unused]] int processIdentifier, const juce::String& name )
@@ -174,7 +174,7 @@ namespace ipc
                 if( pm )
                 {
                     pm->stop();
-                    juce::MessageManager::callAsync( [&, pm]() { pm->start(); } );
+                    juce::MessageManager::callAsync( [pm]() { pm->start(); } );
                 }
             }
             return true;

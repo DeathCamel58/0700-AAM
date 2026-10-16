@@ -66,7 +66,17 @@ namespace ipc
             int status   = message->getProperty( ipc::IPC_KEY_REGISTERATION_STATUS );
             isRegistered = ( status == ipc::MTIPCRegistrationStatus::IPC_MESSAGE_REGISTERATION_SUCCESS );
             if( isRegistered )
+            {
                 MTIPCConnection::onConnected();
+                return;
+            }
+
+            // The server still holds the previous connection under this id
+            // (it has not noticed that it closed yet), or the id or UUID is
+            // wrong. Left alone, the socket stayed open but unregistered for
+            // good; close it and let the subsystem try again.
+            juce::Logger::writeToLog( "Registration of " + connectionName() + " was rejected" );
+            connectFailed();
         }
     }
 

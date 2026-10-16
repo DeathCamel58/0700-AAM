@@ -31,6 +31,7 @@
 #include "../utils/mt_ipc_message_types.h"
 #include "../utils/mt_ipc_exception.h"
 #include "../utils/mt_ipc_error_codes.h"
+#include "../utils/mt_ipc_close_on_exec.h"
 
 namespace ipc
 {
@@ -93,7 +94,11 @@ namespace ipc
                 {
                     connected = connectToSocket( url, port, IPC_DEFAULT_CONNECTION_TIMEOUT );
                     if( connected )
+                    {
+                        if( auto* socket = getSocket() )
+                            ipc::setCloseOnExec( socket->getRawSocketHandle() );
                         break;
+                    }
                 }
 			}
 			break;
@@ -103,17 +108,20 @@ namespace ipc
 			return connected;
 		}
 
-		void disconnect()
+		void disconnect( Notify notify = Notify::yes )
 		{
-			juce::InterprocessConnection::disconnect();
+			juce::InterprocessConnection::disconnect( -1, notify );
 		}
 
 		bool publish(std::shared_ptr<ipc::MTIPCJson> message)
 		{
 			if (!isConnected() || !message) return false;
 
+			// The receiver decodes the block as UTF-8: send its bytes. (JUCE 7
+			// escapes non-ASCII characters in JSON, so today the two counts
+			// agree; they would not for a writer that emits raw UTF-8.)
 			juce::String json = juce::JSON::toString(message->getRoot());
-			return sendMessage(juce::MemoryBlock(json.getCharPointer(), json.length()));
+			return sendMessage(juce::MemoryBlock(json.toRawUTF8(), json.getNumBytesAsUTF8()));
 		}
 
 		const std::shared_ptr<juce::var> config()
@@ -123,13 +131,19 @@ namespace ipc
 
 		virtual void connectionMade() override 
 		{
+            // A connection the server accepted reports itself on the
+            // server's thread as soon as it has its socket; a client's is
+            // marked in connect().
+            if( auto* socket = getSocket() )
+                ipc::setCloseOnExec( socket->getRawSocketHandle() );
+
             try
             {
                 connectedCB();
             }
             catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the connection of " + connName );
             }
 			
 		}
@@ -141,7 +155,7 @@ namespace ipc
                 disConnectedCB();
             } catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the disconnect of " + connName );
             }
 		}
 
@@ -155,7 +169,7 @@ namespace ipc
             }
             catch( ... )
             {
-                // log exception.
+                ipc::logCurrentException( "Exception handling a message from " + connName );
             }
 			
 		}
@@ -288,6 +302,13 @@ namespace ipc
            callback->onMessage(connectionIdentifier(), message);
         }
             
+    }
+
+    void MTIPCConnection::connectFailed()
+    {
+        impl->disconnect( juce::InterprocessConnection::Notify::no );
+        if( callback )
+            callback->onConnectFailed( connectionIdentifier(), connectionName() );
     }
 
 	void MTIPCConnection::setCallback(std::shared_ptr<ipc::MTIIPCConnectionCallback> pCallback)

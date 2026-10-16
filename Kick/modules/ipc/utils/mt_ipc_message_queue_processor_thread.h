@@ -23,36 +23,54 @@
 #include "../utils/mt_ipc_exception.h"
 namespace ipc
 {
+    // Processes queued items on its own thread, one at a time. It sleeps
+    // until push_to_q() or stopThread() wakes it: it used to wake every
+    // millisecond to look at the queue, about a thousand times a second per
+    // thread even when idle.
     template<typename T>
     class MTIPCMessageQueueProcessingThread : public juce::Thread
+                                            , private juce::Thread::Listener
     {
     public:
         MTIPCMessageQueueProcessingThread( juce::String threadName )
-            : juce::Thread( threadName ){};
+            : juce::Thread( threadName )
+        {
+            addListener( this );
+        }
+
+        ~MTIPCMessageQueueProcessingThread() override
+        {
+            removeListener( this );
+        }
 
         virtual void run()
         {
             while( !threadShouldExit() )
             {
-                message_added.wait( 1 );
-                if( q.isEmpty() )
+                // Take one item under the lock and process it outside, so
+                // producers are not blocked while it is sent or handled.
+                std::shared_ptr<T> data;
+                {
+                    const juce::ScopedLock locker( lock );
+                    data = q.pop();
+                }
+
+                if( !data )
+                {
+                    message_added.wait( -1 );
                     continue;
-                process_q();
+                }
+
+                process( data );
             }
         }
 
-        void push_to_q( std::shared_ptr<T> data, bool lockFree = false )
+        // The queue is always locked; lockFree is kept for the callers.
+        void push_to_q( std::shared_ptr<T> data, [[maybe_unused]] bool lockFree = false )
         {
             {
-                if( lockFree )
-                {
-                    q.push( data );
-                }
-                else
-                {
-                    const juce::ScopedWriteLock locker( rwl );
-                    q.push( data );
-                }
+                const juce::ScopedLock locker( lock );
+                q.push( data );
             }
             message_added.signal();
         }
@@ -61,35 +79,33 @@ namespace ipc
         virtual void processMessage( std::shared_ptr<T> message ) = 0;
 
     private:
-        void process_q()
+        void exitSignalSent() override
         {
-            while( !q.isEmpty() && !threadShouldExit() )
-            {
-                try
-                {
-                    const juce::ScopedWriteLock locker( rwl );
-                    std::shared_ptr<T>          data = q.pop();
-                    if( !data )
-                        return;
-                    processMessage( data );
-                    data.reset();
+            message_added.signal();
+        }
 
-                } catch( const ipc::MTIPCException& ex )
-                {
-                    juce::Logger::writeToLog( "Exception Occurred in" + getThreadName() + ". Error Code: " + juce::String( ex.e_code ) + ".Error Message: " + juce::String( ex.e_message ) );
-                } catch( const std::exception& ex )
-                {
-                    juce::Logger::writeToLog( "Exception Occurred in" + getThreadName() + ex.what() );
-                } catch( ... )
-                {
-                    juce::Logger::writeToLog( "Exception Occurred in" + getThreadName() + "Unknown Exception.." );
-                }
+        void process( std::shared_ptr<T> data )
+        {
+            try
+            {
+                processMessage( data );
+            } catch( const ipc::MTIPCException& ex )
+            {
+                juce::Logger::writeToLog( "Exception Occurred in " + getThreadName() + ". Error Code: " + juce::String( ex.e_code ) + ". Error Message: " + juce::String( ex.e_message ) );
+            } catch( const std::exception& ex )
+            {
+                juce::Logger::writeToLog( "Exception Occurred in " + getThreadName() + ": " + ex.what() );
+            } catch( ... )
+            {
+                juce::Logger::writeToLog( "Exception Occurred in " + getThreadName() + ": Unknown Exception.." );
             }
         }
 
     private:
         ipc::MTIPCMessageQueue<T> q;
+        // Auto-reset: a signal sent while the thread is busy is kept until
+        // its next wait, so no item is left waiting in the queue.
         juce::WaitableEvent       message_added;
-        juce::ReadWriteLock       rwl;
+        juce::CriticalSection     lock;
     };
 }

@@ -24,66 +24,71 @@
 #include "memory"
 #include "kick_heart_beat_data.h"
 #include "juce_core/juce_core.h"
+#include "juce_events/juce_events.h"
 
 const int HEART_BEAT_MONITOR_TIMEOUT_IN_MS( 2000 );
-const int HEART_BEAT_MONITOR_EXIT_WAIT_IN_MS( 500 );
+// How long a child may go without a heartbeat before it is restarted. The
+// heartbeat comes from the child's message loop, so this is also how long
+// that loop may be busy (with the UI, say). It must leave time for the
+// restart within the service's WatchdogSec (30 s).
+const int HEART_BEAT_RESTART_TIMEOUT_IN_MS( 10000 );
 
 namespace kick
 {
     namespace main
     {
         class KickHeartBeatData;
-        class KickHearBeatMonitor : public juce::Thread
+
+        // Checks the children's heartbeats every HEART_BEAT_MONITOR_TIMEOUT_IN_MS
+        // on the message thread, so the result also shows that KickMain's own
+        // message loop is running. Calls onHeartBeatNotReceived for each host
+        // that has been quiet for HEART_BEAT_RESTART_TIMEOUT_IN_MS, then
+        // onHeartBeatsVerified with the expected hosts that have not sent a
+        // heartbeat for that long, or ever.
+        class KickHearBeatMonitor : private juce::Timer
         {
         public:
             KickHearBeatMonitor( std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData,
                                  std::function<void( const int )>               onHeartBeatNotReceived,
                                  std::function<void( const juce::Array<int>& )> onHeartBeatsVerified = nullptr )
-                : juce::Thread( "HeartBeatMonitorThread" )
-                , heartBeatData( heartBeatData )
+                : heartBeatData( heartBeatData )
                 , onHeartBeatNotReceived( onHeartBeatNotReceived )
                 , onHeartBeatsVerified( onHeartBeatsVerified )
             {
 
             }
+
+            ~KickHearBeatMonitor() override
+            {
+                stopTimer();
+            }
+
             void startMonitoring()
             {
-                previousCheckTimePoint = juce::Time::currentTimeMillis();
-                startThread();
+                startTimer( HEART_BEAT_MONITOR_TIMEOUT_IN_MS );
             }
 
             void stopMonintoring()
             {
-                stopThread( HEART_BEAT_MONITOR_EXIT_WAIT_IN_MS );
-            }
-
-            virtual void run() override
-            {
-                int count         = 0;
-                int sleepDuration = 100;
-                int totalCount    = ( HEART_BEAT_MONITOR_TIMEOUT_IN_MS ) / sleepDuration;
-                while( !threadShouldExit() )
-                {
-                    juce::Thread::sleep( sleepDuration );
-                    count++;
-                    if( count == totalCount )
-                    {
-                        count = 0;
-                        juce::int64 currentCheckTimePoint = juce::Time::currentTimeMillis();
-                        juce::Array<int> missingHostIds = heartBeatData->verify( previousCheckTimePoint, currentCheckTimePoint );
-                        previousCheckTimePoint = juce::Time::currentTimeMillis();
-                        // Called on this thread, once per verification window.
-                        if( onHeartBeatsVerified )
-                            onHeartBeatsVerified( missingHostIds );
-                    }
-                }
+                stopTimer();
             }
 
         private:
+            void timerCallback() override
+            {
+                const auto result = heartBeatData->verify( KickHeartBeatData::now(), HEART_BEAT_RESTART_TIMEOUT_IN_MS );
+
+                if( onHeartBeatNotReceived )
+                    for( const int hostId : result.silentHostIds )
+                        onHeartBeatNotReceived( hostId );
+
+                if( onHeartBeatsVerified )
+                    onHeartBeatsVerified( result.missingHostIds );
+            }
+
             std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
             std::function<void( const int )>               onHeartBeatNotReceived;
             std::function<void( const juce::Array<int>& )> onHeartBeatsVerified;
-            juce::int64                                    previousCheckTimePoint{ 0 };
         };
     }
 }

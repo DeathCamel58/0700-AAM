@@ -31,15 +31,26 @@ namespace kick
         class KickHeartBeatData
         {
         public:
+            struct Verification
+            {
+                // Expected hosts without a recent enough heartbeat.
+                juce::Array<int> missingHostIds;
+                // Hosts that have sent a heartbeat before, but none recent
+                // enough.
+                juce::Array<int> silentHostIds;
+            };
 
-            KickHeartBeatData( std::function<void( const int )> onVerificationFailed )
-                : onVerificationFailed(onVerificationFailed)
-            {}
+            // Heartbeat times are on the monotonic millisecond counter, so
+            // setting the clock neither causes nor hides a missed heartbeat.
+            static juce::int64 now()
+            {
+                return static_cast<juce::int64>( juce::Time::getMillisecondCounterHiRes() );
+            }
 
-        public:
             void registerHeartBeat( const int hostId )
             {
-                setHeartBeat( hostId, juce::Time::currentTimeMillis() );
+                const juce::ScopedLock sl( lock );
+                heartBeatEventTimePoints.set( hostId, now() );
             }
 
             juce::int64 latestHeartBeat( const int hostId ) const
@@ -48,22 +59,6 @@ namespace kick
                 if( heartBeatEventTimePoints.contains( hostId ) )
                     return heartBeatEventTimePoints[hostId];
                 return -1;
-            }
-
-            juce::HashMap<int, juce::int64>::Iterator begin()
-            {
-                return heartBeatEventTimePoints.begin();
-            }
-
-            juce::HashMap<int, juce::int64>::Iterator end()
-            {
-                return heartBeatEventTimePoints.end();
-            }
-
-            void setHeartBeat( const int hostId, juce::int64 timeInMs )
-            {
-                const juce::ScopedLock sl( lock );
-                heartBeatEventTimePoints.set( hostId, juce::Time::currentTimeMillis() );
             }
 
             // Drops the host's heartbeat, so that verify() asks for no
@@ -82,37 +77,31 @@ namespace kick
                 expectedHostIds = hostIds;
             }
 
-            // Returns the expected hosts without a heartbeat in the window.
-            juce::Array<int> verify( const juce::int64 checkTimePointStart,
-                                     const juce::int64 checkPointEnd)
+            // A heartbeat counts if it is at most maxAge old at timePoint.
+            Verification verify( const juce::int64 timePoint, const juce::int64 maxAge ) const
             {
                 const juce::ScopedLock sl( lock );
+                Verification result;
                 for( auto itr = heartBeatEventTimePoints.begin(); itr != heartBeatEventTimePoints.end(); itr.next() )
                 {
-                    juce::int64 timepoint = itr.getValue();
-                    int         hostId    = itr.getKey();
-                    if( timepoint >= checkTimePointStart && timepoint <= checkPointEnd )
-                        continue;
-                    juce::MessageManager::callAsync( [&, hostId]() { onVerificationFailed( hostId ); } );
+                    if( timePoint - itr.getValue() > maxAge )
+                        result.silentHostIds.add( itr.getKey() );
                 }
 
-                juce::Array<int> missingHostIds;
                 for( const int hostId : expectedHostIds )
                 {
-                    juce::int64 timepoint = heartBeatEventTimePoints.contains( hostId ) ? heartBeatEventTimePoints[hostId] : -1;
-                    if( timepoint < checkTimePointStart || timepoint > checkPointEnd )
-                        missingHostIds.add( hostId );
+                    if( !heartBeatEventTimePoints.contains( hostId ) || timePoint - heartBeatEventTimePoints[hostId] > maxAge )
+                        result.missingHostIds.add( hostId );
                 }
-                return missingHostIds;
+                return result;
             }
 
         private:
             // Heartbeats are registered on the IPC message processor thread
-            // and verified on the monitor thread.
+            // and verified on the message thread.
             juce::CriticalSection            lock;
             juce::HashMap<int, juce::int64>  heartBeatEventTimePoints;
             juce::Array<int>                 expectedHostIds;
-            std::function<void( const int )> onVerificationFailed;
         };
     }
 }

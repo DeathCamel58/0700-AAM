@@ -36,6 +36,7 @@ namespace ipc
 namespace contracts
 {
     class IPCApplicationImpl;
+    class TerminationSignals;
     class IPCApplication : public juce::JUCEApplication
     {
     public:
@@ -59,6 +60,7 @@ namespace contracts
         virtual juce::var getConfig(const juce::String& cmdline) = 0;
     private:
         std::unique_ptr<contracts::IPCApplicationImpl> impl;
+        std::unique_ptr<contracts::TerminationSignals> terminationSignals;
     };
 
 }

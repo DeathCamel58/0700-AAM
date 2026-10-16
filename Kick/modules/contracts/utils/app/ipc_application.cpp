@@ -21,6 +21,7 @@
 
 #include "juce_core/juce_core.h"
 #include "ipc_application.h"
+#include "termination_signals.h"
 #include "ipc/subsystem/mt_ipc_subsystem.h"
 #include "contracts/logger/logger.h"
 #include "ipc/utils/mt_ipc_helpers.h"
@@ -28,52 +29,47 @@
 #include "contracts/main/system_ipc_helpers.h"
 #include "contracts/main/system_signals.h"
 #include "ipc/utils/mt_ipc_json.h"
+#include "ipc/utils/mt_ipc_exception.h"
 
-// start a hearbeat thread. 
+#include <csignal>
 
 namespace contracts
 {
     const int HEART_BEAT_TIMEOUT_IN_MS( 1000 );
-    const int HEART_BEAT_EXIT_WAIT_IN_MS( 500);
 
-    class IPCHeartBeat : public juce::Thread
+    // Sends a heartbeat to KickMain every second from the message thread,
+    // so a heartbeat shows that the message loop is still running. (A
+    // dedicated thread kept beating while the message thread was stuck.)
+    class IPCHeartBeat : private juce::Timer
     {
     public:
         IPCHeartBeat( const int hostId )
-            : juce::Thread( "Heart_Beat_Thread_" + juce::String(hostId) )
         {
-           // timer.reset( new ipc::MTIPCTimer( HEART_BEAT_TIMEOUT_IN_MS, std::bind( &IPCHeartBeat::dispatchFirstHeartBeat, this ), true ) );
             heartBeatMessage = contracts::SystemIPCHelpers::prepareHeartBeatMessage();
             heartBeatMessage->setProperty(ipc::IPC_KEY_HOST_ID, hostId);
         }
 
+        ~IPCHeartBeat() override
+        {
+            stopTimer();
+        }
+
         void start()
         {
-            startThread();
+            startTimer( HEART_BEAT_TIMEOUT_IN_MS );
         }
 
         void stop()
         {
-            stopThread( HEART_BEAT_EXIT_WAIT_IN_MS );
+            stopTimer();
         }
 
-        virtual void run() override
-        {
-            int count         = 0;
-            int sleepDuration = 100;
-            int totalCount    = ( HEART_BEAT_TIMEOUT_IN_MS ) / sleepDuration;
-            while( !threadShouldExit() )
-            {
-                juce::Thread::sleep( sleepDuration );
-                count++;
-                if( count == totalCount )
-                {
-                    count = 0;
-                    contracts::SystemSignals::SendSystemCommand( heartBeatMessage );
-                }
-            }
-        }    
     private:
+        void timerCallback() override
+        {
+            contracts::SystemSignals::SendSystemCommand( heartBeatMessage );
+        }
+
         std::shared_ptr<ipc::MTIPCJson>  heartBeatMessage;
 
     };
@@ -130,9 +126,6 @@ namespace contracts
                                                       handlers,
                                                       contracts::ConnectionIdStore::PARENT_CONNECTION_ID ) );
 
-            if( logToServer )
-                logger->setDispatcher( contracts::ConnectionIdStore::LOGGER_CONNECTION_ID, subsystem->dispatcher() );
-
             if(createSystemInterface)
                 systemIPCIface.reset( new contracts::SystemIPCIterface( subsystem->dispatcher(), contracts::ConnectionIdStore::MAIN_CONNECTION_ID ) );
 
@@ -148,12 +141,18 @@ namespace contracts
 
         void shutdown()
         {
+            if( heartBeat )
+                heartBeat->stop();
+
+            // Stop the IPC, and with it any child processes (which get
+            // SIGTERM and time to save), while the logger still works.
+            if( subsystem )
+                subsystem->stop();
+
             if( logger )
             {
                 juce::Logger::setCurrentLogger( nullptr );
             }
-            if( heartBeat )
-                heartBeat->stop();
         }
 
         std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher()
@@ -210,10 +209,24 @@ namespace contracts
                                         logToServer,
                                         version ) )
     {
+        // The IPC writes to sockets whose peer may have exited. Without this
+        // the write raises SIGPIPE and kills this process as well, so one
+        // crash takes the others down; ignored, the write fails with EPIPE
+        // and the connection's reader reports the disconnect.
+        std::signal( SIGPIPE, SIG_IGN );
+
+        // The service manager stops Kick with SIGTERM: quit through the
+        // message loop, so that shutdown() runs, as it does for an exit
+        // message.
+        terminationSignals.reset( new contracts::TerminationSignals( [this]( int signalNumber ) {
+            juce::Logger::writeToLog( "Received " + contracts::TerminationSignals::signalName( signalNumber ) + ", quitting" );
+            systemRequestedQuit();
+        } ) );
     }
 
     IPCApplication::~IPCApplication()
     {
+        terminationSignals.reset();
         impl.reset();
     }
     const juce::String IPCApplication::getApplicationName()
@@ -228,10 +241,26 @@ namespace contracts
 
     void IPCApplication::initialise( const juce::String& commandLine )
     {
-        std::vector<std::shared_ptr<ipc::MTIIPCMessageHandler>> handlers{};
-        addMessageHandlers( handlers );
-        juce::var config = getConfig(commandLine);
-        impl->initialise( config, handlers );
+        bool initialised = false;
+        try
+        {
+            std::vector<std::shared_ptr<ipc::MTIIPCMessageHandler>> handlers{};
+            addMessageHandlers( handlers );
+            juce::var config = getConfig( commandLine );
+            initialised      = impl->initialise( config, handlers );
+        } catch( ... )
+        {
+            ipc::logCurrentException( "Exception initialising the IPC" );
+        }
+
+        // Without its IPC the process is no use: fail, so that the
+        // supervisor sees it.
+        if( !initialised )
+        {
+            juce::Logger::writeToLog( "Failed to initialise " + getApplicationName() + "; quitting" );
+            setApplicationReturnValue( EXIT_FAILURE );
+            quit();
+        }
     }
 
     void IPCApplication::shutdown()

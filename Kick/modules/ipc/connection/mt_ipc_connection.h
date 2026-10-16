@@ -57,6 +57,9 @@ namespace ipc
         virtual void onConnected();
         virtual void onDisconnected();
         virtual void onMessage( std::shared_ptr<ipc::MTIPCJson> message );
+        // Closes the connection without reporting a disconnect, and reports a
+        // failed connection instead.
+        void connectFailed();
 
     private:
         MTIPCConnection( const MTIPCConnection& )            = delete;

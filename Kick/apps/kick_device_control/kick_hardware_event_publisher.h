@@ -23,6 +23,7 @@
 
 #include <memory>
 #include <PktMgr/PktMgr.hpp>
+#include <3rdParty/signal/signal.hpp>
 
 namespace ipc
 {
@@ -44,6 +45,7 @@ namespace kick
 
         private:
             std::weak_ptr<ipc::MTIPCMessageDispatcher> dispatcher;
+            sigslot::scoped_connection                 connection;
         };
 
     }

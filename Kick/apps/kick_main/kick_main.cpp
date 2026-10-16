@@ -46,7 +46,7 @@ public:
                           kick::logger::LOG_FILE_BASE_NAME,
                           kick::logger::METRICS_FILE_BASE_NAME,
                           false ),
-        heartBeatData( new kick::main::KickHeartBeatData(std::bind(&KickMain::onHeartBeatNotReceived, this, std::placeholders::_1) ))
+        heartBeatData( new kick::main::KickHeartBeatData() )
     {}
 
     bool moreThanOneInstanceAllowed() override
@@ -105,20 +105,19 @@ public:
         handlers.push_back( std::shared_ptr<ipc::MTIIPCMessageHandler>( new kick::main::KickExitMessageHandler() ) );
     }
 private:
-    // Runs on the message thread, queued by KickHeartBeatData::verify() for
-    // a host whose last heartbeat is outside the verification window.
+    // Runs on the message thread, called by the monitor for a host that has
+    // not sent a heartbeat for HEART_BEAT_RESTART_TIMEOUT_IN_MS.
     // Restarts that process only; the others keep running and reconnect to
     // it. (Stopping and starting the whole subsystem destroyed its data in
     // stop(), and start() then dereferenced it.)
     void onHeartBeatNotReceived( const int hostId )
     {
-        if( !childNames.contains( hostId ) )
+        if( !childNames.contains( hostId ) || juce::MessageManager::getInstance()->hasStopMessageBeenSent() )
             return;
 
-        // verify() queues a call every window until the heartbeat changes:
-        // act on the first only. The host may also have recovered since.
+        // The host may have recovered since the check.
         const juce::int64 latest = heartBeatData->latestHeartBeat( hostId );
-        if( latest < 0 || juce::Time::currentTimeMillis() - latest <= HEART_BEAT_MONITOR_TIMEOUT_IN_MS )
+        if( latest < 0 || kick::main::KickHeartBeatData::now() - latest <= HEART_BEAT_RESTART_TIMEOUT_IN_MS )
             return;
 
         auto ss = subsystem();
@@ -130,10 +129,13 @@ private:
         ss->restartHost( hostId );
     }
 
-    // Runs on the monitor thread after every verification window. Until it
-    // is told READY=1, the service manager only enforces its start timeout;
-    // after that, missing WATCHDOG=1 notifications let it restart KickMain
-    // when restarting the process in onHeartBeatNotReceived() does not help.
+    // Runs on the message thread after every check, so WATCHDOG=1 is only
+    // sent while KickMain's message loop runs and every child's heartbeat
+    // (sent from the child's message loop) is recent enough. Until
+    // it is told READY=1, the service manager only enforces its start
+    // timeout; after that, missing WATCHDOG=1 notifications let it restart
+    // KickMain when restarting the process in onHeartBeatNotReceived() does
+    // not help.
     void onHeartBeatsVerified( const juce::Array<int>& missingHostIds )
     {
         if( missingHostIds.isEmpty() )
@@ -173,10 +175,7 @@ private:
     std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
     std::unique_ptr<kick::main::KickHearBeatMonitor> monitor;
 
-    // Set up on the message thread before the monitor thread starts; from
-    // then until shutdown() stops it, only the monitor thread uses them
-    // (childNames, which no longer changes, is also read on the message
-    // thread).
+    // Used on the message thread only.
     kick::main::KickServiceNotifier  serviceNotifier;
     juce::HashMap<int, juce::String> childNames;
     bool                             reportedReady{ false };

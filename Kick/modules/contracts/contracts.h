@@ -37,6 +37,7 @@
 #include "utils/keyboard/keyboard_detector.h"
 #include "utils/keyboard/keyboard_signals.h"
 #include "utils/app/ipc_application.h"
+#include "utils/app/termination_signals.h"
 #include "audioengine/audio_engine_contracts_helpers.h"
 #include "audioengine/audio_engine_signals.h"
 #include "logger/logger.h"

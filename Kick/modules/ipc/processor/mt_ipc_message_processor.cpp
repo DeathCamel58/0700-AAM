@@ -30,6 +30,7 @@
 #include "../utils/mt_ipc_keys.h"
 #include "../utils/mt_ipc_message_types.h"
 #include "../utils/mt_ipc_enums.h"
+#include "../utils/mt_ipc_exception.h"
 
 
 namespace ipc
@@ -119,7 +120,7 @@ namespace ipc
         }
         catch( ... )
         {
-            // log exception.
+            ipc::logCurrentException( "Exception handling IPC message type " + juce::String( (int) message->getProperty( ipc::IPC_KEY_MESSAGE_TYPE, -1 ) ) );
         }
     }
 }

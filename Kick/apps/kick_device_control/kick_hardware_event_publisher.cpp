@@ -23,6 +23,7 @@
 #include "contracts/dcl/dcl_contracts_helper.h"
 #include "kick_hardware_event_publisher.h"
 #include "ipc/dispatcher/mt_ipc_message_dispatcher.h"
+#include "ipc/utils/mt_ipc_exception.h"
 #include "contracts/dcl/dcl_ipc_message_types.h"
 #include "contracts/utils/keyboard/keyboard_signals.h"
 #include "input_events/input_events.h"
@@ -35,7 +36,8 @@ namespace kick
         KickHardwareEventPublisher::KickHardwareEventPublisher( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher )
             : dispatcher( dispatcher )
         {
-            Controls::InputEvents::dispatchHardwareEvent.connect( [&]( CPktMgr::HWMsg_t& f_HwMsg ) {
+            // Disconnected when this is destroyed: the signal outlives it.
+            connection = Controls::InputEvents::dispatchHardwareEvent.connect( [&]( CPktMgr::HWMsg_t& f_HwMsg ) {
                 publish( f_HwMsg );
             } );
         }
@@ -54,7 +56,7 @@ namespace kick
 
             } catch( ... )
             {
-                // log exception.
+                ipc::logCurrentException( "Exception publishing a hardware event" );
             }
         }
     }

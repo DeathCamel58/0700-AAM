@@ -46,7 +46,7 @@ namespace ipc
         data->connectionId = connectionId;
         data->connectionAttemptCompletedCB = connectionAttemptCompletedCB;
         data->attempts = 0;
-        data->timer.reset(new ipc::MTIPCTimer(ipc::IPC_DELAYED_CONNECT_DELAY_IN_MILLI_SECONDS, std::bind(&MTIPCDelayedConnector::onTimeout, this)));
+        data->timer.reset(new ipc::MTIPCTimer(ipc::IPC_RECONNECT_MIN_DELAY_IN_MILLI_SECONDS, std::bind(&MTIPCDelayedConnector::onTimeout, this)));
     }
     MTIPCDelayedConnector::~MTIPCDelayedConnector()
     {
@@ -59,28 +59,30 @@ namespace ipc
     void MTIPCDelayedConnector::connect() { data->timer->start(); }
     void MTIPCDelayedConnector::stopConnectAttempt() { data->timer->stop(); }
 
+    // Keeps trying until it connects, doubling the delay up to
+    // IPC_RECONNECT_MAX_DELAY_IN_MILLI_SECONDS. It used to give up after four
+    // attempts 5 s apart, and a process then stayed up, still sending its
+    // heartbeat, without the connection for good.
     void MTIPCDelayedConnector::onTimeout()
     {
         if (!data->cm) return;
-        bool connected = false;
-        connected = data->cm->connect(data->connectionId);
-            
+        bool connected = data->cm->connect(data->connectionId);
+
         if (connected)
         {
             data->attempts = 0;
-            juce::MessageManager::callAsync([&, connected]() { data->connectionAttemptCompletedCB(data->connectionId, connected); });
+            data->timer->setInterval( ipc::IPC_RECONNECT_MIN_DELAY_IN_MILLI_SECONDS );
+            // Called asynchronously: the callback destroys this connector.
+            juce::MessageManager::callAsync( [callback = data->connectionAttemptCompletedCB, id = data->connectionId]() { callback( id, true ); } );
+            return;
         }
 
-        else if (data->attempts < 3)
-        {
-            data->attempts++;
-            juce::MessageManager::callAsync([&]() {connect(); });
-        }
-        else
-        {
-            // log connection failure message
-            data->attempts = 0;
-            juce::MessageManager::callAsync([&, connected]() { data->connectionAttemptCompletedCB(data->connectionId, connected); });
-        }
+        data->attempts++;
+        if( data->attempts == 1 || data->attempts % 10 == 0 )
+            juce::Logger::writeToLog( "Cannot connect " + data->cm->connectionName( data->connectionId ) + " (attempt "
+                                      + juce::String( data->attempts ) + "), still trying" );
+
+        data->timer->setInterval( juce::jmin( data->timer->getInterval() * 2, ipc::IPC_RECONNECT_MAX_DELAY_IN_MILLI_SECONDS ) );
+        data->timer->start();
     }
 }

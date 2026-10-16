@@ -96,7 +96,7 @@ namespace ipc
             }
             catch( ... )
             {
-                // log exception.
+                ipc::logCurrentException( "Exception sending an IPC message" );
             }
             
         }

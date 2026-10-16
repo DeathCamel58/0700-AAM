@@ -38,11 +38,12 @@ namespace contracts
         DclIPCInterfaceImpl( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher, const int connectionId )
             : IPCInterface( dispatcher, connectionId )
         {
-            contracts::DclSignals::sendCommandToDcl.connect( [&]( std::shared_ptr<ipc::MTIPCJson> message ) {
+            // Disconnected when this is destroyed: the signals outlive it.
+            sendConnection = contracts::DclSignals::sendCommandToDcl.connect( [&]( std::shared_ptr<ipc::MTIPCJson> message ) {
                 this->send( message );
             } );
 
-            contracts::DclSignals::createAndSendCommandToDcl.connect( [&]( const CPktMgr::HWMsg_t& message ) {
+            createAndSendConnection = contracts::DclSignals::createAndSendCommandToDcl.connect( [&]( const CPktMgr::HWMsg_t& message ) {
                 this->createAndPublishToDcl( message );
             } );
         }
@@ -55,6 +56,9 @@ namespace contracts
             contracts::DclContractsHelper::hWMessageToIPCMessage( hwMessage, message );
             send( message );
         }
+
+        sigslot::scoped_connection sendConnection;
+        sigslot::scoped_connection createAndSendConnection;
     };
 
     DclIPCInterface::DclIPCInterface( std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher, const int connectionId )

@@ -25,6 +25,10 @@
 #include "kick_audio_engine_adapter.h"
 #include "kick_audio_interface.h"
 
+#include "contracts/utils/app/termination_signals.h"
+
+#include <csignal>
+
 #ifdef PERFETTO
     #include "melatonin_perfetto/melatonin_perfetto.h"
 #endif
@@ -109,6 +113,17 @@ private:
 class AudioEngineApplication : public juce::JUCEApplication
 {
 public:
+    AudioEngineApplication()
+    {
+        // A write to a closed socket or pipe should fail with EPIPE, not
+        // kill the application.
+        std::signal( SIGPIPE, SIG_IGN );
+
+        // Quit through the message loop on SIGTERM, SIGINT and SIGHUP, so
+        // that shutdown() runs.
+        terminationSignals = std::make_unique<contracts::TerminationSignals>( [this]( int ) { systemRequestedQuit(); } );
+    }
+
     //==============================================================================
     const juce::String getApplicationName() override
     {
@@ -128,6 +143,17 @@ public:
     //==============================================================================
     void initialise( const juce::String& /*commandLine*/ ) override
     {
+        // Without a display (no X server, or DISPLAY not set) there is no
+        // primary display, and the window code dereferences it. Fail with a
+        // clear message instead.
+        if( juce::Desktop::getInstance().getDisplays().getPrimaryDisplay() == nullptr )
+        {
+            juce::Logger::writeToLog( "No display is available (is DISPLAY set and the display server running?); quitting" );
+            setApplicationReturnValue( EXIT_FAILURE );
+            quit();
+            return;
+        }
+
         audioInterface.reset(new KickAudioInterface());
         engineAdapter.reset(new KickAudioEngineAdapter(audioInterface));
         
@@ -221,7 +247,9 @@ public:
             : juce::DocumentWindow( name, juce::Colours::black, 0 )
         {
             setTitle( name );
-            setContentOwned( &kick_ui::KickHome::Instance(), true );
+            // KickHome is a function-local static: the window must not
+            // delete it.
+            setContentNonOwned( &kick_ui::KickHome::Instance(), true );
         }
 
         ~HomeWindow() final = default;
@@ -245,6 +273,7 @@ private:
     std::unique_ptr<KickDeviceAdapter>    adapter;
     std::unique_ptr<KickAudioEngineAdapter>    engineAdapter;
     std::shared_ptr<contracts::AudioInterface> audioInterface;
+    std::unique_ptr<contracts::TerminationSignals> terminationSignals;
 #if PERFETTO
     std::unique_ptr<perfetto::TracingSession> tracingSession;
 #endif
