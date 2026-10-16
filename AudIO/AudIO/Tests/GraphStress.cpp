@@ -30,8 +30,10 @@
 //       AudIO/Tests/GraphStress.cpp -o GraphStress -lpthread
 //   ./GraphStress 30
 //
-// It passes when the sanitizer reports nothing and the memory pool holds
-// only the stand-in device's buffers once the design is gone.
+// It first checks a few behaviors on their own (chain inserts, meters,
+// sub-designs, batched removal). It passes when those checks pass, the sanitizer reports
+// nothing and the memory pool holds only the stand-in device's buffers once
+// the design is gone.
 
 #include "AudIO.h"
 
@@ -50,10 +52,12 @@ namespace AudIO
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -101,6 +105,275 @@ namespace
 
         void process( AudIO::Buffer<float>& B ) override { DawInserts::process( B ); }
     };
+
+    // A stand-in audio thread for the checks below. Look at the device's
+    // outputs only while it is stopped.
+    struct Player
+    {
+        Player( AudIO::Design& D, AudIO::Buffer<float>& Device )
+            : design( D ), device( Device ) {}
+
+        ~Player() { stop(); }
+
+        void start()
+        {
+            running.store( true );
+            thread = std::thread( [this] {
+                while( running.load() )
+                {
+                    design.process( device );
+                    ++blocks;
+                    std::this_thread::sleep_for( pause );
+                }
+            } );
+        }
+
+        void stop()
+        {
+            running.store( false );
+            if( thread.joinable() )
+                thread.join();
+        }
+
+        void waitBlocks( long Count )
+        {
+            const auto target = blocks.load() + Count;
+            while( blocks.load() < target )
+                std::this_thread::sleep_for( std::chrono::microseconds( 100 ) );
+        }
+
+        AudIO::Design&        design;
+        AudIO::Buffer<float>& device;
+        std::atomic<bool>     running{ false };
+        std::atomic<long>     blocks{ 0 };
+        std::thread           thread;
+
+        std::chrono::microseconds pause{ 200 }; // Between blocks.
+    };
+
+    bool check( bool Condition, const char* What )
+    {
+        if( !Condition )
+            std::printf( "FAILED: %s\n", What );
+        return Condition;
+    }
+
+    float outputLevel( AudIO::Buffer<float>& Device )
+    {
+        auto out = Device.getOutputBuffer( 0 );
+        return out ? out[Device.getBlockSize() - 1] : 0.f;
+    }
+
+    // A chain's inserts, added at the head, the middle and the tail (several
+    // times), before and while it plays, must all be wired in: every Gain
+    // halves the level. Burst: change the chain several times between two
+    // blocks.
+    bool checkChainInserts( bool Burst )
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto chain  = design->createChain( true );
+        auto source = design->createObject( std::make_unique<Source>() );
+        design->patch( source, chain );
+        design->setDesignOutput( chain, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        Player               player( *design, device );
+        bool                 ok = true;
+
+        std::vector<uint32_t> inserts;
+        auto                  settle = [&] {
+            if( player.running.load() && !Burst )
+                player.waitBlocks( 2 );
+        };
+        auto add = [&]( uint32_t Pos ) {
+            auto id = design->createInsert( chain, "TestGain" );
+            ok &= check( design->addInsert( chain, id, Pos ), "adding an insert" );
+            inserts.push_back( id );
+            settle();
+        };
+        auto remove = [&]( uint32_t Pos ) {
+            ok &= check( design->removeInsertByPos( chain, Pos ), "removing an insert" );
+            settle();
+        };
+        auto expect = [&]( int Gains, const char* What ) {
+            player.waitBlocks( 4 );
+            player.stop();
+            ok &= check( ( 0.25f / (float)( 1 << Gains ) ) == outputLevel( device ), What );
+            player.start();
+        };
+
+        // Not playing yet: the patches are made at once.
+        add( AudIO::POS_END );
+        add( 1 ); // The tail.
+
+        design->prepareToPlay( 48000, BLOCK );
+        player.start();
+        expect( 2, "two inserts each halve the level" );
+
+        add( 2 ); // The tail.
+        add( AudIO::POS_END );
+        add( 0 ); // The head.
+        add( 2 ); // The middle.
+        add( (uint32_t)inserts.size() ); // The tail.
+        expect( 7, "seven inserts each halve the level" );
+
+        remove( 6 ); // The tail.
+        remove( 0 ); // The head.
+        remove( 2 ); // The middle.
+        expect( 4, "four inserts left each halve the level" );
+
+        player.stop();
+        design->teardown();
+        return ok;
+    }
+
+    // The design's meters run round-robin, a few per block: they must keep
+    // coming round as meters are added and removed.
+    bool checkMeterRoundRobin()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.start();
+
+        auto addMetered = [&] {
+            auto id = design->createObject( std::make_unique<Source>() );
+            design->sendToBus( out, id, 1.f );
+            design->addMeter( id );
+            return id;
+        };
+        auto metered = [&]( const std::vector<uint32_t>& Ids ) {
+            player.waitBlocks( 50 );
+            player.stop();
+            bool all = true;
+            for( auto id : Ids )
+            {
+                // A Source peaks at 0.25 (-12 dB); a meter that never ran
+                // reads otherwise.
+                const auto& data = design->readMeter( id );
+                all &= !data.empty() && ( std::fabs( data[0].peak + 12.04f ) < 0.1f );
+            }
+            player.start();
+            return all;
+        };
+
+        std::vector<uint32_t> first;
+        for( int i = 0; i < 4; ++i )
+            first.push_back( addMetered() );
+        bool ok = check( metered( first ), "four meters are updated" );
+
+        // Fewer meters than the round-robin has been through.
+        for( int i = 0; i < 3; ++i )
+            design->removeObject( first[(size_t)i] );
+        std::vector<uint32_t> second{ first[3], addMetered(), addMetered() };
+        ok &= check( metered( second ), "meters added after removals are updated" );
+
+        std::vector<uint32_t> third{ addMetered(), addMetered(), addMetered() };
+        ok &= check( metered( third ), "meters added later are updated" );
+
+        player.stop();
+        design->teardown();
+        return ok;
+    }
+
+    // A sub-design inserted and torn down while the engine plays must not
+    // start or stop the patch queue, which only the audio thread empties.
+    bool checkSubDesign()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.start();
+
+        auto& queue = AudIO::PatchQueue<float>::get();
+        bool  ok    = true;
+        for( int i = 0; i < 20; ++i )
+        {
+            auto sub    = std::make_shared<AudIO::Design>( 0, 2 );
+            auto source = sub->createObject( std::make_unique<Source>() );
+            sub->setDesignOutput( source, true );
+            auto id = design->insertDesign( sub );
+            ok &= check( 0 != id, "inserting a sub-design" );
+            design->sendToBus( out, id, 1.f );
+            player.waitBlocks( 2 );
+
+            sub->teardown();
+            ok &= check( queue.isRunning(), "a sub-design's teardown leaves the patch queue running" );
+            design->removeObject( id );
+        }
+
+        player.stop();
+        design->teardown();
+        ok &= check( !queue.isRunning(), "the top-level design's teardown stops the patch queue" );
+        return ok;
+    }
+
+    // Removing many objects at once, while playing, waits for the audio
+    // thread once rather than once per object, and frees them all.
+    bool checkBatchedRemoval()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.pause = std::chrono::microseconds( 2000 ); // Blocks as a device runs them.
+        player.start();
+
+        const auto usedBefore = AudIO::MemoryPool<float>::get().getUsed();
+        auto       create     = [&] {
+            std::vector<uint32_t> ids;
+            for( int i = 0; i < 30; ++i )
+            {
+                auto id = design->createObject( std::make_unique<Source>() );
+                design->sendToBus( out, id, 1.f );
+                design->addMeter( id );
+                ids.push_back( id );
+            }
+            return ids;
+        };
+        auto timed = [&]( auto&& Remove ) {
+            const auto start = std::chrono::steady_clock::now();
+            Remove();
+            return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start ).count();
+        };
+
+        auto       ids = create();
+        const auto one = timed( [&] {
+            for( auto id : ids )
+                design->removeObject( id );
+        } );
+
+        ids             = create();
+        auto       ok   = true;
+        const auto many = timed( [&] { ok &= check( design->removeObjects( ids ), "removing objects together" ); } );
+
+        ids              = create();
+        const auto scope = timed( [&] {
+            AudIO::Design::RemovalBatch batch{ *design };
+            for( auto id : ids )
+                design->removeObject( id );
+        } );
+
+        player.waitBlocks( 2 );
+        player.stop();
+        std::printf( "Removing 30 objects: %.1f ms one by one, %.1f ms together, %.1f ms in a batch\n", one, many, scope );
+        ok &= check( ( many < one ) && ( scope < one ), "removing objects together is faster" );
+        ok &= check( usedBefore == AudIO::MemoryPool<float>::get().getUsed(), "objects removed together are freed" );
+
+        design->teardown();
+        return ok;
+    }
 } // namespace
 
 int main( int argc, char** argv )
@@ -108,6 +381,9 @@ int main( int argc, char** argv )
     const int seconds = ( argc > 1 ) ? std::atoi( argv[1] ) : 5;
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
+
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() || !checkBatchedRemoval() )
+        return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
     auto out    = design->createBus();
@@ -143,12 +419,13 @@ int main( int argc, char** argv )
     std::mt19937          rng( 1234 );
     long                  operations = 0;
     std::vector<uint32_t> objects;
+    std::vector<uint32_t> chainInserts;
     const auto            deadline = std::chrono::steady_clock::now() + std::chrono::seconds( seconds );
 
     while( std::chrono::steady_clock::now() < deadline )
     {
-        // Keep within the memory pool: remove when there are many objects.
-        const auto operation = ( objects.size() < 300 ) ? rng() % 9 : 3;
+        // Keep within the memory pool: remove many when there are many objects.
+        const auto operation = ( objects.size() < 300 ) ? rng() % 9 : 9;
         switch( operation )
         {
             case 0:
@@ -187,14 +464,24 @@ int main( int argc, char** argv )
                 }
                 break;
             case 5:
-            {
-                auto id = design->createInsert( chain, "TestGain" );
-                design->addInsert( chain, id, rng() % 3 );
-                if( rng() & 1 )
-                    design->removeInsert( chain, id );
-                design->deleteInsert( chain, id );
+                // Up to a few inserts, added anywhere (the tail included)
+                // and deleted in any order.
+                if( ( chainInserts.size() < 4 ) && ( rng() & 1 ) )
+                {
+                    auto id = design->createInsert( chain, "TestGain" );
+                    design->addInsert( chain, id, rng() % ( chainInserts.size() + 2 ) );
+                    chainInserts.push_back( id );
+                }
+                else if( !chainInserts.empty() )
+                {
+                    auto index = rng() % chainInserts.size();
+                    auto id    = chainInserts[index];
+                    if( rng() & 1 )
+                        design->removeInsert( chain, id );
+                    design->deleteInsert( chain, id );
+                    chainInserts.erase( chainInserts.begin() + (long)index );
+                }
                 break;
-            }
             case 6:
                 pHost->addEffect( "TestGain", rng() % AudIO::DawInserts::MAX_INSERTS );
                 break;
@@ -205,6 +492,32 @@ int main( int argc, char** argv )
                 if( !objects.empty() )
                     design->setBusInputGain( out, objects[rng() % objects.size()], 0.3f );
                 break;
+            case 9:
+            {
+                // Many at once, together or in a batch.
+                std::vector<uint32_t> ids;
+                for( auto n = 1 + rng() % 100; n && !objects.empty(); --n )
+                {
+                    auto index = rng() % objects.size();
+                    ids.push_back( objects[index] );
+                    objects.erase( objects.begin() + (long)index );
+                }
+                if( rng() & 1 )
+                {
+                    design->removeObjects( ids );
+                }
+                else
+                {
+                    AudIO::Design::RemovalBatch batch{ *design };
+                    for( auto id : ids )
+                    {
+                        if( rng() & 1 )
+                            design->removeFromBus( out, id );
+                        design->removeObject( id );
+                    }
+                }
+                break;
+            }
         }
         ++operations;
     }

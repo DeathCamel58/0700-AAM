@@ -15,13 +15,26 @@ namespace AudIO
         output
     };
 
+    // Where a patch's block comes from: the block given, or a channel of
+    // another buffer, looked up only when the patch is applied, after the
+    // patches queued before it (which may change that channel).
+    enum class PatchSource
+    {
+        block,
+        input,
+        output
+    };
+
     template<typename T>
     struct PatchData
     {
-        Buffer<T>* dest   = nullptr;
-        T*         src    = nullptr;
-        uint32_t   destch = 0;
-        PatchType  type   = PatchType::input;
+        Buffer<T>*  dest      = nullptr;
+        T*          src       = nullptr;
+        uint32_t    destch    = 0;
+        PatchType   type      = PatchType::input;
+        Buffer<T>*  srcBuffer = nullptr;
+        uint32_t    srcch     = 0;
+        PatchSource from      = PatchSource::block;
     };
 
     // Patches made while the audio thread runs are queued here and applied by
@@ -37,8 +50,13 @@ namespace AudIO
             return _s;
         }
 
+        // The top-level design's prepareToPlay() and teardown(): see there.
         void start()
         {
+            // Applying patches here while the audio thread does would make
+            // two consumers.
+            if( _running.load() )
+                return;
             process();
             _running.store( true );
         }
@@ -125,6 +143,40 @@ namespace AudIO
             }
         }
 
+        // Patch Destination's DestCh to Source's SrcCh (one of its inputs or
+        // outputs) as it is once the patches queued before have been applied.
+        // Source must outlive the patch (releaseWhenUnused() sees to that).
+        void patchInputFrom( Buffer<T>* destination, uint32_t destCh, Buffer<T>* source, PatchSource from, uint32_t srcCh )
+        {
+            if( destination && source )
+            {
+                destination->acquireInputForPatch( destCh );
+                PatchData<T> data;
+                data.dest      = destination;
+                data.destch    = destCh;
+                data.type      = PatchType::input;
+                data.srcBuffer = source;
+                data.srcch     = srcCh;
+                data.from      = from;
+                push( data );
+            }
+        }
+
+        void patchOutputFrom( Buffer<T>* destination, uint32_t destCh, Buffer<T>* source, PatchSource from, uint32_t srcCh )
+        {
+            if( destination && source )
+            {
+                PatchData<T> data;
+                data.dest      = destination;
+                data.destch    = destCh;
+                data.type      = PatchType::output;
+                data.srcBuffer = source;
+                data.srcch     = srcCh;
+                data.from      = from;
+                push( data );
+            }
+        }
+
     private:
         void push( PatchData<T>& data )
         {
@@ -179,13 +231,20 @@ namespace AudIO
 
         void process( PatchData<T>& data )
         {
+            auto src = data.src;
+            if( data.srcBuffer )
+            {
+                src = ( data.from == PatchSource::input ) ? data.srcBuffer->getInputBuffer( data.srcch )
+                                                          : data.srcBuffer->getOutputBuffer( data.srcch );
+            }
+
             if( data.type == PatchType::input )
             {
-                data.dest->patchInput( data.src, data.destch );
+                data.dest->patchInput( src, data.destch );
             }
             else
             {
-                data.dest->patchOutput( data.src, data.destch );
+                data.dest->patchOutput( src, data.destch );
             }
         }
 

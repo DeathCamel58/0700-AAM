@@ -237,10 +237,13 @@ namespace mt
         //DBG( "CP: FM3: " << engine.getFeeMemory() );
 
         // The transport, closed above, waited for the tick thread to let go
-        // of the sequences, and removing a program's objects waits for the
-        // audio thread to let go of them.
-        MTAudioSequenceManager::close();
-        MTAudioProgramManager::close();
+        // of the sequences. The programs' objects are removed in one batch:
+        // freeing them waits for the audio thread once, not once per object.
+        {
+            AudIO::Design::RemovalBatch removal{ engine };
+            MTAudioSequenceManager::close();
+            MTAudioProgramManager::close();
+        }
 
         engine.waitForAudioThread();
         //DBG( "CP: End FM: " << engine.getFeeMemory() );

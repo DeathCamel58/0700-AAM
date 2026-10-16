@@ -27,7 +27,7 @@ namespace AudIO
             auto count  = std::min( _buffer.getNumOutputChannels(), dstbuffer.getNumInputChannels() );
             for( uint32_t ch = 0; ch < count; ++ch )
             {
-                PatchQueue<float>::get().patchInput( &dstbuffer, _buffer.getOutputBuffer( ch ), ch );
+                PatchQueue<float>::get().patchInputFrom( &dstbuffer, ch, &_buffer, PatchSource::output, ch );
             }
             return retVal;
         }
