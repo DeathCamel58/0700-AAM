@@ -33,6 +33,7 @@
 #include <thread>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -124,10 +125,26 @@ namespace ipc
                 return false;
             }
 
+            // Until the child has reset the signal handlers and closed this
+            // process's descriptors, a signal must not run one of this
+            // process's handlers in it: a SIGTERM there would write to this
+            // process's signal pipe and make it quit. Block every signal
+            // across fork(); the child unblocks them once that is done.
+            sigset_t allSignals, previousMask;
+            sigfillset( &allSignals );
+            ::pthread_sigmask( SIG_SETMASK, &allSignals, &previousMask );
+
             const std::lock_guard<std::mutex> lock( mutex );
             const pid_t                       child = ::fork();
             if( child == 0 )
             {
+                struct sigaction defaultAction{};
+                defaultAction.sa_handler = SIG_DFL;
+                sigemptyset( &defaultAction.sa_mask );
+                for( int signalNumber = 1; signalNumber < NSIG; ++signalNumber )
+                    if( signalNumber != SIGKILL && signalNumber != SIGSTOP )
+                        ::sigaction( signalNumber, &defaultAction, nullptr );
+
                 // The death signal is sent when the thread that forked exits:
                 // processes are started on the message thread, which lives as
                 // long as this process.
@@ -135,12 +152,11 @@ namespace ipc
                 if( ::getppid() != parentPid )
                     ::_exit( 127 );
 
+                closeDescriptorsFrom( STDERR_FILENO + 1, errorPipe[1], maxFd );
+
                 sigset_t noSignals;
                 sigemptyset( &noSignals );
                 ::sigprocmask( SIG_SETMASK, &noSignals, nullptr );
-                ::signal( SIGPIPE, SIG_DFL );
-
-                closeDescriptorsFrom( STDERR_FILENO + 1, errorPipe[1], maxFd );
                 ::execv( argv[0], argv );
 
                 const int error = errno;
@@ -148,10 +164,12 @@ namespace ipc
                 ::_exit( 127 );
             }
 
+            const int forkError = errno;
+            ::pthread_sigmask( SIG_SETMASK, &previousMask, nullptr );
             ::close( errorPipe[1] );
             if( child < 0 )
             {
-                juce::Logger::writeToLog( "Cannot start " + path + ": " + juce::String( std::strerror( errno ) ) );
+                juce::Logger::writeToLog( "Cannot start " + path + ": " + juce::String( std::strerror( forkError ) ) );
                 ::close( errorPipe[0] );
                 return false;
             }
