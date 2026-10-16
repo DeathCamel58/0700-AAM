@@ -60,15 +60,18 @@ namespace AudIO
         struct InsertEffects
         {
             std::atomic<bool>       bypassed{ true };
-            std::unique_ptr<Object> pObj;
+            std::unique_ptr<Object> pObj; // Control threads.
+            std::atomic<Object*>    live{ nullptr }; // What the audio thread runs.
 
             int  reset();
-            int  create( const std::string& Effect );
+            int  create( const std::string& Effect, uint32_t Samplerate, uint32_t Blocksize );
             bool isSame( const std::string& Effect ) const;
         };
 
         std::atomic<bool>                      _bypassAll{ false };
         std::array<InsertEffects, MAX_INSERTS> _inserts;
+        uint32_t                               _sampleRate{ 0 }; // 0 until prepared.
+        uint32_t                               _blockSize{ 0 };
 
         InsertEffects* getEffect( const std::string& Effect );
         InsertEffects* getEffect( unsigned int Position );
