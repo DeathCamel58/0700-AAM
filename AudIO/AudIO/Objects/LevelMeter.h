@@ -5,11 +5,12 @@
 
 namespace AudIO
 {
+    // A channel's level over the last block metered: silence until then.
     struct MeterStats
     {
         float rms{ 0.f };
-        float min{ 1.f };
-        float max{ -1.f };
+        float min{ 0.f };
+        float max{ 0.f };
     };
     using MeterStatsContainer = std::vector<MeterStats>;
 

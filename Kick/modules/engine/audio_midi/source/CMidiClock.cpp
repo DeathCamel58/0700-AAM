@@ -91,15 +91,19 @@ namespace mt
     // Clock control API's
     void CMidiClock::init() noexcept
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
         initPlatformTimer();
         setTempo( tempo.getCurrentValue() );
     }
 
     void CMidiClock::start( bool ClearCounters ) noexcept
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
+
         // Restarting a running clock: stopping waits for a tick the timer
         // thread is running, which reads the counters reset below.
         stopPlatformTimer();
+        takeTempoRequest( false );
 
         clockCounter       = 0;
         intClockSyncPulses = 0;
@@ -122,6 +126,7 @@ namespace mt
 
     void CMidiClock::stop() noexcept
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
         stopPlatformTimer();
 
         if( isExternalClockSync() )
@@ -137,6 +142,7 @@ namespace mt
     // PPQN factors...
     void CMidiClock::setInternalPPQN( PPQNResolution resolution )
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
         stop();
         intPPQN = resolution;
         recomputePPQNFactor();
@@ -144,6 +150,7 @@ namespace mt
 
     void CMidiClock::setExternalPPQN( PPQNResolution resolution )
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
         stop();
         extPPQN = resolution;
         recomputePPQNFactor();
@@ -155,19 +162,44 @@ namespace mt
         if( isExternalClockSync() )
         {
             auto averageMicros = averageOfExternalIntervals();
-            return ( 0 == averageMicros ) ? tempo.getCurrentValue() : microsToTempo( averageMicros );
+            return ( 0 == averageMicros ) ? requestedTempo.load() : microsToTempo( averageMicros );
         }
-        return tempo.getCurrentValue();
+        // The tempo set last: a running clock ramps to it within a
+        // millisecond or so.
+        return requestedTempo.load();
     }
 
     void CMidiClock::setTempo( float Bpm, double RampLengthInSeconds )
     {
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
+
         auto numSteps = isInternalClockSync() ? ( RampLengthInSeconds / 0.001 ) : 1;
-        tempo.reset( numSteps );
+        requestedTempo.store( Bpm, std::memory_order_relaxed );
+        requestedRampSteps.store( (int)numSteps, std::memory_order_relaxed );
+        tempoRequest.fetch_add( 1, std::memory_order_release );
+
+        // A running timer takes it up at its next tick.
+        if( !isTimerRunning )
+            takeTempoRequest( false );
+    }
+
+    // Timer thread while the timer runs; otherwise a control function.
+    void CMidiClock::takeTempoRequest( bool UpdateInterval )
+    {
+        const auto request = tempoRequest.load( std::memory_order_acquire );
+        if( request == tempoRequestTaken )
+            return;
+        tempoRequestTaken = request;
+        applyTempo( requestedTempo.load( std::memory_order_relaxed ), requestedRampSteps.load( std::memory_order_relaxed ), UpdateInterval );
+    }
+
+    void CMidiClock::applyTempo( float Bpm, int RampSteps, bool UpdateInterval )
+    {
+        tempo.reset( RampSteps );
         tempo.setTargetValue( Bpm );
         microsPerQuarterNote = tempoToMicros( Bpm ); // In Micro-Seconds.
 
-        if( isRunning() )
+        if( UpdateInterval )
             setPlatformTimerInterval( microsPerQuarterNote );
     }
 
@@ -185,6 +217,8 @@ namespace mt
     {
         if( isInternalClockSync() )
             return;
+
+        const std::lock_guard<std::recursive_mutex> sl( controlLock );
 
         switch( state )
         {
@@ -232,6 +266,8 @@ namespace mt
 
     void CMidiClock::tickInternal()
     {
+        takeTempoRequest( true );
+
         if( tempo.isSmoothing() )
         {
             microsPerQuarterNote = static_cast<uint32_t>( tempoToMicros( tempo.getNextValue() ) ); // In Micro-Seconds.
@@ -260,21 +296,21 @@ namespace mt
             // increase internal clock pulses at tempo synchronization rate as per extPPQN.
             ++intClockSyncPulses;
 
-            if( syncTempo && isExternalClockSync() )
+            if( isExternalClockSync() && syncTempo.exchange( false ) )
             {
-                syncTempo = false;
-
                 // sync tick position with external tick clock
-                if( ( intClockSyncPulses < extClockSyncPulses ) || ( intClockSyncPulses > ( extClockSyncPulses + 1 ) ) )
+                const uint32_t extPulses = extClockSyncPulses.load();
+                if( ( intClockSyncPulses < extPulses ) || ( intClockSyncPulses > ( extPulses + 1 ) ) )
                 {
-                    intClockSyncPulses = extClockSyncPulses;
-                    ticks              = extClockSyncPulses * intClockPulsesPerExtClockPulse;
+                    intClockSyncPulses = extPulses;
+                    ticks              = extPulses * intClockPulsesPerExtClockPulse;
                     clockCounter       = ticks % intClockPulsesPerExtClockPulse;
                 }
 
-                // Synchronize tempo
-                uint32_t avgIntervalInMicros = averageOfExternalIntervals();
-                setTempoByTime( avgIntervalInMicros );
+                // Synchronize tempo (here, on the timer thread, directly:
+                // setTempo() would take the control lock).
+                if( uint32_t avgIntervalInMicros = averageOfExternalIntervals() )
+                    applyTempo( microsToTempo( (float)avgIntervalInMicros ), 1, true );
             }
 
             if( ++syncCounter >= (uint32_t)extPPQN )
@@ -306,7 +342,8 @@ namespace mt
         extCounter            = 0;
         extClockSyncPulses    = 0;
         extIntervalIdx        = 0;
-        std::fill( extIntervals.begin(), extIntervals.end(), 0 );
+        for( auto& interval : extIntervals )
+            interval.store( 0 );
     }
 
     uint32_t CMidiClock::averageOfExternalIntervals() const noexcept
@@ -315,8 +352,9 @@ namespace mt
         // 0 until there is one.
         uint64_t count = 0;
         uint64_t total = 0;
-        for( const auto& val : extIntervals )
+        for( const auto& interval : extIntervals )
         {
+            const uint64_t val = interval.load();
             if( val != 0 )
             {
                 total += val;

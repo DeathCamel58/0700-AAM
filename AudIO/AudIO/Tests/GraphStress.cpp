@@ -31,7 +31,7 @@
 //   ./GraphStress 30
 //
 // It first checks a few behaviors on their own (chain inserts, meters,
-// sub-designs, batched removal). It passes when those checks pass, the sanitizer reports
+// sub-designs, batched removal, parameter changes). It passes when those checks pass, the sanitizer reports
 // nothing and the memory pool holds only the stand-in device's buffers once
 // the design is gone.
 
@@ -261,10 +261,17 @@ namespace
             return all;
         };
 
-        std::vector<uint32_t> first;
-        for( int i = 0; i < 4; ++i )
+        // Before it has run, a meter reads silence.
+        player.stop();
+        const auto fresh = addMetered();
+        const auto& data = design->readMeter( fresh );
+        bool        ok   = check( !data.empty() && ( -100.f == data[0].peak ), "a meter that has not run reads silence" );
+        player.start();
+
+        std::vector<uint32_t> first{ fresh };
+        for( int i = 0; i < 3; ++i )
             first.push_back( addMetered() );
-        bool ok = check( metered( first ), "four meters are updated" );
+        ok &= check( metered( first ), "four meters are updated" );
 
         // Fewer meters than the round-robin has been through.
         for( int i = 0; i < 3; ++i )
@@ -274,6 +281,54 @@ namespace
 
         std::vector<uint32_t> third{ addMetered(), addMetered(), addMetered() };
         ok &= check( metered( third ), "meters added later are updated" );
+
+        player.stop();
+        design->teardown();
+        return ok;
+    }
+
+    // A chain's gain, changed while it plays, ramps to the new value; a
+    // forced change of the design's output gain applies at once.
+    bool checkParameterChanges()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto chain  = design->createChain( true );
+        auto source = design->createObject( std::make_unique<Source>() );
+        design->patch( source, chain );
+        design->setDesignOutput( chain, true );
+        design->addMeter( chain );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.start();
+
+        bool ok    = true;
+        auto level = [&]( long Blocks ) {
+            player.waitBlocks( Blocks );
+            player.stop();
+            const auto l = outputLevel( device );
+            player.start();
+            return l;
+        };
+
+        for( int i = 0; i < 50; ++i ) // Changes faster than the ramps.
+            design->setGain( chain, ( i & 1 ) ? 0.25f : 1.f );
+        design->setGain( chain, 0.5f );
+        ok &= check( 0.5f == design->getGain( chain ), "a chain's gain reads back at once" );
+        ok &= check( 0.125f == level( 40 ), "a chain's gain ramps to its new value" );
+        player.stop();
+        const auto& meter = design->readMeter( chain ); // 0.125: -18 dB.
+        ok &= check( !meter.empty() && ( std::fabs( meter[0].peak + 18.06f ) < 0.1f ), "the chain's meter follows its level down" );
+        player.start();
+
+        design->setMute( chain, true );
+        ok &= check( 0.f == level( 40 ), "a muted chain is silent" );
+        design->setMute( chain, false );
+        ok &= check( 0.125f == level( 40 ), "an unmuted chain plays again" );
+
+        design->clearDesignOutput( true );
+        ok &= check( 0.f == level( 4 ), "a forced output gain change is immediate" );
 
         player.stop();
         design->teardown();
@@ -382,7 +437,7 @@ int main( int argc, char** argv )
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
 
-    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() || !checkBatchedRemoval() )
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() || !checkSubDesign() || !checkBatchedRemoval() || !checkParameterChanges() )
         return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
@@ -425,7 +480,7 @@ int main( int argc, char** argv )
     while( std::chrono::steady_clock::now() < deadline )
     {
         // Keep within the memory pool: remove many when there are many objects.
-        const auto operation = ( objects.size() < 300 ) ? rng() % 9 : 9;
+        const auto operation = ( objects.size() < 300 ) ? rng() % 10 : 10;
         switch( operation )
         {
             case 0:
@@ -493,6 +548,21 @@ int main( int argc, char** argv )
                     design->setBusInputGain( out, objects[rng() % objects.size()], 0.3f );
                 break;
             case 9:
+            {
+                // Parameters, which the audio thread ramps.
+                const auto target = ( rng() & 1 ) ? chain : ( ( rng() & 1 ) ? sub : out );
+                switch( rng() % 6 )
+                {
+                    case 0: design->setGain( target, 0.5f + 0.5f * (float)( rng() & 1 ) ); break;
+                    case 1: design->setPan( target, ( rng() & 1 ) ? -0.5f : 0.f ); break;
+                    case 2: design->setLevelAndPan( target, 1.f, 0.f ); break;
+                    case 3: design->setMute( target, 0 == rng() % 4 ); break;
+                    case 4: design->setBypass( target, 0 == rng() % 4 ); break;
+                    case 5: design->setBypass( 0 == rng() % 8 ); break;
+                }
+                break;
+            }
+            case 10:
             {
                 // Many at once, together or in a batch.
                 std::vector<uint32_t> ids;

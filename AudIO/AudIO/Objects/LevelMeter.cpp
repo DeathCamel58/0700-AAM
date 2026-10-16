@@ -9,7 +9,13 @@ namespace AudIO
     static void _meteringProcess( const float* buffer, unsigned int size, MeterStats& stats )
     {
         if( buffer )
+        {
+            // rmsMinAndMax() widens Min and Max: start each block from
+            // silence, or the peak would be the loudest sample ever metered.
+            stats.min = 0.f;
+            stats.max = 0.f;
             utils::rmsMinAndMax( buffer, size, stats.rms, stats.min, stats.max );
+        }
     }
 
     static void _processInMeter( const AudIO::Buffer<float>& buffer, MeterStatsContainer& stats )

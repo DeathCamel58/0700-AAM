@@ -1,2 +1,3 @@
 add_subdirectory(sequencer_stress)
 add_subdirectory(pad_stress)
+add_subdirectory(clock_stress)

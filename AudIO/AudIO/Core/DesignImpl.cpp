@@ -126,6 +126,8 @@ namespace AudIO
         _clearDesignInput.store( true );
         if( !_running )
         {
+            // Nothing processes the design: take the new gain up here.
+            designInputGain.update();
             handleClearDesignInput();
         }
     }
