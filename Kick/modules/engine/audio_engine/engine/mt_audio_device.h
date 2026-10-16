@@ -29,14 +29,20 @@ namespace mt
     /// The engine's master audio device: an AudIO::IAudioDevice that plays
     /// the engine through a juce::AudioDeviceManager.
     ///
-    /// The device type and device come from the build (KICK_AUDIO_DEVICE_TYPE
-    /// and KICK_AUDIO_DEVICE, see CMakeLists.txt), unless DeviceName names a
-    /// device. A device name is matched against the names JUCE lists for the
-    /// type: exactly, as a wildcard pattern, or as a part of the name; an
-    /// empty name selects the type's default device, which for ALSA is the
-    /// "default" PCM of /etc/asound.conf. If the type is not available (JUCE
-    /// built without it) the first type that has devices is used, and if the
-    /// device cannot be opened, the type's default device.
+    /// The device type and device come from, in this order: DeviceName; the
+    /// KICK_AUDIO_DEVICE_TYPE and KICK_AUDIO_DEVICE environment variables;
+    /// the device saved in the state directory (prefs/audio-device.xml);
+    /// the build (KICK_AUDIO_DEVICE_TYPE and KICK_AUDIO_DEVICE, see
+    /// CMakeLists.txt). A device chosen through the environment is saved
+    /// once it opens, in AudioDeviceManager's DEVICESETUP format, so that
+    /// it is used again without the variables; remove the file to go back
+    /// to the build's device. A device name is matched against the names
+    /// JUCE lists for the type: exactly, as a wildcard pattern, or as a
+    /// part of the name; an empty name selects the type's default device,
+    /// which for ALSA is the "default" PCM of /etc/asound.conf. If the type
+    /// is not available (JUCE built without it) the first type that has
+    /// devices is used, and if the device cannot be opened, the type's
+    /// default device.
     ///
     /// The main mix plays on the first two outputs. The engine's other
     /// outputs are only opened on a device that has that many channels of
@@ -124,9 +130,22 @@ namespace mt
             const juce::String preferredType;
         };
 
+        // The device to open, and whether to save it once it opens.
+        struct DeviceChoice
+        {
+            juce::String type;
+            juce::String device;
+            juce::String origin;
+            bool         save{ false };
+        };
+
+        static DeviceChoice chooseDevice( const juce::String& DeviceName );
+        void                saveDeviceChoice();
+
     private:
         const int          numInputs;
         const int          numOutputs;
+        DeviceChoice       choice;
         const juce::String deviceName;
 
         JuceDeviceManager deviceManager;

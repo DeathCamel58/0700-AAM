@@ -68,6 +68,11 @@ namespace mt
             return {};
         }
 
+        juce::File getSavedDeviceFile()
+        {
+            return getAppDirs( MTPrefs ).getChildFile( "audio-device.xml" );
+        }
+
         juce::String defaultDeviceName( juce::AudioIODeviceType& Type, bool Input )
         {
             const auto names = Type.getDeviceNames( Input );
@@ -115,9 +120,51 @@ namespace mt
         : IAudioDevice( (uint32_t)juce::jmax( 0, NumInputs ), (uint32_t)juce::jmax( 0, NumOutputs ) )
         , numInputs( juce::jmax( 0, NumInputs ) )
         , numOutputs( juce::jmax( 0, NumOutputs ) )
-        , deviceName( DeviceName.isNotEmpty() ? DeviceName : juce::String( KICK_AUDIO_DEVICE ) )
-        , deviceManager( KICK_AUDIO_DEVICE_TYPE )
+        , choice( chooseDevice( DeviceName ) )
+        , deviceName( choice.device )
+        , deviceManager( choice.type )
     {
+        logAudioDevice( "using " + ( deviceName.isNotEmpty() ? "device \"" + deviceName + "\"" : juce::String( "the default device" ) )
+                        + " of type \"" + choice.type + "\" (" + choice.origin + ")" );
+    }
+
+    AudioDevice::DeviceChoice AudioDevice::chooseDevice( const juce::String& DeviceName )
+    {
+        const auto envType   = juce::SystemStats::getEnvironmentVariable( "KICK_AUDIO_DEVICE_TYPE", {} );
+        const auto envDevice = juce::SystemStats::getEnvironmentVariable( "KICK_AUDIO_DEVICE", {} );
+        const auto type      = envType.isNotEmpty() ? envType : juce::String( KICK_AUDIO_DEVICE_TYPE );
+
+        if( DeviceName.isNotEmpty() )
+            return { type, DeviceName, "requested", false };
+
+        if( envType.isNotEmpty() || envDevice.isNotEmpty() )
+            return { type, envDevice, "from the environment", true };
+
+        if( auto state = juce::parseXMLIfTagMatches( getSavedDeviceFile(), "DEVICESETUP" ) )
+        {
+            auto device = state->getStringAttribute( "audioOutputDeviceName" );
+            if( device.isEmpty() )
+                device = state->getStringAttribute( "audioInputDeviceName" );
+
+            const auto savedType = state->getStringAttribute( "deviceType" );
+            if( savedType.isNotEmpty() )
+                return { savedType, device, "saved in " + getSavedDeviceFile().getFullPathName(), false };
+        }
+
+        return { KICK_AUDIO_DEVICE_TYPE, KICK_AUDIO_DEVICE, "the build's default", false };
+    }
+
+    void AudioDevice::saveDeviceChoice()
+    {
+        auto state = deviceManager.createStateXml();
+        if( state == nullptr )
+            return;
+
+        const auto file = getSavedDeviceFile();
+        if( file.getParentDirectory().createDirectory().wasOk() && state->writeTo( file ) )
+            logAudioDevice( "saved the device in " + file.getFullPathName() );
+        else
+            logAudioDevice( "cannot save the device in " + file.getFullPathName() );
     }
 
     AudioDevice::~AudioDevice()
@@ -235,12 +282,14 @@ namespace mt
         }
 
         juce::String error;
+        bool         chosen = false;
 
         if( type != nullptr )
         {
-            error = openDevice( *type, output, input, SampleRate, BlockSize );
+            error  = openDevice( *type, output, input, SampleRate, BlockSize );
+            chosen = deviceManager.getCurrentAudioDevice() != nullptr;
 
-            if( deviceManager.getCurrentAudioDevice() == nullptr )
+            if( !chosen )
                 logAudioDevice( "cannot open \"" + ( output.isNotEmpty() ? output : input ) + "\": " + error + ", using the default device" );
         }
 
@@ -262,7 +311,8 @@ namespace mt
                 output = numOutputs > 0 ? defaultDeviceName( *type, false ) : juce::String();
                 input  = numInputs > 0 && type->hasSeparateInputsAndOutputs() ? defaultDeviceName( *type, true ) : output;
 
-                error = openDevice( *type, output, input, SampleRate, BlockSize );
+                error  = openDevice( *type, output, input, SampleRate, BlockSize );
+                chosen = deviceName.isEmpty() && type->getTypeName() == choice.type;
             }
         }
 
@@ -278,6 +328,14 @@ namespace mt
                         + juce::String( device->getCurrentBufferSizeSamples() ) + " samples, "
                         + juce::String( device->getActiveInputChannels().countNumberOfSetBits() ) + " in / "
                         + juce::String( device->getActiveOutputChannels().countNumberOfSetBits() ) + " out" );
+
+        // Only the device that was asked for, not a fallback.
+        if( chosen && choice.save )
+        {
+            choice.save = false;
+            saveDeviceChoice();
+        }
+
         return true;
     }
 
