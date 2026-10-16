@@ -84,6 +84,8 @@ namespace ipc
 					const juce::ScopedLock sl( data->executorsLock );
 					for( auto itr = data->executors.begin(); itr != data->executors.end(); itr.next() )
 					{
+						if( itr.getValue()->killIfOverdue() )
+							juce::Logger::writeToLog( data->processName( itr.getKey() ) + " did not exit after SIGTERM, killing it" );
 						if( itr.getValue()->isRunning() )
 							continue;
 						exitedIds.add( itr.getKey() );
@@ -123,9 +125,9 @@ namespace ipc
 
 	MTIPCProcessManager::~MTIPCProcessManager()
 	{
+		// Does nothing if stop() has already run.
+		stop();
 		data.reset();
-		if( processMonitorThread )
-			processMonitorThread->stopThread( 1500 );
 		processMonitorThread.reset();
 	}
 
@@ -154,17 +156,49 @@ namespace ipc
 		processMonitorThread->startThread();
 	}
 
+	// Stops every child the way the service manager stops a service: SIGTERM
+	// to all, then SIGKILL to those still running after the timeout. The
+	// monitor thread is stopped first, so nothing reports these exits or
+	// restarts the processes.
 	void MTIPCProcessManager::stop()
 	{
 		if(processMonitorThread && processMonitorThread->isThreadRunning())
 			processMonitorThread->stopThread(1500);
 
-		const juce::ScopedLock sl( data->executorsLock );
-		for (auto executor : data->executors)
+		juce::Array<int>                                              ids;
+		juce::Array<std::shared_ptr<ipc::MTIPCChildProcessExecutor>> executors;
+		{
+			const juce::ScopedLock sl( data->executorsLock );
+			for( auto itr = data->executors.begin(); itr != data->executors.end(); itr.next() )
+			{
+				ids.add( itr.getKey() );
+				executors.add( itr.getValue() );
+			}
+		}
+
+		for (auto executor : executors)
 		{
 			executor->stop();
 		}
 
+		// One deadline for all: they stop in parallel.
+		const double deadline = juce::Time::getMillisecondCounterHiRes() + ipc::IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS;
+		for( int i = 0; i < executors.size(); ++i )
+		{
+			while( executors[i]->isRunning() && juce::Time::getMillisecondCounterHiRes() < deadline )
+				juce::Thread::sleep( 10 );
+
+			if( executors[i]->isRunning() )
+			{
+				juce::Logger::writeToLog( data->processName( ids[i] ) + " did not exit after SIGTERM, killing it" );
+				executors[i]->kill();
+				executors[i]->join();
+			}
+			juce::Logger::writeToLog( data->processName( ids[i] ) + " " + executors[i]->exitDescription() );
+		}
+
+		const juce::ScopedLock sl( data->executorsLock );
+		data->executors.clear();
 	}
 
 	void MTIPCProcessManager::wait()

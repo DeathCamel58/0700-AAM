@@ -282,6 +282,9 @@ namespace ipc
 
     void MTIPCBaseSubsystem::stop()
     {
+        if( !data )
+            return;
+
         try
         {
             if( data->messageProcessor )
@@ -327,22 +330,22 @@ namespace ipc
 
     std::shared_ptr<ipc::MTIPCMessageDispatcher> MTIPCBaseSubsystem::dispatcher()
     {
-        return data->messageDispatcher;
+        return data ? data->messageDispatcher : nullptr;
     }
 
     std::shared_ptr<ipc::MTIPCMessageProcessor> MTIPCBaseSubsystem::processor()
     {
-        return data->messageProcessor;
+        return data ? data->messageProcessor : nullptr;
     }
 
     std::shared_ptr<ipc::MTIPCConnectionManager> MTIPCBaseSubsystem::connectionManager()
     {
-        return data->connectionManager;
+        return data ? data->connectionManager : nullptr;
     }
 
     std::shared_ptr<ipc::MTIPCProcessManager> MTIPCBaseSubsystem::processManager()
     {
-        return data->processManager;
+        return data ? data->processManager : nullptr;
     }
 
     void MTIPCBaseSubsystem::restartChildProcess( int processIdentifier )

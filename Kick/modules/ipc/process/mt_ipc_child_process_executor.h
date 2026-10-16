@@ -38,7 +38,15 @@ namespace ipc
         MTIPCChildProcessExecutor( std::shared_ptr<juce::var> config );
         ~MTIPCChildProcessExecutor();
         bool start();
+        // Sends SIGTERM; killIfOverdue() sends SIGKILL if the process is
+        // still running IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS
+        // later.
         bool stop();
+        bool kill();
+        // Returns true if it had to kill the process.
+        bool killIfOverdue();
+        // Waits for the process to exit, killing it after
+        // IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS.
         bool join();
         // The exit status, or 128 plus the signal number for a process that
         // a signal killed (as a shell reports it).

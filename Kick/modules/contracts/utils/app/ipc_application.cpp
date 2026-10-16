@@ -151,12 +151,18 @@ namespace contracts
 
         void shutdown()
         {
+            if( heartBeat )
+                heartBeat->stop();
+
+            // Stop the IPC, and with it any child processes (which get
+            // SIGTERM and time to save), while the logger still works.
+            if( subsystem )
+                subsystem->stop();
+
             if( logger )
             {
                 juce::Logger::setCurrentLogger( nullptr );
             }
-            if( heartBeat )
-                heartBeat->stop();
         }
 
         std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher()

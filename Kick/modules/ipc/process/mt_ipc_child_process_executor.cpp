@@ -184,6 +184,31 @@ namespace ipc
             return ::kill( pid, signalNumber ) == 0;
         }
 
+        // Asks the process to exit with SIGTERM; killIfOverdue() sends
+        // SIGKILL once timeoutMs has passed.
+        bool terminate( int timeoutMs )
+        {
+            {
+                const std::lock_guard<std::mutex> lock( mutex );
+                if( killDeadline < 0.0 )
+                    killDeadline = juce::Time::getMillisecondCounterHiRes() + timeoutMs;
+            }
+            return kill( SIGTERM );
+        }
+
+        bool killIfOverdue()
+        {
+            {
+                const std::lock_guard<std::mutex> lock( mutex );
+                if( killDeadline < 0.0 || juce::Time::getMillisecondCounterHiRes() < killDeadline )
+                    return false;
+            }
+            if( !isRunning() )
+                return false;
+            kill( SIGKILL );
+            return true;
+        }
+
         // Waits up to timeoutMs (-1: no limit) for the process to exit.
         bool waitForExit( int timeoutMs )
         {
@@ -250,6 +275,7 @@ namespace ipc
         std::shared_ptr<juce::var> config;
         std::mutex                 mutex;
         pid_t                      pid{ -1 };
+        double                     killDeadline{ -1.0 };
         int                        status{ 0 };
         bool                       exited{ false };
     };
@@ -274,13 +300,28 @@ namespace ipc
     bool MTIPCChildProcessExecutor::stop()
     {
         if( isRunning() )
-            return impl->kill( SIGKILL );
+            return impl->terminate( IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS );
         return true;
+    }
+
+    bool MTIPCChildProcessExecutor::kill()
+    {
+        return impl->kill( SIGKILL );
+    }
+
+    bool MTIPCChildProcessExecutor::killIfOverdue()
+    {
+        return impl->killIfOverdue();
     }
 
     bool MTIPCChildProcessExecutor::join()
     {
-        return impl->waitForExit( IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS );
+        if( impl->waitForExit( IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS ) )
+            return true;
+
+        impl->kill( SIGKILL );
+        impl->reap( 0 );
+        return true;
     }
 
     int MTIPCChildProcessExecutor::exitCode()
