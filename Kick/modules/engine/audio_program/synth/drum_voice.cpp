@@ -25,6 +25,13 @@
 
 namespace mt
 {
+    namespace
+    {
+        // Range of the pitch envelope at full depth, in semitones. A guess: the
+        // depth is a 0 - 127 value and nothing in the UI gives its range.
+        constexpr double PITCH_ENVELOPE_RANGE = 24.0;
+    } // namespace
+
     void DrumVoice::attachToAndReset( const juce::ValueTree& Tree, juce::UndoManager* Undo )
     {
         pLfo.attachTo( Tree.getChildWithName( IDs::LFO ) );
@@ -41,13 +48,19 @@ namespace mt
         filtEnv.setSampleRate( sampleRate );
         pitchEnv.setSampleRate( sampleRate );
 
+        // AudIO's DSP objects are disabled (bypassed) until enabled.
+        filter.setEnabled( true );
+        ampEnv.setEnabled( true );
+        filtEnv.setEnabled( true );
+        pitchEnv.setEnabled( true );
+
         // Setup LFO.
         lfo.setType( toEnum<LFOType>( pLfo.type() ) );
         lfo.setFrequency( pLfo.freq(), true );
         lfo.setEnabled( pLfo.isEnabled() );
 
         // Setup Envelopes.
-        sampleLength = MIDI::SCALER * getLength();
+        sampleLength = getLength(); // In seconds...
         updateAmplitudeEnvelope( sampleLength );
         updateFilterEnvelope( sampleLength );
         updatePitchEnvelope( sampleLength );
@@ -89,7 +102,7 @@ namespace mt
     void DrumVoice::updateFilter( double modulation )
     {
         filter.setFilterType( toEnum<FilterType>( pEnv.filter.type() ) );
-        filter.setResonance( pEnv.filter.resonance() );
+        filter.setResonance( MIDI::SCALER * pEnv.filter.resonance() );
 
         auto cutoff = Filter::freqRange.convertTo0to1( pEnv.filter.cutoff() ) + modulation;
         filter.setCutoff( cutoff );
@@ -118,7 +131,7 @@ namespace mt
         aa -= mod;
         ah += mod;
 
-        ampEnv.setParameters( aa, ah, ad, ar, as ); // In terms of samples...
+        ampEnv.setParameters( aa, ah, ad, ar, as ); // In seconds...
     }
 
     void DrumVoice::updateFilterEnvelope( double Length )
@@ -135,7 +148,7 @@ namespace mt
         auto ah = ( pEnv.filter.h() * hF );
         auto ar = ( pEnv.filter.r() * rF );
         auto as = ( pEnv.filter.s() );
-        filtEnv.setParameters( aa, ah, ad, ar, as ); // In terms of samples...
+        filtEnv.setParameters( aa, ah, ad, ar, as ); // In seconds...
     }
 
     void DrumVoice::updatePitchEnvelope( double Length )
@@ -152,7 +165,7 @@ namespace mt
         auto ah = ( pEnv.pitch.h() * hF );
         auto ar = ( pEnv.pitch.r() * rF );
         auto as = ( pEnv.pitch.s() );
-        pitchEnv.setParameters( aa, ah, ad, ar, as ); // In terms of samples...
+        pitchEnv.setParameters( aa, ah, ad, ar, as ); // In seconds...
     }
 
     void DrumVoice::process( juce::AudioBuffer<float>& Buffer )
@@ -169,6 +182,9 @@ namespace mt
             auto out0 = tempBuffer.getWritePointer( 0 );
             auto out1 = tempBuffer.getWritePointer( 1 );
 
+            const auto filtDepth  = MIDI::SCALER * pEnv.filter.depth();
+            const auto pitchDepth = MIDI::SCALER * pEnv.pitch.depth() * PITCH_ENVELOPE_RANGE; // In semitones...
+
             // For each sample...
             for( auto i = 0; i < numSamples; ++i )
             {
@@ -180,8 +196,8 @@ namespace mt
 
                 auto aMod   = rGain * ampAdsr * ( ( 1. - lfoToAmp ) + ( lfoToAmp * lfoOut ) ); // Amplitude modulation factor.
                 auto panMod = ( lfoToPan * lfoOut ) + ( gain.getTargetValue() * ampToPan ); // Pan modulation factor.
-                auto pMod   = pitchAdsr * masterPitchRatio * ( 1.0 - ( lfoToPitch * lfoOut ) ); // Pitch modulation factor.
-                auto fMod   = filtAdsr * pEnv.filter.depth() * ( ( lfoToFilter * lfoOut ) + ( lfoToPitch * lfoOut ) ); // Filter cutoff frequency modulation.
+                auto pMod   = masterPitchRatio * std::exp2( pitchDepth * pitchAdsr / 12.0 ) * ( 1.0 - ( lfoToPitch * lfoOut ) ); // Pitch modulation factor.
+                auto fMod   = ( filtDepth * filtAdsr ) + ( lfoToFilter * lfoOut ); // Filter cutoff modulation, in the 0 - 1 cutoff range.
 
                 // get next sample.
                 updateFilter( fMod );
@@ -198,7 +214,7 @@ namespace mt
             Buffer.addFrom( 0, 0, tempBuffer, 0, 0, numSamples, masterGainL );
             Buffer.addFrom( 1, 0, tempBuffer, 1, 0, numSamples, masterGainR );
 
-            if( hasFinished() )
+            if( hasFinished() || !ampEnv.isActive() ) // End of the sample, or of the amplitude envelope...
                 makeFree();
         }
     }
