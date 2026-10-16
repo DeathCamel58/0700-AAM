@@ -84,7 +84,7 @@ namespace kick_ui
 
         juce::String serialNumber          = hwpref.getDevSerial();
         juce::String ControlSurfaceVersion = hwpref.getSurfaceVersion();
-        juce::String firmWareVersion       = hwpref.getFirmwareVersion();
+        juce::String firmWareVersion       = hwpref.getSystemVersion();
 
         srNo.value.setText( serialNumber, juce::dontSendNotification );
         cVer.value.setText( ControlSurfaceVersion, juce::dontSendNotification );

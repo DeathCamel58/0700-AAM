@@ -50,6 +50,7 @@
 #include <functional>
 #include "kick_Process.h"
 #include "kick_NetInfo.h"
+#include "kick_OsRelease.h"
 #include "kick_SysFile.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
@@ -180,6 +181,7 @@ namespace mt
         void        setSurfaceVersion( juce::String str ) { surfaceVerison = str; }
 
         juce::String getFirmwareVersion();
+        juce::String getSystemVersion(); // for display only
         juce::String getSurfaceVersion() { return surfaceVerison; }
 
     private:

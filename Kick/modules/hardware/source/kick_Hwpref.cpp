@@ -330,6 +330,15 @@ namespace mt
         return FwVersion;
     }
 
+    juce::String HwPref::getSystemVersion()
+    {
+        // The image's version from os-release; the updates still compare
+        // the one in version.txt (getLinuxVersion()), which systems
+        // without os-release's IMAGE_VERSION or VERSION_ID show too.
+        const auto version = osrelease::displayVersion( osrelease::read() );
+        return version.empty() ? getFirmwareVersion() : juce::String::fromUTF8( version.c_str() );
+    }
+
     bool HwPref::getLinuxVersion( std::string& path, mt::linuxFwInfo& linfo )
     {
         std::string   filePath = path + "version.txt";
