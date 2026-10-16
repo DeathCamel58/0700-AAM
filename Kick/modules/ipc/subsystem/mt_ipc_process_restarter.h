@@ -31,6 +31,16 @@ namespace ipc
     class MTIPCProcessManager;
     class MTIPCTimer;
 
+    /*
+     * Restarts one child process each time it exits, and gives up (calls
+     * onRestartCompleted with false) when it has been started
+     * IPC_RESTART_BURST_LIMIT times within IPC_RESTART_BURST_INTERVAL: a
+     * process that keeps crashing, however long it stays up each time, is
+     * not restarted forever. A start that fails is retried after
+     * IPC_DELAYED_RESTART_DELAY_IN_MILLI_SECONDS and counts as well.
+     *
+     * Used on the message thread only.
+     */
     class MTIPCProcessRestarter
     {
     public:
@@ -39,34 +49,39 @@ namespace ipc
                                std::function<void( int, bool )>          onRestartCompleted )
             : processId( processId )
             , processManager( processManager )
-            , restartSuccessTimer( new ipc::MTIPCTimer( ipc::IPC_DELAYED_RESTART_DELAY_IN_MILLI_SECONDS, std::bind( &MTIPCProcessRestarter::onRestartSuccessTimerTimeout, this ) ) )
+            , retryTimer( new ipc::MTIPCTimer( ipc::IPC_DELAYED_RESTART_DELAY_IN_MILLI_SECONDS, std::bind( &MTIPCProcessRestarter::restart, this ) ) )
             , onRestartCompleted( onRestartCompleted )
         {}
+
         void restart()
         {
-            if( attempts >= 3 )
+            if( !processManager )
+                return;
+
+            stopRestartAttempt();
+
+            // Monotonic, so a change of the wall clock cannot hide a burst.
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            while( !restartTimes.isEmpty() && now - restartTimes.getFirst() > ipc::IPC_RESTART_BURST_INTERVAL_IN_MILLI_SECONDS )
+                restartTimes.remove( 0 );
+
+            if( restartTimes.size() >= ipc::IPC_RESTART_BURST_LIMIT )
             {
-                attempts = 0;
+                restartTimes.clear();
                 if( onRestartCompleted )
                     onRestartCompleted( processId, false );
                 return;
             }
-            if( restartSuccessTimer->isRunning() )
-            {
-                restartSuccessTimer->stop();
-            }
-            if( processManager )
-            {
-                attempts++;
-                processManager->startProcess( processId );
-                restartSuccessTimer->start();
-            }
+
+            restartTimes.add( now );
+            if( !processManager->startProcess( processId ) )
+                retryTimer->start();
         }
 
         void stopRestartAttempt()
         {
-            if( restartSuccessTimer->isRunning() )
-                restartSuccessTimer->stop();
+            if( retryTimer->isRunning() )
+                retryTimer->stop();
         }
 
         const int processIdentifier()
@@ -74,17 +89,11 @@ namespace ipc
             return processId;
         }
 
-        void onRestartSuccessTimerTimeout()
-        {
-            attempts = 0;
-            onRestartCompleted( processId, true );
-        }
-
     private:
         const int                                 processId;
-        int                                       attempts{ 0 };
-        std::unique_ptr<ipc::MTIPCTimer>          restartSuccessTimer;
-        std::function<void( int, bool )>          onRestartCompleted;
+        juce::Array<double>                       restartTimes;
         std::shared_ptr<ipc::MTIPCProcessManager> processManager;
+        std::unique_ptr<ipc::MTIPCTimer>          retryTimer;
+        std::function<void( int, bool )>          onRestartCompleted;
     };
 }

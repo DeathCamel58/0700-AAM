@@ -371,19 +371,23 @@ namespace ipc
         }
     }
 
+    // The restarter is kept after a restart: it remembers when the process
+    // was restarted, which is what its limit counts.
     void MTIPCBaseSubsystem::onRestartAttemptCompleted( int processId, bool status )
     {
-        if( data->delayedRestarters.contains( processId ) )
-        {
-            data->delayedRestarters[processId].reset();
-            data->delayedRestarters.remove(processId);
-        }
-        if( !status ) // if process restart fails
-        {
-            data->processManager->stop();
-            juce::MessageManager::callAsync( juce::JUCEApplicationBase::getInstance()->quit ); 
-        }
-        
+        if( status )
+            return;
+
+        // Exit with a failure, so that the service manager sees one and can
+        // apply its own restart policy to the whole application.
+        juce::Logger::writeToLog( data->processManager->processName( processId ) + " was restarted "
+                                  + juce::String( ipc::IPC_RESTART_BURST_LIMIT ) + " times within "
+                                  + juce::String( ipc::IPC_RESTART_BURST_INTERVAL_IN_MILLI_SECONDS / 1000 )
+                                  + " s and keeps exiting; giving up" );
+        data->processManager->stop();
+        if( auto* app = juce::JUCEApplicationBase::getInstance() )
+            app->setApplicationReturnValue( EXIT_FAILURE );
+        juce::MessageManager::callAsync( juce::JUCEApplicationBase::quit );
     }
 
     void MTIPCBaseSubsystem::onConnectionAttemptCompleted( int connectionId, bool status )
