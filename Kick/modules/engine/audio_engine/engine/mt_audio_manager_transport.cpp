@@ -69,10 +69,10 @@ namespace mt
 
     MTAudioTransportManager::~MTAudioTransportManager()
     {
-        // Song ticks still waiting in the message queue must not run.
-        transportAlive.reset();
-
+        // Stop the clock first: its thread's onTick() copies transportAlive,
+        // and stopping waits for a tick it is running.
         close();
+        midiClock.onTick = []( uint32_t ) {};
 
         if( tickProcessingThread )
         {
@@ -81,6 +81,9 @@ namespace mt
             delete tickProcessingThread;
             tickProcessingThread = nullptr;
         }
+
+        // Song ticks still waiting in the message queue must not run.
+        transportAlive.reset();
     }
 
     void MTAudioTransportManager::close()
