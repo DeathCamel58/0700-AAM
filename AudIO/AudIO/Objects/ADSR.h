@@ -48,19 +48,19 @@ namespace AudIO
             release,
         };
 
-        inline float processADSR( void );
+        float processADSR( void );
 
         void prepareToPlay( uint32_t samplerate, uint32_t blocksize ) override;
 
     private:
         void process( Buffer<float>& buffer ) override;
 
-        inline float getRate( float distance, float timeInSeconds ) const;
-        inline void  recalulateAttack();
-        inline void  recalulateDecay();
-        inline void  recalulateRelease();
-        inline void  recalculateCoeffs();
-        inline void  goToNextState();
+        float getRate( float distance, float timeInSeconds ) const;
+        void  recalulateAttack();
+        void  recalulateDecay();
+        void  recalulateRelease();
+        void  recalculateCoeffs();
+        void  goToNextState();
         State        state = State::idle;
         float        output;
 

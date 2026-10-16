@@ -18,7 +18,7 @@ namespace AudIO
         virtual void  setParameter( int index, float value ) override;
         virtual float getParameter( int index ) override;
 
-        inline float getGain( uint32_t channel );
+        float getGain( uint32_t channel );
 
     private:
         RampedParameter<float> pan{ 0.0f };

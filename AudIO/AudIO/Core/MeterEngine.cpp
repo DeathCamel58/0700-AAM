@@ -57,7 +57,7 @@ namespace AudIO
         recalculate();
     }
 
-    inline void MeterEngine::recalculate()
+    void MeterEngine::recalculate()
     {
         _loopCntr       = (int)( _rateMs / blockRate() );
         _metersPerBlock = (int)( 1 + ( (float)_meters.size() / (float)_loopCntr ) );
