@@ -35,6 +35,11 @@ namespace mt
 
     using LFOType = AudIO::LFOType;
 
+    // Synth voice DSP...
+    using ADSR       = AudIO::ADSR<double>;
+    using Filter     = AudIO::Filter<double>;
+    using FilterType = AudIO::FilterType;
+
     enum ADSRType
     {
         Type_AD,
