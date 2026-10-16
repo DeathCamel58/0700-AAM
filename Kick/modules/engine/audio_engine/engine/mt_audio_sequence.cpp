@@ -712,8 +712,9 @@ namespace mt
     void MTSequence::onTick( unsigned int Ticks )
     {
         //double start = juce::Time::getMillisecondCounterHiRes();
-        auto diff = Ticks - prevTicks;
-        prevTicks.store( Ticks );
+        // Playing from the start restarts the clock at tick 0: count from there.
+        const auto previous = prevTicks.exchange( Ticks );
+        auto       diff     = ( Ticks >= previous ) ? ( Ticks - previous ) : Ticks;
 
         tickPos += diff;
         beatPos += diff;
