@@ -157,6 +157,15 @@ add_compile_definitions(
 set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
 add_compile_definitions(KICK_FACTORY_RESET_UNIT="${KICK_FACTORY_RESET_UNIT}")
 
+## The Ethernet and Wi-Fi interfaces (kick_NetInfo.h); empty: the first one
+## of each kind the kernel has.
+set(KICK_ETH_IFACE  "" CACHE STRING "Ethernet interface; empty: the first one")
+set(KICK_WIFI_IFACE "" CACHE STRING "Wi-Fi interface; empty: the first one")
+add_compile_definitions(
+    KICK_ETH_IFACE="${KICK_ETH_IFACE}"
+    KICK_WIFI_IFACE="${KICK_WIFI_IFACE}"
+)
+
 ## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
 set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
 add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")

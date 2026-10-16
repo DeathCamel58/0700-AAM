@@ -637,12 +637,7 @@ namespace mt
 
     bool HwPref::isEthernetCableConnected()
     {
-#if( JUCE_LINUX || __linux__ )
-        std::ifstream carrier( "/sys/class/net/eth0/carrier" );
-        int           detected = 0;
-        return ( carrier >> detected ) && detected == 1;
-#endif
-        return false;
+        return net::hasCarrier( net::ethernetInterface() );
     }
 
     bool HwPref::ethernetEnable( bool status )
@@ -660,20 +655,7 @@ namespace mt
     bool HwPref::isInterfaceUp()
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string   path = "/sys/class/net/eth0/operstate";
-        std::ifstream file( path );
-
-        if( !file.is_open() )
-        {
-            std::cerr << "Error: Could not open " << path << std::endl;
-            return false;
-        }
-
-        std::string state;
-        file >> state;
-        file.close();
-
-        return state == "up";
+        return net::isUp( net::ethernetInterface() );
 #else
         return true;
 #endif
@@ -694,116 +676,23 @@ namespace mt
 
     std::string HwPref::getSubnetMask( const std::string& interface )
     {
-        std::string subnetMask = "0.0.0.0";
-#if( JUCE_LINUX || __linux__ )
-        int          sockfd;
-        struct ifreq ifr;
-
-        // Create a socket to use for the ioctl call
-        sockfd = socket( AF_INET, SOCK_DGRAM, 0 );
-        if( sockfd == -1 )
-        {
-            std::cerr << "Failed to create socket\n";
-            return "";
-        }
-
-        // Prepare the struct for the ioctl call
-        ifr.ifr_addr.sa_family = AF_INET;
-        std::strncpy( ifr.ifr_name, interface.c_str(), IFNAMSIZ - 1 );
-
-        // Perform the ioctl to get the subnet mask
-        if( ioctl( sockfd, SIOCGIFNETMASK, &ifr ) == -1 )
-        {
-            std::cerr << "Failed to get subnet mask\n";
-            close( sockfd );
-            return "";
-        }
-
-        // Convert the result to a readable string
-        struct sockaddr_in* netmask = reinterpret_cast<struct sockaddr_in*>( &ifr.ifr_netmask );
-        subnetMask                  = inet_ntoa( netmask->sin_addr );
-
-        // Close the socket
-        close( sockfd );
-#endif
-        return subnetMask;
+        return net::ipv4Address( interface ).netmask;
     }
 
     std::string HwPref::getGateway( const std::string& interface )
     {
-#if( JUCE_LINUX || __linux__ )
-        // Retrieve routing information
-        juce::String output;
-        if( process::run( { "ip", "route", "show" }, &output ) < 0 )
-        {
-            std::cerr << "Failed to run command\n";
-            return "";
-        }
-        std::string result = output.toStdString();
-
-        // Parse the result to find the line corresponding to the desired interface
-        std::istringstream iss( result );
-        std::string        line;
-        while( std::getline( iss, line ) )
-        {
-            if( line.find( "default via" ) != std::string::npos && line.find( interface ) != std::string::npos )
-            {
-                // Extract the gateway IP from the line
-                std::istringstream lineStream( line );
-                std::string        word;
-                lineStream >> word; // Skip "default"
-                lineStream >> word; // Skip "via"
-                std::string gatewayIP;
-                lineStream >> gatewayIP; // Gateway IP
-
-                return gatewayIP;
-            }
-        }
-#endif
-        return "0.0.0.0";
+        const std::string gateway = net::defaultGateway( interface );
+        return gateway.empty() ? "0.0.0.0" : gateway;
     }
 
     void HwPref::getIP( const std::string interface, sysEthInfo& info )
     {
-        DBG( "GetIP Fucntion Called" );
-        std::string ipAddress = "0.0.0.0";
-
-#if( JUCE_LINUX || __linux__ )
-
-        // Get the local IP address: the "inet <address>/<prefix>" of
-        // "ip -4 -o addr show dev <interface>"
-        juce::String output;
-        process::run( { "ip", "-4", "-o", "addr", "show", "dev", interface }, &output );
-        const auto fields = juce::StringArray::fromTokens( output, " \t\n", "" );
-        const auto inet   = fields.indexOf( "inet" );
-        if( inet >= 0 && inet + 1 < fields.size() )
-            ipAddress = fields[inet + 1].upToFirstOccurrenceOf( "/", false, false ).toStdString();
-        info.IP = ipAddress;
-
-        // Get the adapter status
-        std::ifstream operstate( "/sys/class/net/" + interface + "/operstate" );
-        std::string   state;
-        if( ( operstate >> state ) && state == "up" )
-        {
-            info.status = true;
-            DBG( "Ethernet Adapter Status: Operational" );
-        }
-        else
-        {
-            info.status = false;
-            DBG( "Ethernet Adapter Status: Not Operational" );
-        }
-
-        // Get the gateway
-        std::string gateway = getGateway( interface );
-        DBG( "Gateway: " << gateway );
-        info.gateway = gateway;
-
-        // Get the subnet mask
-        std::string subnetMask = getSubnetMask( interface );
-        info.subnet            = subnetMask;
-        DBG( "Subnet Mask: " << subnetMask );
-#endif
+        const auto address = net::ipv4Address( interface );
+        info.IP            = address.address;
+        info.subnet        = address.netmask;
+        info.status        = net::isUp( interface );
+        info.gateway       = getGateway( interface );
+        DBG( "Network " << interface << ": " << info.IP << "/" << info.subnet << " via " << info.gateway << ( info.status ? ", up" : ", down" ) );
     }
 
     int HwPref::getDateTime( dateInfo& date, timeInfo& time, const juce::String& timezone )

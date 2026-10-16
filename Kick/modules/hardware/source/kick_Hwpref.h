@@ -46,6 +46,7 @@
 #include <regex>
 #include <functional>
 #include "kick_Process.h"
+#include "kick_NetInfo.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
 #define BAUDRATE   B115200

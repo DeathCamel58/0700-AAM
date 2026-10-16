@@ -97,11 +97,11 @@ namespace kick_ui
     void SettingsWifi::refresh()
     {
         mt::sysEthInfo info;
-        mt::HwPref::getHwPref().getIP( "wlan0", info );
+        mt::HwPref::getHwPref().getIP( mt::net::wifiInterface(), info );
 
         wifIP.setText( info.IP, juce::dontSendNotification );
         subnet.setText( info.subnet, juce::dontSendNotification );
-        gateway.setText( info.subnet, juce::dontSendNotification );
+        gateway.setText( info.gateway, juce::dontSendNotification );
 #if 0
         // Assuming wifiList is a custom UI component or structure managing the list of networks
         juce::String previouslySelectedSSID = wifiList.getSelected(); // Step 1: Store the currently selected SSID

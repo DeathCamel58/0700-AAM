@@ -118,7 +118,7 @@ namespace kick_ui
         enabled.setToggleState( status, juce::dontSendNotification );
 
         mt::sysEthInfo info;
-        mt::HwPref::getHwPref().getIP( "eth0", info );
+        mt::HwPref::getHwPref().getIP( mt::net::ethernetInterface(), info );
 
         ipAddr.setText( info.IP, juce::dontSendNotification );
 
@@ -156,7 +156,7 @@ namespace kick_ui
         juce::String ip   = settings.eth.ipAddress();
         juce::String gate = settings.eth.gateway();
         juce::String sub  = settings.eth.subnetMask();
-        mt::HwPref::getHwPref().setIP( "eth0", ip.toStdString(), sub.toStdString(), gate.toStdString() );
+        mt::HwPref::getHwPref().setIP( mt::net::ethernetInterface(), ip.toStdString(), sub.toStdString(), gate.toStdString() );
     }
 
     void SettingsEthernet::setupHeader( kick_ui::KickModeHeader& Hdr ) {}
