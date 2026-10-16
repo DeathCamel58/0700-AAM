@@ -47,19 +47,9 @@ foreach(TARGET ${current_targets})
     )
 endforeach()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-find_package(PkgConfig)
-pkg_check_modules(SERIAL libserial)
-target_include_directories(${TargetName}
-    PRIVATE
-        ${SERIAL_INCLUDE_DIRS}
-)
-endif()
-
 target_include_directories(${TargetName}
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
-	${SERIAL_INCLUDE_DIRS}
 )
 
 file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "*.cpp" "*.h" )
@@ -101,7 +91,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(${TargetName}
       PRIVATE
       "-latomic"
-      ${SERIAL_LDFLAGS}
       )
   #  target_link_options(${TargetName} PRIVATE "-m64")
 endif()
