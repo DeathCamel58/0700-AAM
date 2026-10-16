@@ -127,9 +127,9 @@ namespace ipc
 
             // Until the child has reset the signal handlers and closed this
             // process's descriptors, a signal must not run one of this
-            // process's handlers in it: a SIGTERM there would write to this
-            // process's signal pipe and make it quit. Block every signal
-            // across fork(); the child unblocks them once that is done.
+            // process's handlers in it, with this process's descriptors.
+            // Block every signal across fork(); the child unblocks them once
+            // that is done.
             sigset_t allSignals, previousMask;
             sigfillset( &allSignals );
             ::pthread_sigmask( SIG_SETMASK, &allSignals, &previousMask );

@@ -33,13 +33,20 @@ namespace contracts
      * service manager stops Kick with SIGTERM; with the default action the
      * processes died without saving settings or stopping their children.
      *
-     * The signal handler only writes the signal number to a pipe (the
-     * self-pipe pattern), whichever thread the signal arrives on; the
-     * message loop watches the read end and calls onSignal with the number.
+     * No handler runs: the signals are blocked in every thread and read
+     * from a signalfd that the message loop watches, which calls onSignal
+     * with the number. A handler interrupts whichever thread the signal
+     * lands on, and a blocking send() interrupted after part of a message
+     * returns a short count, which the IPC (one send() per message) does
+     * not retry: the rest of the message was lost and the stream's framing
+     * broken.
      *
      * Create one instance, on the message thread, after the MessageManager
-     * exists (an application object's constructor qualifies). Destroying it
-     * restores the default actions.
+     * exists and before any other thread starts, since threads inherit the
+     * signal mask of the thread that creates them (an application object's
+     * constructor qualifies). The signals stay blocked when it is destroyed,
+     * so that one arriving during the exit does not kill the process.
+     * Processes started with fork() get them unblocked again.
      */
     class TerminationSignals
     {
@@ -53,7 +60,7 @@ namespace contracts
         void readSignals();
 
         std::function<void( int )> onSignal;
-        int                        readFd{ -1 };
+        int                        signalFd{ -1 };
 
         JUCE_DECLARE_NON_COPYABLE( TerminationSignals )
     };
