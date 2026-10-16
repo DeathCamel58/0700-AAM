@@ -61,7 +61,7 @@ namespace AudIO
         };
 
         explicit ADSR( Type Typ = Type::EXPONENTIAL ) noexcept
-            : type_( Typ ){};
+            : type_( Typ ) {}
 
         explicit ADSR( const Params& P ) noexcept
         {
@@ -75,13 +75,29 @@ namespace AudIO
         void setType( Type Typ ) noexcept { type_ = Typ; }
         void setParameters( const Params& P ) noexcept
         {
-            stageTime_[State::IDLE]    = (T)minimumLevel_;
-            stageTime_[State::ATTACK]  = (T)utils::max( P.A, minimumLevel_ );
-            stageTime_[State::HOLD]    = (T)P.H;
-            stageTime_[State::DECAY]   = (T)P.D;
-            stageTime_[State::SUSTAIN] = (T)P.S;
-            stageTime_[State::RELEASE] = (T)utils::max( P.R, minimumLevel_ );
+            stageTime_[State::IDLE]    = 0.0;
+            stageTime_[State::ATTACK]  = utils::max( P.A, minimumLevel_ );
+            stageTime_[State::HOLD]    = utils::max( P.H, 0.0 );
+            stageTime_[State::DECAY]   = utils::max( P.D, 0.0 );
+            stageTime_[State::SUSTAIN] = utils::clamp( P.S, 0.0, 1.0 );
+            stageTime_[State::RELEASE] = utils::max( P.R, minimumLevel_ );
         }
+
+        //! Sets the stage times (in seconds) and the sustain level (0.0 - 1.0).
+        //! Note the order of the arguments: release comes before sustain.
+        void setParameters( double Attack, double Hold, double Decay, double Release, double Sustain ) noexcept
+        {
+            setParameters( Params{ Attack, Hold, Decay, Sustain, Release } );
+        }
+
+        Params getParameters() const noexcept
+        {
+            return Params{ stageTime_[State::ATTACK], stageTime_[State::HOLD], stageTime_[State::DECAY],
+                           stageTime_[State::SUSTAIN], stageTime_[State::RELEASE] };
+        }
+
+        //! Current output level of the envelope, without advancing it.
+        inline T getLevel() const noexcept { return static_cast<T>( currentStage_ == State::IDLE ? 0.0 : currentLevel_ ); }
 
         void gate( bool On ) noexcept
         {
@@ -112,8 +128,8 @@ namespace AudIO
                 return 0.0;
 
             T val = 0.0;
-            for( auto i = ( NumSamples - 1 ); 0 < i; --i )
-                val = process_internal();
+            for( auto i = 0u; i < NumSamples; ++i )
+                val = static_cast<T>( process_internal() );
             return val;
         }
 
@@ -155,18 +171,27 @@ namespace AudIO
         {
             switch( currentStage_ )
             {
-                default: // IDLE or SUSTAIN...
-                    return stageTime_[currentStage_];
+                default: // IDLE...
+                    return 0.0;
+                case State::SUSTAIN: // Follows changes of the sustain level...
+                    currentLevel_ = utils::max( stageTime_[State::SUSTAIN], minimumLevel_ );
+                    return stageTime_[State::SUSTAIN];
                 case State::ATTACK:
                 case State::HOLD:
                 case State::DECAY:
                 case State::RELEASE:
+                {
+                    const auto out = currentLevel_;
+                    if( Type::LINEAR == type_ )
+                        currentLevel_ += increment_;
+                    else
+                        currentLevel_ *= multiplier_;
+
                     if( ++numCurrentSamples >= numSamplesToNextStage )
-                    {
                         enterStage( (State)( currentStage_ + 1 ) );
-                    }
-                    currentLevel_ *= multiplier_;
-                    return currentLevel_;
+
+                    return out;
+                }
             }
         }
 
@@ -184,17 +209,20 @@ namespace AudIO
             }
         }
 
-        inline double calculateCoefficient( double startLevel, double endLevel, unsigned long lengthInSamples, Type type )
+        //! Per-sample multiplier of an exponential segment from startLevel to endLevel.
+        inline double calculateCoefficient( double startLevel, double endLevel, unsigned long lengthInSamples )
         {
-            double coeff = 1.0;
-            if( 0 != lengthInSamples )
-            {
-                if( Type::LINEAR == type )
-                    coeff += ( ( endLevel - startLevel ) / (double)( lengthInSamples ) );
-                else // if( Mode::EXPONENTIAL == type_ )
-                    coeff += ( ( std::log( endLevel ) - std::log( startLevel ) ) / (double)( lengthInSamples + 1 ) );
-            }
-            return coeff;
+            if( 0 == lengthInSamples )
+                return 1.0;
+            return std::exp( ( std::log( endLevel ) - std::log( startLevel ) ) / (double)lengthInSamples );
+        }
+
+        //! Per-sample increment of a linear segment from startLevel to endLevel.
+        inline double calculateIncrement( double startLevel, double endLevel, unsigned long lengthInSamples )
+        {
+            if( 0 == lengthInSamples )
+                return 0.0;
+            return ( endLevel - startLevel ) / (double)lengthInSamples;
         }
 
         void enterStage( State newStage ) noexcept
@@ -209,7 +237,7 @@ namespace AudIO
             {
                 default:
                     currentStage_ = State::IDLE;
-                    currentLevel_ = endLevel = stageTime_[currentStage_];
+                    currentLevel_ = endLevel = minimumLevel_;
                     break;
                 case State::ATTACK:
                     currentLevel_ = minimumLevel_;
@@ -222,31 +250,38 @@ namespace AudIO
                     endLevel = utils::max( stageTime_[State::SUSTAIN], minimumLevel_ );
                     break;
                 case State::SUSTAIN:
-                    currentLevel_ = endLevel = stageTime_[currentStage_];
-                    if( utils::isEqual<double>( 0.0, currentLevel_ ) )
-                    {
-                        enterStage( State::RELEASE );
+                    if( utils::isEqual<double>( 0.0, stageTime_[currentStage_] ) )
+                    { // No sustain, the envelope has ended...
+                        enterStage( State::IDLE );
                         return;
-                    } // fall through...
+                    }
+                    currentLevel_ = endLevel = stageTime_[currentStage_];
                     break;
                 case State::RELEASE:
                     endLevel = minimumLevel_;
                     break;
             }
 
-            multiplier_ = calculateCoefficient( currentLevel_, endLevel, numSamplesToNextStage, type_ );
+            currentLevel_ = utils::max( currentLevel_, minimumLevel_ );
+            endLevel      = utils::max( endLevel, minimumLevel_ );
+            multiplier_   = calculateCoefficient( currentLevel_, endLevel, numSamplesToNextStage );
+            increment_    = calculateIncrement( currentLevel_, endLevel, numSamplesToNextStage );
             switch( currentStage_ )
             {
                 case State::ATTACK:
                 case State::HOLD:
                 case State::DECAY:
+                    if( 0 == numSamplesToNextStage )
+                    {
+                        currentLevel_ = endLevel;
+                        enterStage( State( currentStage_ + 1 ) );
+                    }
+                    break;
                 case State::RELEASE:
                     if( 0 == numSamplesToNextStage )
-                        enterStage( State( currentStage_ + 1 ) );
+                        enterStage( State::IDLE );
                     break;
-                case State::SUSTAIN:
-                    if( utils::isEqual<double>( 0.0, currentLevel_ ) )
-                        enterStage( State::RELEASE );
+                default:
                     break;
             }
         }
@@ -259,6 +294,7 @@ namespace AudIO
         std::array<double, State::MAX> stageTime_{ 0.0, 0.01, 0.0, 0.5, 0.1, 1.0 };
         double                         currentLevel_{ minimumLevel_ };
         double                         multiplier_{ 1.0 };
+        double                         increment_{ 0.0 };
         unsigned long                  numCurrentSamples{ 0 };
         unsigned long                  numSamplesToNextStage{ 0 };
     };
