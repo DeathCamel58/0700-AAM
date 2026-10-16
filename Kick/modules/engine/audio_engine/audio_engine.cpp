@@ -39,6 +39,7 @@
 #include "engine/mt_audio_interface_types.cpp"
 #include "engine/mt_audio_interface_looper.cpp"
 
+#include "engine/mt_audio_device.cpp"
 #include "engine/mt_audio_manager.cpp"
 #include "engine/mt_audio_manager_program.cpp"
 #include "engine/mt_audio_manager_sequence.cpp"
