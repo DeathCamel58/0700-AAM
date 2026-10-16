@@ -88,6 +88,27 @@ namespace mt
         deSelectAllNotes();
     }
 
+    MTNoteList::~MTNoteList()
+    {
+        freeNoteMap();
+    }
+
+    void MTNoteList::freeNoteMap()
+    {
+        // Only the message thread uses the map: the sequencer plays the
+        // tracks' note snapshots.
+        for( juce::HashMap<int, juce::HashMap<int, MTNote*>*>::Iterator it( notes ); it.next(); )
+        {
+            if( auto* map = it.getValue() )
+            {
+                for( juce::HashMap<int, MTNote*>::Iterator note( *map ); note.next(); )
+                    delete note.getValue();
+                delete map;
+            }
+        }
+        notes.clear();
+    }
+
     void MTNoteList::sort()
     {
         vTree.sort( _noteSorter, um, false );
@@ -672,7 +693,7 @@ namespace mt
         juce::ScopedLock sl( lock );
         selected.clearQuick();
         vTree.removeAllChildren( um );
-        notes.clear();
+        freeNoteMap();
         triggerAsyncUpdate();
         return 0;
     }

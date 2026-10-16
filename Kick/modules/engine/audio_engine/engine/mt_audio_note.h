@@ -29,7 +29,7 @@ namespace mt
     {
     public:
         explicit MTNoteList( const juce::ValueTree& VT, juce::UndoManager* UM, MTSequence& Seq );
-        virtual ~MTNoteList() = default;
+        virtual ~MTNoteList();
 
         allNotesChanedFn onAllNotesChanedFn;
 
@@ -189,6 +189,7 @@ namespace mt
 
         // Funtions.
         void clearNotesToDelete();
+        void freeNoteMap();
         void triggerAllNoteChanged()
         {
             if( onAllNotesChanedFn ) onAllNotesChanedFn();
@@ -205,7 +206,7 @@ namespace mt
         juce::Array<juce::ValueTree> temp;
 
         juce::MidiMessageSequence*                       pMidiSeq{ nullptr };
-        juce::HashMap<int, juce::HashMap<int, MTNote*>*> notes;
+        juce::HashMap<int, juce::HashMap<int, MTNote*>*> notes; // Owns the maps and the notes.
         int                                              uniqueNoteId{ 0 };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTNoteList );
