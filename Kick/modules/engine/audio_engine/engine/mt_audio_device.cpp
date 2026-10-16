@@ -19,6 +19,12 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include <pthread.h>
+#include <sched.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <unistd.h>
+
 // The audio device type and device the engine plays through; the build
 // system can override them (see CMakeLists.txt).
 #ifndef KICK_AUDIO_DEVICE_TYPE
@@ -66,6 +72,43 @@ namespace mt
                     return name;
 
             return {};
+        }
+
+        // Locks the process's pages in memory, once. With a finite memory
+        // lock limit, MCL_FUTURE would make allocations fail once the limit
+        // is reached, so the lock is only taken without one (the Kick unit
+        // sets LimitMEMLOCK=infinity) or as root.
+        void lockMemory()
+        {
+            static bool locked = false;
+            if( locked )
+                return;
+            locked = true;
+
+            rlimit limit{};
+            if( geteuid() != 0 && ( getrlimit( RLIMIT_MEMLOCK, &limit ) != 0 || limit.rlim_cur != RLIM_INFINITY ) )
+            {
+                logAudioDevice( "not locking memory: the memory lock limit is " + juce::String( (juce::int64)limit.rlim_cur ) + " bytes" );
+                return;
+            }
+
+            if( mlockall( MCL_CURRENT | MCL_FUTURE ) != 0 )
+                logAudioDevice( "cannot lock memory: " + juce::String( strerror( errno ) ) );
+            else
+                logAudioDevice( "memory locked" );
+        }
+
+        juce::String schedulingPolicyName( int Policy )
+        {
+            switch( Policy )
+            {
+                case SCHED_FIFO: return "SCHED_FIFO";
+                case SCHED_RR: return "SCHED_RR";
+                case SCHED_OTHER: return "SCHED_OTHER";
+                case SCHED_BATCH: return "SCHED_BATCH";
+                case SCHED_IDLE: return "SCHED_IDLE";
+                default: return "policy " + juce::String( Policy );
+            }
         }
 
         juce::File getSavedDeviceFile()
@@ -190,6 +233,8 @@ namespace mt
         requestedRate = samplerate;
         sampleRate    = samplerate;
         reopenDelayMs = minReopenDelayMs;
+
+        lockMemory();
 
         const auto hasDevice = openDevice( samplerate, (uint32_t)blockSize );
         if( hasDevice )
@@ -426,6 +471,8 @@ namespace mt
         lastCallbackTime = deviceStartTime = juce::Time::getMillisecondCounterHiRes();
         lastXRunCount    = Device != nullptr ? juce::jmax( 0, Device->getXRunCount() ) : 0;
         stuckLogged      = false;
+        schedulingRead   = false;
+        schedulingLogged = false;
 
         const auto deviceBlock = Device != nullptr ? Device->getCurrentBufferSizeSamples() : 0;
 
@@ -463,6 +510,8 @@ namespace mt
                 reopenDevice();
             return;
         }
+
+        logScheduling();
 
         const auto count = numCallbacks.load();
         if( count != lastNumCallbacks )
@@ -505,6 +554,26 @@ namespace mt
             logAudioDevice( juce::String( xruns - lastXRunCount ) + " xrun(s), " + juce::String( xruns ) + " since the device opened" );
             lastXRunCount = xruns;
         }
+    }
+
+    void AudioDevice::logScheduling()
+    {
+        if( schedulingLogged || !schedulingRead.load( std::memory_order_acquire ) )
+            return;
+
+        schedulingLogged = true;
+
+        if( callbackPolicy == SCHED_FIFO || callbackPolicy == SCHED_RR )
+        {
+            logAudioDevice( "the audio thread runs with real-time scheduling, " + schedulingPolicyName( callbackPolicy )
+                            + " priority " + juce::String( callbackPriority ) );
+            return;
+        }
+
+        rlimit limit{};
+        getrlimit( RLIMIT_RTPRIO, &limit );
+        logAudioDevice( "the audio thread runs without real-time scheduling (" + schedulingPolicyName( callbackPolicy )
+                        + "); the real-time priority limit is " + juce::String( (juce::int64)limit.rlim_cur ) );
     }
 
     void AudioDevice::closeLostDevice( const juce::String& Reason )
@@ -595,6 +664,14 @@ namespace mt
         juce::ScopedNoDenormals noDenormals;
 
         numCallbacks.fetch_add( 1, std::memory_order_relaxed );
+
+        if( !schedulingRead.load( std::memory_order_relaxed ) )
+        {
+            sched_param param{};
+            pthread_getschedparam( pthread_self(), &callbackPolicy, &param );
+            callbackPriority = param.sched_priority;
+            schedulingRead.store( true, std::memory_order_release );
+        }
 
         if( !isPlaying() || blockSize <= 0 )
         {

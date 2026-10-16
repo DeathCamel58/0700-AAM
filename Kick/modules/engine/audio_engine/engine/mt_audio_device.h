@@ -63,6 +63,11 @@ namespace mt
     /// takes what the message thread queues for its audio thread. The
     /// engine is prepared again when a device opens at another rate.
     ///
+    /// Starting the engine locks the process's memory (mlockall) when the
+    /// memory lock limit allows it, so that nothing the audio thread
+    /// touches is paged out. Whether the audio thread got real-time
+    /// scheduling is logged once a device runs.
+    ///
     class AudioDevice
         : public AudIO::IAudioDevice
         , private juce::AudioIODeviceCallback
@@ -92,6 +97,7 @@ namespace mt
         // juce::Timer: the device watchdog.
         void timerCallback() override;
 
+        void logScheduling();
         void closeLostDevice( const juce::String& Reason );
         void reopenDevice();
         void scheduleReopen();
@@ -175,6 +181,13 @@ namespace mt
         int                   reopenDelayMs{ 0 };
         int                   lastXRunCount{ 0 };
         bool                  stuckLogged{ false };
+
+        // The audio thread's scheduling, read once by the callback after a
+        // device starts, and logged by the watchdog.
+        std::atomic<bool> schedulingRead{ false };
+        bool              schedulingLogged{ false };
+        int               callbackPolicy{ 0 };
+        int               callbackPriority{ 0 };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( AudioDevice )
     };
