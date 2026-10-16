@@ -324,12 +324,14 @@ namespace mt
 
     void MTTrack::onBeat()
     {
+        const juce::ScopedLock sl( lock );
         trackPlayhead.bnb.tick = 0;
         trackPlayhead.bnb.beat++;
     };
 
     void MTTrack::onBar()
     {
+        const juce::ScopedLock sl( lock );
         trackPlayhead.bnb.beat = 0;
         int last               = seq.isLooping.get() ? juce::jmin<int>( getLength(), seq.getLoopEnd() ) : juce::jmin<int>( getLength(), seq.getLength() );
         if( ++trackPlayhead.bnb.bar % last == 0 )
@@ -392,15 +394,18 @@ namespace mt
         if( pProgram->isAudio() )
             return;
 
-        unsigned int diffTick = Tick - prevTick;
+        // play(), stop() and seek() reset the counters under the lock.
+        const juce::ScopedLock sl( lock );
+
+        // Playing from the start restarts the clock at tick 0: count from there.
+        const auto previousTick = ( Tick >= prevTick ) ? prevTick : 0u;
+        const auto diffTick     = Tick - previousTick;
 
         tickCtr += diffTick;
         tickPos += diffTick;
         trackPlayhead.bnb.tick += diffTick;
         auto isEffectivelyMute   = isTrackEffectivelyMuted();
         auto trackMidiOutChannel = getMidiOutChannel();
-
-        const juce::ScopedLock sl( lock );
 
         // Check if any pending queued note off's are to be sent...
         for( auto p = queuedNotes.begin(); p != queuedNotes.end(); )
@@ -414,7 +419,7 @@ namespace mt
                 ++p;
         }
 
-        fillMidiMessages( Tick, prevTick, trackMidiOutChannel );
+        fillMidiMessages( Tick, previousTick, trackMidiOutChannel );
 
         prevTick = Tick;
 
