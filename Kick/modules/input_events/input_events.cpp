@@ -161,13 +161,15 @@ namespace Controls
         {
             int rxLength = (int)input->getTotalLength();
             // DBG("Receive Length: " << rxLength);
-            if( !input->getTotalLength() || input->getTotalLength() < 6 )
+            if( rxLength < 6 )
                 return;
 
-            juce::MemoryBlock serialData( (size_t)input->getTotalLength(), true );
-            size_t            len = (size_t)input->getTotalLength();
+            // The reader thread keeps appending to the input buffer, so take
+            // its length once: a later, larger length would overrun serialData.
+            juce::MemoryBlock serialData( (size_t)rxLength, true );
+            size_t            len = (size_t)rxLength;
 
-            input->read( serialData.getData(), (int)input->getTotalLength() );
+            input->read( serialData.getData(), rxLength );
 
             if( len < 4 )
             {
