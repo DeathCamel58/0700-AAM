@@ -309,15 +309,14 @@ namespace mt
         if( toChannelmap( port ) < 0 )
             return false;
 
-        channelNoteMap[(uint8_t)port] = startNote;
+        channelNoteMap[(size_t)port].store( startNote, std::memory_order_relaxed );
         return true; // Indicate successful operation
     }
 
     // Function to get the note range for a given port
     inline uint8_t CV::getChannelNoteMap( uint8_t channel )
     {
-        const auto it = channelNoteMap.find( channel );
-        return it != channelNoteMap.end() ? (uint8_t)it->second : 0;
+        return channel < channelNoteMap.size() ? (uint8_t)channelNoteMap[channel].load( std::memory_order_relaxed ) : 0;
     }
 
     uint16_t CV::calculateValue( uint8_t note )
