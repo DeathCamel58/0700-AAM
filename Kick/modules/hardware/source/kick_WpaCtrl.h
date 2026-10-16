@@ -338,6 +338,62 @@ namespace mt
             bool hasPsk() const { return flags.find( "PSK" ) != std::string::npos; }
         };
 
+        /** Parses a BSS reply asked for with MASK=bssMask: per access point,
+            "id=", "bssid=", "freq=", "level=", "flags=" and "ssid=" lines and
+            a "====" line, which is "####" after the last one in the table.
+            Hidden networks (an empty SSID) are left out. lastId is the id of
+            the last access point in the reply, hidden or not, or -1 if it
+            has none; end tells whether that one is the table's last. */
+        inline std::vector<ScanResult> parseBss( const std::string& reply, long& lastId, bool& end )
+        {
+            std::vector<ScanResult> results;
+            std::istringstream      lines( reply );
+            std::string             line;
+            ScanResult              result;
+            long                    id = -1;
+            lastId                     = -1;
+            end                        = false;
+            while( std::getline( lines, line ) )
+            {
+                if( line == "====" || line == "####" )
+                {
+                    if( id >= 0 )
+                    {
+                        lastId = id;
+                        if( !result.ssid.empty() )
+                            results.push_back( result );
+                    }
+                    end    = line == "####";
+                    result = {};
+                    id     = -1;
+                    continue;
+                }
+
+                const auto equals = line.find( '=' );
+                if( equals == std::string::npos )
+                    continue;
+                const auto key   = line.substr( 0, equals );
+                const auto value = line.substr( equals + 1 );
+                if( key == "id" && !value.empty() && value.find_first_not_of( "0123456789" ) == std::string::npos )
+                    id = std::atol( value.c_str() );
+                else if( key == "bssid" )
+                    result.bssid = value;
+                else if( key == "freq" )
+                    result.frequency = std::atoi( value.c_str() );
+                else if( key == "level" )
+                    result.signal = std::atoi( value.c_str() );
+                else if( key == "flags" )
+                    result.flags = value;
+                else if( key == "ssid" )
+                    result.ssid = decodeSsid( value );
+            }
+            return results;
+        }
+
+        // The id, bssid, freq, level, flags and ssid of each access point,
+        // and the delimiter after it (WPA_BSS_MASK_* in wpa_ctrl.h).
+        constexpr const char* bssMask = "0x21887";
+
         /** Parses a SCAN_RESULTS reply: a title line, then
             "bssid \t frequency \t signal level \t flags \t ssid" per access
             point. Hidden networks (an empty SSID) are left out. */
@@ -404,6 +460,31 @@ namespace mt
         // wpa_supplicant's replies are at most 4096 bytes, and what does not
         // fit is left out. Lists that can be longer are read a piece at a
         // time.
+
+        /** The access points wpa_supplicant knows of, from its BSS table,
+            a few dozen at a time. */
+        inline std::vector<ScanResult> readScanResults( WpaCtrl& ctrl )
+        {
+            std::vector<ScanResult> results;
+            long                    next = 0;
+            for( ;; )
+            {
+                const auto reply = ctrl.request( "BSS RANGE=" + std::to_string( next ) + "- MASK=" + bssMask );
+                long       lastId;
+                bool       end;
+                const auto page = parseBss( reply, lastId, end );
+
+                // A wpa_supplicant without BSS ranges: SCAN_RESULTS, which
+                // has as many as fit.
+                if( next == 0 && lastId < 0 && !reply.empty() )
+                    return parseScanResults( ctrl.request( "SCAN_RESULTS" ) );
+
+                results.insert( results.end(), page.begin(), page.end() );
+                if( end || lastId < next )
+                    return results;
+                next = lastId + 1;
+            }
+        }
 
         /** The networks in wpa_supplicant's configuration. */
         inline std::vector<ConfiguredNetwork> listNetworks( WpaCtrl& ctrl )

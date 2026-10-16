@@ -159,7 +159,7 @@ namespace mt
 
         // One entry per network name, for the access point heard best.
         std::map<juce::String, wpa::ScanResult> found;
-        for( const auto& result : wpa::parseScanResults( ctrl.request( "SCAN_RESULTS" ) ) )
+        for( const auto& result : wpa::readScanResults( ctrl ) )
         {
             const auto name = ssidToDisplayName( result.ssid );
             auto       it   = found.find( name );
