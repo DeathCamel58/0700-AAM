@@ -2,6 +2,9 @@
 
 #include "DesignImpl.h"
 
+#include <tuple>
+#include <vector>
+
 namespace AudIO
 {
 
@@ -225,6 +228,20 @@ namespace AudIO
                     value.removeConnectionsTo( objMeta );
                 }
             }
+
+            // Detach it from the buses it is sent to and unpatch what it
+            // feeds: otherwise they keep reading its last block, and the
+            // buses keep a pointer to its meta.
+            for( auto& bus : _buses )
+                bus->removeInput( *objMeta );
+
+            std::vector<std::tuple<objectMeta*, uint32_t, uint32_t>> connections;
+            for( auto& [dstMeta, channels] : objMeta->_outputs )
+                for( auto& [dstch, srcch] : channels )
+                    connections.emplace_back( dstMeta, srcch, dstch );
+            for( auto& [dstMeta, srcch, dstch] : connections )
+                if( dstMeta )
+                    objMeta->unpatch( *dstMeta, srcch, dstch );
 
             return handleRemove( id );
         }
