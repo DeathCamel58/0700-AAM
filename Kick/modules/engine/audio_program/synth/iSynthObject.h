@@ -22,6 +22,8 @@
 
 #include "iSynthVoice.h"
 
+#include <bitset>
+
 namespace mt
 {
     class MTIProgram;
@@ -118,7 +120,9 @@ namespace mt
         void prepareToPlay( uint32_t samplerate, uint32_t blocksize );
         void teardown();
 
+        void keepNoteEvent( const NoteEvent& Event ); // Caller holds noteQueueLock.
         void processNoteEvents(); // Audio thread.
+        void processKeptNoteEvents(); // Audio thread.
         void handleNoteEvent( const NoteEvent& Event ); // Audio thread.
 
     protected:
@@ -134,6 +138,16 @@ namespace mt
         juce::AbstractFifo                    noteFifo{ NOTE_QUEUE_SIZE };
         std::array<NoteEvent, NOTE_QUEUE_SIZE> noteQueue;
         std::mutex                            noteQueueLock;
+
+        // While the queue is full (the audio thread is not draining it), the
+        // note offs and resets are kept here, and everything else is dropped,
+        // until the audio thread has emptied the queue and applied them. The
+        // bits are guarded by noteQueueLock.
+        std::atomic<bool>     noteQueueFull{ false };
+        bool                  keptNoteOffAll{ false };
+        std::bitset<128>      keptNoteOffs;
+        std::bitset<128>      keptNoteResets;
+        std::atomic<uint32_t> droppedNoteEvents{ 0 };
 
         AudIO::MeterData  outMeterData;
         AudIO::LevelMeter meter;
