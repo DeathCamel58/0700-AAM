@@ -734,30 +734,26 @@ namespace mt
         DBG( "Network " << interface << ": " << info.IP << "/" << info.subnet << " via " << info.gateway << ( info.status ? ", up" : ", down" ) );
     }
 
-    int HwPref::getDateTime( dateInfo& date, timeInfo& time, const juce::String& timezone )
+    int HwPref::getDateTime( dateInfo& date, timeInfo& time )
     {
         DBG( "GetDate Fucntion Called" );
 
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        setenv( "TZ", timezone.toRawUTF8(), 1 );
-#endif
-
-        // Use tzset to update the timezone information
+        // The system's time zone, /etc/localtime: tzset() reads it again if
+        // it has changed since (TZ being unset), and localtime_r(), unlike
+        // localtime(), is safe with other threads.
         tzset();
 
         std::time_t currentTime = std::time( nullptr );
+        std::tm     timeInfo {};
 
-        // Convert the time to a struct tm
-        std::tm* timeInfo = std::localtime( &currentTime );
-
-        if( timeInfo != nullptr )
+        if( localtime_r( &currentTime, &timeInfo ) != nullptr )
         {
             // Extract and display each component separately
-            date.YYYY = timeInfo->tm_year + 1900; // Add 1900 to get the actual year
-            date.MM   = timeInfo->tm_mon + 1; // Add 1 since months are 0-based
-            date.DD   = timeInfo->tm_mday;
-            time.HH   = timeInfo->tm_hour;
-            time.MM   = timeInfo->tm_min;
+            date.YYYY = timeInfo.tm_year + 1900; // Add 1900 to get the actual year
+            date.MM   = timeInfo.tm_mon + 1; // Add 1 since months are 0-based
+            date.DD   = timeInfo.tm_mday;
+            time.HH   = timeInfo.tm_hour;
+            time.MM   = timeInfo.tm_min;
 
             DBG( "Date-> " << date.YYYY << "/" << date.MM << "/" << date.DD );
             DBG( "Time-> " << time.HH << "/" << time.MM );
@@ -765,6 +761,35 @@ namespace mt
             return 1;
         }
         return 0;
+    }
+
+    juce::String HwPref::getTimeZone()
+    {
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // /etc/localtime links to the zone's file in the time zone database
+        // (.../zoneinfo/Europe/Berlin), which is how systemd's timedated
+        // sets and reports it.
+        char          target[PATH_MAX];
+        const ssize_t n = readlink( "/etc/localtime", target, sizeof( target ) - 1 );
+        if( n > 0 )
+        {
+            std::string zone( target, (size_t)n );
+            const auto  pos = zone.find( "zoneinfo/" );
+            if( pos != std::string::npos )
+            {
+                zone = zone.substr( pos + 9 );
+                for( const char* prefix : { "posix/", "right/" } )
+                    if( zone.rfind( prefix, 0 ) == 0 )
+                        zone = zone.substr( std::strlen( prefix ) );
+                return zone;
+            }
+        }
+
+        // Debian's way; also written by some builds.
+        return sysfile::readLine( "/etc/timezone" );
+#else
+        return {};
+#endif
     }
 
     int HwPref::setTimeZone( juce::String& str )
@@ -941,9 +966,20 @@ namespace mt
 
         // A clock set by hand would be overwritten by network time, and
         // timedated refuses to set it while network time is on, so turn it
-        // off first.
-        process::run( { "timedatectl", "set-ntp", "false" } );
-        return process::run( { "timedatectl", "set-time", localTime } ) == 0;
+        // off first; back on if the time cannot be set after all.
+        juce::String ntp;
+        process::run( { "timedatectl", "show", "--property=NTP", "--value" }, &ntp );
+        const bool ntpWasOn = ntp.trim() == "yes";
+
+        if( ntpWasOn )
+            process::run( { "timedatectl", "set-ntp", "false" } );
+
+        if( process::run( { "timedatectl", "set-time", localTime } ) == 0 )
+            return true;
+
+        if( ntpWasOn )
+            process::run( { "timedatectl", "set-ntp", "true" } );
+        return false;
     }
 
     // Get the number of days in a month, considering leap years

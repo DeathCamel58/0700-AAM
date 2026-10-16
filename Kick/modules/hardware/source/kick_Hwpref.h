@@ -138,7 +138,8 @@ namespace mt
         std::string                                      getGateway( const std::string& interface );
         int                                              setIP( const std::string& interface, const std::string& ipAddress, const std::string& subnetMask, const std::string& gateway );
         std::string                                      getSubnetMask( const std::string& interface );
-        int                                              getDateTime( dateInfo& date, timeInfo& time, const juce::String& timezone );
+        int                                              getDateTime( dateInfo& date, timeInfo& time );
+        juce::String                                     getTimeZone();
         int                                              setTimeZone( juce::String& str );
         int                                              setBrightness( int value );
         int                                              getDaysInMonth( int month, int year );
