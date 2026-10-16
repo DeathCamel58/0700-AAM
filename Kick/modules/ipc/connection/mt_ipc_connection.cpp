@@ -112,8 +112,11 @@ namespace ipc
 		{
 			if (!isConnected() || !message) return false;
 
+			// The receiver decodes the block as UTF-8: send its bytes. (JUCE 7
+			// escapes non-ASCII characters in JSON, so today the two counts
+			// agree; they would not for a writer that emits raw UTF-8.)
 			juce::String json = juce::JSON::toString(message->getRoot());
-			return sendMessage(juce::MemoryBlock(json.getCharPointer(), json.length()));
+			return sendMessage(juce::MemoryBlock(json.toRawUTF8(), json.getNumBytesAsUTF8()));
 		}
 
 		const std::shared_ptr<juce::var> config()
