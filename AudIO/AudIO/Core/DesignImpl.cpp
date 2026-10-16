@@ -78,8 +78,12 @@ namespace AudIO
                     {
                         if( auto dst = Buffer.getOutputBuffer( ch ) )
                         {
-                            auto src = outBuffer->getOutputBuffer( ch );
-                            utils::copyWithGain( dst, src, size, dOutGain );
+                            // An output nothing is patched to has no buffer:
+                            // it is silent.
+                            if( auto src = outBuffer->getOutputBuffer( ch ) )
+                                utils::copyWithGain( dst, src, size, dOutGain );
+                            else
+                                utils::clear( dst, size );
                         }
                     }
                 }
