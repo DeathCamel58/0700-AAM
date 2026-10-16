@@ -71,8 +71,13 @@ namespace mt
         // thread no longer uses it: call before deleting a sequence.
         void detachSequence( MTSequence* Sequence );
 
-    private:
+        // Returns once the tick thread is done with the tick it may be
+        // processing: call after taking a sequence, or a track's program,
+        // away from it and before freeing that. Not on the tick thread, and
+        // not while holding a lock it takes.
         void waitForTickThread();
+
+    private:
         void handleSongTick();
         void onTick( unsigned int Ticks ) override;
         void onBeat();

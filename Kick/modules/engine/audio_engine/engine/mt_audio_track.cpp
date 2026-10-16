@@ -70,6 +70,12 @@ namespace mt
             if( program.load() == MTIProg )
             {
                 setProgram( nullptr );
+                jassert( program.load() == nullptr );
+
+                // The tick thread may have loaded the program for the tick
+                // it is processing (onTick()): it must be done with it
+                // before the program is deleted.
+                manager.waitForTickThread();
             }
         } );
 
