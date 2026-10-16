@@ -32,51 +32,43 @@
 
 #include <csignal>
 
-// start a hearbeat thread. 
-
 namespace contracts
 {
     const int HEART_BEAT_TIMEOUT_IN_MS( 1000 );
-    const int HEART_BEAT_EXIT_WAIT_IN_MS( 500);
 
-    class IPCHeartBeat : public juce::Thread
+    // Sends a heartbeat to KickMain every second from the message thread,
+    // so a heartbeat shows that the message loop is still running. (A
+    // dedicated thread kept beating while the message thread was stuck.)
+    class IPCHeartBeat : private juce::Timer
     {
     public:
         IPCHeartBeat( const int hostId )
-            : juce::Thread( "Heart_Beat_Thread_" + juce::String(hostId) )
         {
-           // timer.reset( new ipc::MTIPCTimer( HEART_BEAT_TIMEOUT_IN_MS, std::bind( &IPCHeartBeat::dispatchFirstHeartBeat, this ), true ) );
             heartBeatMessage = contracts::SystemIPCHelpers::prepareHeartBeatMessage();
             heartBeatMessage->setProperty(ipc::IPC_KEY_HOST_ID, hostId);
         }
 
+        ~IPCHeartBeat() override
+        {
+            stopTimer();
+        }
+
         void start()
         {
-            startThread();
+            startTimer( HEART_BEAT_TIMEOUT_IN_MS );
         }
 
         void stop()
         {
-            stopThread( HEART_BEAT_EXIT_WAIT_IN_MS );
+            stopTimer();
         }
 
-        virtual void run() override
-        {
-            int count         = 0;
-            int sleepDuration = 100;
-            int totalCount    = ( HEART_BEAT_TIMEOUT_IN_MS ) / sleepDuration;
-            while( !threadShouldExit() )
-            {
-                juce::Thread::sleep( sleepDuration );
-                count++;
-                if( count == totalCount )
-                {
-                    count = 0;
-                    contracts::SystemSignals::SendSystemCommand( heartBeatMessage );
-                }
-            }
-        }    
     private:
+        void timerCallback() override
+        {
+            contracts::SystemSignals::SendSystemCommand( heartBeatMessage );
+        }
+
         std::shared_ptr<ipc::MTIPCJson>  heartBeatMessage;
 
     };
