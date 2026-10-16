@@ -4,6 +4,25 @@
 
 namespace kick_ui
 {
+    namespace
+    {
+        // The rate of a recorded sample file: the engine's rate when it was
+        // recorded, which is not necessarily the 44.1 kHz slices assumed.
+        double getSampleRateOf( const juce::String& SampleFile )
+        {
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+
+            std::unique_ptr<juce::AudioFormatReader> reader( formats.createReaderFor( juce::File( SampleFile ) ) );
+            return reader != nullptr && reader->sampleRate > 0 ? reader->sampleRate : (double)AUDIO_SAMPLE_RATE;
+        }
+
+        int secondsToSamples( double Seconds, double SampleRate )
+        {
+            return juce::roundToInt( Seconds * SampleRate );
+        }
+    } // namespace
+
     int Sampler::lastPressedPad = -1;
     Sampler::Sampler()
         : kick_ui::IScreen( kick_ui::Screen::MenuSampler )
@@ -260,13 +279,15 @@ namespace kick_ui
 
     void Sampler::addSlicesToPads( const juce::String& SampleFile )
     {
+        const auto sampleRate = getSampleRateOf( SampleFile );
+
         int index = 0;
         for( auto samplePoint : startSamplePoints )
         {
-            auto loopStart = (int)( samplePoint.second * 44100 );
-            auto loopEnd   = (int)( endSamplePoints[samplePoint.first] * 44100 );
+            auto loopStart = secondsToSamples( samplePoint.second, sampleRate );
+            auto loopEnd   = secondsToSamples( endSamplePoints[samplePoint.first], sampleRate );
             if( index == startSamplePoints.size() - 1 && buttonState == 2 )
-                loopEnd = (int)( recorder.getCurrentRecordTime() * 44100 );
+                loopEnd = secondsToSamples( recorder.getCurrentRecordTime(), sampleRate );
 
             addAssetSlice( SampleFile, loopStart, loopEnd, index + 1 );
             ae.addSampleToProgram( ae.getSelectedProgram(), samplePoint.first, SampleFile, index + 1 );
@@ -284,7 +305,7 @@ namespace kick_ui
 
         while( std::filesystem::exists( path ) )
         {
-            path = base + "\\" + file + " " + std::to_string( counter ) + extension;
+            path = std::filesystem::path( base ) / ( file + " " + std::to_string( counter ) + extension );
             counter++;
         }
         return path.filename().string();
@@ -309,16 +330,18 @@ namespace kick_ui
         auto                        index = 0;
         if( samplePoints.size() > 1 )
         {
+            const auto sampleRate = getSampleRateOf( SampleFile );
+
             for( ; index < samplePoints.size() - 1; ++index )
             {
-                auto loopStart = (int)*it * 44100; // Default Sampling rate
+                auto loopStart = secondsToSamples( *it, sampleRate );
                 std::advance( it, 1 );
-                auto loopEnd = (int)*it * 44100; // Default Sampling rate
+                auto loopEnd = secondsToSamples( *it, sampleRate );
 
                 IsSliceToPad ? ae.addSampleToProgram( Program, index, SampleFile, index + 1 ) : addAssetSlice( SampleFile, loopStart, loopEnd, index + 1 );
             }
-            auto loopStart = (int)*it * 44100; // Default Sampling rate
-            auto loopEnd   = (int)( recorder.getCurrentRecordTime() * 44100 ); // Default Sampleing rate
+            auto loopStart = secondsToSamples( *it, sampleRate );
+            auto loopEnd   = secondsToSamples( recorder.getCurrentRecordTime(), sampleRate );
 
             IsSliceToPad ? ae.addSampleToProgram( Program, index, SampleFile, index + 1 ) : addAssetSlice( SampleFile, loopStart, loopEnd, index + 1 );
         }

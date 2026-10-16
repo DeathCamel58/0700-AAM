@@ -29,23 +29,49 @@ namespace mt
     /// The engine's master audio device: an AudIO::IAudioDevice that plays
     /// the engine through a juce::AudioDeviceManager.
     ///
-    /// The device type and device come from the build (KICK_AUDIO_DEVICE_TYPE
-    /// and KICK_AUDIO_DEVICE, see CMakeLists.txt), unless DeviceName names a
-    /// device. A device name is matched against the names JUCE lists for the
-    /// type: exactly, as a wildcard pattern, or as a part of the name; an
-    /// empty name selects the type's default device, which for ALSA is the
-    /// "default" PCM of /etc/asound.conf. If the type is not available (JUCE
-    /// built without it) the first type that has devices is used, and if the
-    /// device cannot be opened, the type's default device.
+    /// The device type and device come from, in this order: DeviceName; the
+    /// KICK_AUDIO_DEVICE_TYPE and KICK_AUDIO_DEVICE environment variables;
+    /// the device saved in the state directory (prefs/audio-device.xml);
+    /// the build (KICK_AUDIO_DEVICE_TYPE and KICK_AUDIO_DEVICE, see
+    /// CMakeLists.txt). A device chosen through the environment is saved
+    /// once it opens, in AudioDeviceManager's DEVICESETUP format, so that
+    /// it is used again without the variables; remove the file to go back
+    /// to the build's device. A device name is matched against the names
+    /// JUCE lists for the type: exactly, as a wildcard pattern, or as a
+    /// part of the name; an empty name selects the type's default device,
+    /// which for ALSA is the "default" PCM of /etc/asound.conf. If the type
+    /// is not available (JUCE built without it) the first type that has
+    /// devices is used, and if the device cannot be opened, the type's
+    /// default device.
+    ///
+    /// The main mix plays on the first two outputs. The engine's other
+    /// outputs are only opened on a device that has that many channels of
+    /// its own, never on a sound server or a converting PCM, which would
+    /// mix them into the main outputs. A device whose input cannot be
+    /// opened is opened for output only.
     ///
     /// The engine processes fixed blocks of the AudIO buffer pool's block
     /// size. The device is asked for that buffer size; when it delivers
     /// whole multiples of it the blocks are processed in place, otherwise
     /// they are re-blocked through a FIFO, which adds one block of latency.
     ///
+    /// A watchdog on the message thread notices a device that stops calling
+    /// back (JUCE's ALSA thread just ends on a read or write error) or
+    /// reports an error, closes it and opens it again, waiting longer after
+    /// each failure. While there is no device, a clock thread runs the
+    /// engine on silence at the engine's rate, so that the engine still
+    /// takes what the message thread queues for its audio thread. The
+    /// engine is prepared again when a device opens at another rate.
+    ///
+    /// Starting the engine locks the process's memory (mlockall) when the
+    /// memory lock limit allows it, so that nothing the audio thread
+    /// touches is paged out. Whether the audio thread got real-time
+    /// scheduling is logged once a device runs.
+    ///
     class AudioDevice
         : public AudIO::IAudioDevice
         , private juce::AudioIODeviceCallback
+        , private juce::Timer
     {
     public:
         AudioDevice( int NumInputs, int NumOutputs, const juce::String& DeviceName );
@@ -68,8 +94,33 @@ namespace mt
         void audioDeviceStopped() override;
         void audioDeviceError( const juce::String& ErrorMessage ) override;
 
-        bool openDevice( uint32_t SampleRate, uint32_t BlockSize );
+        // juce::Timer: the device watchdog.
+        void timerCallback() override;
+
+        void logScheduling();
+        void closeLostDevice( const juce::String& Reason );
+        void reopenDevice();
+        void scheduleReopen();
+        void processWithoutDevice();
+
+        bool         openDevice( uint32_t SampleRate, uint32_t BlockSize );
+        juce::String openDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, uint32_t SampleRate, uint32_t BlockSize );
+        juce::String initialiseDevice( juce::AudioIODeviceType& Type, const juce::String& Output, const juce::String& Input, int Inputs, int Outputs, uint32_t SampleRate, uint32_t BlockSize );
+        int          numOutputChannelsFor( juce::AudioIODeviceType& Type, const juce::String& Output ) const;
         void readInputs( const float* const* InputData, int NumInputChannels, int SrcOffset, int DstOffset, int NumSamples );
+
+        // Calls the engine at its rate while no device does.
+        class DummyClock final : public juce::Thread
+        {
+        public:
+            explicit DummyClock( AudioDevice& Owner )
+                : juce::Thread( "Kick audio clock" ), owner( Owner ) {}
+
+            void run() override;
+
+        private:
+            AudioDevice& owner;
+        };
 
         // A device manager that offers the configured device type first, so
         // that it is the one initialise() picks.
@@ -85,9 +136,22 @@ namespace mt
             const juce::String preferredType;
         };
 
+        // The device to open, and whether to save it once it opens.
+        struct DeviceChoice
+        {
+            juce::String type;
+            juce::String device;
+            juce::String origin;
+            bool         save{ false };
+        };
+
+        static DeviceChoice chooseDevice( const juce::String& DeviceName );
+        void                saveDeviceChoice();
+
     private:
         const int          numInputs;
         const int          numOutputs;
+        DeviceChoice       choice;
         const juce::String deviceName;
 
         JuceDeviceManager deviceManager;
@@ -99,6 +163,31 @@ namespace mt
         int                      fifoPos{ 0 };
         bool                     inPlace{ true };
         bool                     opened{ false };
+
+        // The rate the engine is asked for, and the rate it is prepared at.
+        uint32_t requestedRate{ 0 };
+        uint32_t sampleRate{ 0 };
+
+        DummyClock dummyClock{ *this };
+
+        // Watchdog state; the counter and flags are set by the audio thread.
+        std::atomic<uint32_t> numCallbacks{ 0 };
+        std::atomic<bool>     inCallback{ false };
+        std::atomic<bool>     deviceError{ false };
+        uint32_t              lastNumCallbacks{ 0 };
+        double                lastCallbackTime{ 0 };
+        double                deviceStartTime{ 0 };
+        double                nextReopenTime{ 0 };
+        int                   reopenDelayMs{ 0 };
+        int                   lastXRunCount{ 0 };
+        bool                  stuckLogged{ false };
+
+        // The audio thread's scheduling, read once by the callback after a
+        // device starts, and logged by the watchdog.
+        std::atomic<bool> schedulingRead{ false };
+        bool              schedulingLogged{ false };
+        int               callbackPolicy{ 0 };
+        int               callbackPriority{ 0 };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( AudioDevice )
     };

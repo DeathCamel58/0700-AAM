@@ -41,33 +41,58 @@ namespace mt
         midiInPorts.reserve( 8 );
         midiOutPorts.reserve( 8 );
 
-        // Create MIDI output devices...
-#if JUCE_LINUX || JUCE_BSD || JUCE_MAC || JUCE_IOS
-        for( auto i = 0; i < 8; ++i )
-        {
-            juce::MidiOutput::createNewDevice( "Kick:Out:" + juce::String( i + 1 ) );
-        }
-#endif
+        createVirtualPorts();
+        refreshMIDIDeviceLists();
 
-        // Start timer to scan for any changes in MIDI devices....
-        internalTimer.setCallbackFunction( [&]() { refreshMIDIDeviceLists(); } );
-        internalTimer.startTimerHz( 1 );
+        // Called on the message thread whenever a port comes or goes.
+        deviceListConnection = juce::MidiDeviceListConnection::make( [this]() { refreshMIDIDeviceLists(); } );
     }
 
     MTMidiDeviceManager::~MTMidiDeviceManager()
     {
+        deviceListConnection.reset();
         cancelPendingUpdate();
 
-        // Stop MIDI devices....
-        internalTimer.stopTimer();
+        juce::ReferenceCountedArray<MidiDeviceListEntry> outputs;
+        {
+            const juce::ScopedLock sl( outputLock );
+            outputs.swapWith( midiOutputs );
+        }
 
         for( auto mDev : midiInputs )
             closeMidiDevice( mDev );
-        for( auto mDev : midiOutputs )
+        for( auto mDev : outputs )
             closeMidiDevice( mDev );
 
         midiInputs.clear();
-        midiOutputs.clear();
+        virtualInputs.clear();
+        virtualOutputs.clear();
+    }
+
+    void MTMidiDeviceManager::createVirtualPorts()
+    {
+#if JUCE_LINUX || JUCE_BSD || JUCE_MAC || JUCE_IOS
+        // The ports live as long as their MidiInput and MidiOutput, which
+        // their list entries own.
+        for( auto i = 0; i < 8; ++i )
+        {
+            if( auto port = juce::MidiOutput::createNewDevice( "Kick:Out:" + juce::String( i + 1 ) ) )
+            {
+                MidiDeviceListEntry::Ptr entry = new MidiDeviceListEntry( port->getDeviceInfo() );
+                entry->outDevice               = std::move( port );
+                virtualOutputs.add( entry );
+            }
+        }
+
+        if( auto port = juce::MidiInput::createNewDevice( "Kick:In", this ) )
+        {
+            MidiDeviceListEntry::Ptr entry = new MidiDeviceListEntry( port->getDeviceInfo() );
+            entry->isInput                 = true;
+            entry->inDevice                = std::move( port );
+            entry->inDevice->start();
+            virtualInputs.add( entry );
+        }
+#endif
     }
 
     int                              MTMidiDeviceManager::getNumMidiInputDevices() noexcept { return midiInputs.size(); }
@@ -122,12 +147,15 @@ namespace mt
     ///
     bool MTMidiDeviceManager::hasMidiDeviceListChanged( const juce::Array<juce::MidiDeviceInfo>& availableDevices, bool isInputDevice )
     {
-        juce::ReferenceCountedArray<MidiDeviceListEntry>& midiDevices = isInputDevice ? midiInputs : midiOutputs;
-        if( availableDevices.size() != midiDevices.size() )
+        // The system's ports follow Kick's own in the list.
+        const juce::ReferenceCountedArray<MidiDeviceListEntry>& midiDevices = isInputDevice ? midiInputs : midiOutputs;
+        const auto                                               first       = ( isInputDevice ? virtualInputs : virtualOutputs ).size();
+
+        if( availableDevices.size() != midiDevices.size() - first )
             return true;
 
         for( auto i = 0; i < availableDevices.size(); ++i )
-            if( availableDevices[i] != midiDevices[i]->deviceInfo )
+            if( availableDevices[i] != midiDevices[first + i]->deviceInfo )
                 return true;
 
         return false;
@@ -139,17 +167,27 @@ namespace mt
     {
         auto availableDevices = isInputDevice ? juce::MidiInput::getAvailableDevices() : juce::MidiOutput::getAvailableDevices();
 
+        // Kick's virtual ports are listed as ports of the other direction
+        // (others read from Kick's outputs); opening them would loop Kick's
+        // own MIDI back to it.
+        for( auto& port : isInputDevice ? virtualOutputs : virtualInputs )
+            availableDevices.removeAllInstancesOf( port->deviceInfo );
+
         if( hasMidiDeviceListChanged( availableDevices, isInputDevice ) )
         {
             juce::ReferenceCountedArray<MidiDeviceListEntry>& midiDevices     = isInputDevice ? midiInputs : midiOutputs;
             auto&                                             midiDeviceNames = isInputDevice ? midiInPorts : midiOutPorts;
 
-            closeUnpluggedMidiDevices( availableDevices, isInputDevice );
-
             juce::ReferenceCountedArray<MidiDeviceListEntry> newDeviceList;
             std::vector<juce::String>                        newPortNames;
 
             newPortNames.push_back( "None" );
+
+            for( auto& entry : isInputDevice ? virtualInputs : virtualOutputs )
+            {
+                newDeviceList.add( entry );
+                newPortNames.push_back( entry->deviceInfo.name );
+            }
 
             // add all currently plugged-in devices to the device list
             for( auto& newDevice : availableDevices )
@@ -167,8 +205,26 @@ namespace mt
                 newPortNames.push_back( entry->deviceInfo.name );
             }
 
+            juce::ReferenceCountedArray<MidiDeviceListEntry> unplugged;
+            for( auto& entry : midiDevices )
+                if( !newDeviceList.contains( entry ) )
+                    unplugged.add( entry );
+
             // Actually update the device list
-            midiDevices = newDeviceList;
+            if( isInputDevice )
+            {
+                midiDevices = newDeviceList;
+            }
+            else
+            {
+                const juce::ScopedLock sl( outputLock );
+                midiDevices = newDeviceList;
+            }
+
+            // No sender can reach the unplugged devices any more.
+            for( auto& entry : unplugged )
+                closeMidiDevice( entry );
+
             // Update port names...
             midiDeviceNames = newPortNames;
             // Display information...
@@ -194,6 +250,10 @@ namespace mt
     {
         const juce::ReferenceCountedArray<MidiDeviceListEntry>& midiDevices = isInputDevice ? midiInputs : midiOutputs;
         for( auto& d : midiDevices )
+            if( d->deviceInfo.identifier == device )
+                return d;
+
+        for( auto& d : midiDevices )
             if( d->deviceInfo.name == device )
                 return d;
 
@@ -216,13 +276,16 @@ namespace mt
             }
             else if( !entry->isInput && nullptr == entry->outDevice.get() )
             {
-                entry->outDevice = juce::MidiOutput::openDevice( entry->deviceInfo.identifier );
-                if( entry->outDevice.get() == nullptr )
+                auto device = juce::MidiOutput::openDevice( entry->deviceInfo.identifier );
+                if( device.get() == nullptr )
                 {
                     DBG( "MidiDemo::openDevice: open output device [" << entry->deviceInfo.name << "] failed!" );
                     return;
                 }
-                entry->outDevice->startBackgroundThread();
+                device->startBackgroundThread();
+
+                const juce::ScopedLock sl( outputLock );
+                entry->outDevice = std::move( device );
             }
         }
     }
@@ -238,8 +301,12 @@ namespace mt
             }
             else if( !entry->isInput && nullptr != entry->outDevice.get() )
             {
-                entry->outDevice->stopBackgroundThread();
-                entry->outDevice.reset();
+                std::unique_ptr<juce::MidiOutput> device;
+                {
+                    const juce::ScopedLock sl( outputLock );
+                    std::swap( device, entry->outDevice );
+                }
+                device->stopBackgroundThread();
             }
         }
     }
@@ -268,26 +335,22 @@ namespace mt
         }
     }
 
-    void MTMidiDeviceManager::closeUnpluggedMidiDevices( const juce::Array<juce::MidiDeviceInfo>& currentlyPluggedInDevices, bool isInputDevice )
-    {
-        juce::ReferenceCountedArray<MidiDeviceListEntry>& midiDevices = isInputDevice ? midiInputs : midiOutputs;
-
-        for( auto i = midiDevices.size(); --i >= 0; )
-        {
-            auto& d = *midiDevices[i];
-            if( !currentlyPluggedInDevices.contains( d.deviceInfo ) )
-            {
-                if( isInputDevice ? d.inDevice.get() != nullptr : d.outDevice.get() != nullptr )
-                    closeMidiDevice( isInputDevice, i );
-
-                midiDevices.remove( i );
-            }
-        }
-    }
-
     void MTMidiDeviceManager::handleIncomingMidiMessage( juce::MidiInput* source, const juce::MidiMessage& message )
     {
         // This is called on the MIDI thread
+        if( midiInputFifoEnabled && message.getRawDataSize() <= 3 )
+        {
+            const auto scope = midiInputFifo.write( 1 );
+            if( scope.blockSize1 > 0 )
+            {
+                auto& event     = midiInputEvents[(size_t)scope.startIndex1];
+                event.source    = source;
+                event.timeStamp = message.getTimeStamp();
+                event.size      = message.getRawDataSize();
+                std::copy_n( message.getRawData(), event.size, event.data );
+            }
+        }
+
         const juce::ScopedLock sl( midiMonitorLock );
         MTMidiMessage          msg;
         msg.source  = source;
@@ -313,8 +376,20 @@ namespace mt
         //midiMonitor.insertTextAtCaret( messageText );
     }
 
+    bool MTMidiDeviceManager::popMidiInputEvent( MidiInputEvent& Event ) noexcept
+    {
+        const auto scope = midiInputFifo.read( 1 );
+        if( scope.blockSize1 <= 0 )
+            return false;
+
+        Event = midiInputEvents[(size_t)scope.startIndex1];
+        return true;
+    }
+
     void MTMidiDeviceManager::sendToOutputs( const juce::MidiMessage& Msg )
     {
+        const juce::ScopedLock sl( outputLock );
+
         for( auto midiOutput : midiOutputs )
             if( midiOutput->outDevice.get() != nullptr )
                 midiOutput->outDevice->sendMessageNow( Msg );
@@ -322,6 +397,8 @@ namespace mt
 
     void MTMidiDeviceManager::sendToOutput( juce::MidiDeviceInfo Device, const juce::MidiMessage& Msg )
     {
+        const juce::ScopedLock sl( outputLock );
+
         auto midiOutput = findMidiDevice( Device, false );
         if( midiOutput )
             if( midiOutput->outDevice.get() != nullptr )
@@ -330,6 +407,8 @@ namespace mt
 
     void MTMidiDeviceManager::sendToOutput( const juce::String& Device, const juce::MidiMessage& Msg )
     {
+        const juce::ScopedLock sl( outputLock );
+
         auto midiOutput = findMidiDevice( Device, false );
         if( midiOutput )
             if( midiOutput->outDevice.get() != nullptr )

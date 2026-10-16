@@ -62,6 +62,9 @@ namespace mt
 
     inline void CMidiClock::setPlatformTimerInterval( [[maybe_unused]] float microSeconds )
     { // Compute tick multiplier if desired interval is not possible to meet on the platform.
+        if( microSeconds <= 0.f )
+            return;
+
         uint32_t mills = 1;
         sTickFactor    = ( (float)( mills * 1000 ) / (float)microSeconds ) * getMidiClock().getInternalPPQN();
     }
@@ -190,15 +193,17 @@ namespace mt
                 break;
 
             case ClockState::STARTED:
+            {
                 te = juce::Time::getMillisecondCounterHiRes();
-                ts = te;
 
                 // Increment external ticks count!
                 ++extClockSyncPulses;
 
-                // Accumulate intervals between ticks....
-                auto intervalUs              = te - ts;
-                extIntervals[extIntervalIdx] = intervalUs;
+                // Accumulate intervals between ticks, in microseconds (the
+                // timer counts milliseconds).
+                const auto intervalUs        = ( te - ts ) * 1000.0;
+                ts                           = te;
+                extIntervals[extIntervalIdx] = static_cast<uint32_t>( juce::jlimit( 0.0, (double)std::numeric_limits<uint32_t>::max(), intervalUs ) );
                 if( ++extIntervalIdx >= MAX_EXT_INTERVALS )
                 {
                     extIntervalIdx = 0;
@@ -207,9 +212,8 @@ namespace mt
                 if( extClockFirstInterval )
                 {
                     extClockFirstInterval = false;
-                    // Synchronize tempo
-                    microsPerQuarterNote = averageOfExternalIntervals();
-                    setTempoByTime( microsPerQuarterNote );
+                    // Synchronize tempo (setTempo() sets microsPerQuarterNote)
+                    setTempoByTime( averageOfExternalIntervals() );
                 }
 
                 if( ++extCounter >= TEMPO_SYNC_INTERVAL )
@@ -218,6 +222,7 @@ namespace mt
                     syncTempo  = true;
                 }
                 break;
+            }
         }
     }
 
@@ -302,16 +307,22 @@ namespace mt
 
     uint32_t CMidiClock::averageOfExternalIntervals() const noexcept
     {
-        uint32_t count   = 0;
-        uint32_t average = 0;
+        // Microseconds per quarter note from the intervals between pulses;
+        // 0 until there is one.
+        uint64_t count = 0;
+        uint64_t total = 0;
         for( const auto& val : extIntervals )
         {
             if( val != 0 )
             {
-                average += val;
+                total += val;
                 ++count;
             }
         }
-        return ( ( average * extPPQN ) / count );
+
+        if( 0 == count )
+            return 0;
+
+        return static_cast<uint32_t>( juce::jmin( ( total * (uint64_t)extPPQN ) / count, (uint64_t)std::numeric_limits<uint32_t>::max() ) );
     }
 }

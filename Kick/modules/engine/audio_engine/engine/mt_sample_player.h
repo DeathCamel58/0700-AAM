@@ -1,8 +1,13 @@
 #pragma once
 namespace mt{
+    // Plays a sample file for the sample editor. The file is decoded into
+    // memory when it is set, so the audio thread never reads the disk, and
+    // played at the device's rate. Position and stop notifications reach
+    // the listeners from a timer on the message thread.
     class MTSamplePlayer : public juce::PositionableAudioSource,
         public juce::ChangeBroadcaster,
-        public juce::ChangeListener{
+        public juce::ChangeListener,
+        private juce::Timer{
     public:
         MTSamplePlayer();
         ~MTSamplePlayer();
@@ -64,6 +69,8 @@ namespace mt{
 
     private:
         void changeListenerCallback( ChangeBroadcaster* source );
+        void timerCallback() override;
+        void readSamples( juce::AudioBuffer<float>& Dest, int DestStart, int NumSamples, juce::int64 Start ) const;
 
     private:
         juce::AudioSourcePlayer player;
@@ -80,11 +87,16 @@ namespace mt{
         int samplesPerBlock = 0;
 
         juce::File sourceFile;
-        std::unique_ptr<juce::AudioFormatReader> reader;
+        juce::AudioBuffer<float> samples;
+        double sourceSampleRate = 0.0;
         MTSampleRegion region;
         MTSamplePlayMode playMode = MTSamplePlayMode::samplePlayFromStart;
 
         int broadcastElapsedSamples = 0;
         int numSamplesElapsed = 0;
+
+        // Set by the audio thread, handled by the timer.
+        std::atomic<bool> positionChanged{ false };
+        std::atomic<bool> finished{ false };
     };
 }

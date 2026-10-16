@@ -9,33 +9,48 @@ namespace mt
     {
         formatManager.registerBasicFormats();
         player.setSource( &transportSource );
-        transportSource.setSource( this );
         transportSource.addChangeListener( this );
     }
 
     MTSamplePlayer::~MTSamplePlayer()
     {
+        stopTimer();
         transportSource.stop();
-        player.setSource( nullptr );
         devmgr.removeAudioCallback( &player );
+        player.setSource( nullptr );
+        transportSource.setSource( nullptr );
     }
 
     void MTSamplePlayer::setSource( juce::File source )
     {
-        pos        = 0;
-        sourceFile = source;
         transportSource.stop();
-        if( sourceFile != juce::File{} )
-        {
-            devmgr.removeAudioCallback( &player );
-            reader.reset( formatManager.createReaderFor( sourceFile ) );
-            devmgr.addAudioCallback( &player );
-        }
-        else
-        {
-            devmgr.removeAudioCallback( &player );
-            reader.reset();
-        }
+
+        // The audio thread no longer calls this source from here on.
+        devmgr.removeAudioCallback( &player );
+        transportSource.setSource( nullptr );
+
+        pos              = 0;
+        length           = 0;
+        sourceFile       = source;
+        sourceSampleRate = 0.0;
+        samples.setSize( 0, 0 );
+
+        if( sourceFile == juce::File{} )
+            return;
+
+        std::unique_ptr<juce::AudioFormatReader> reader( formatManager.createReaderFor( sourceFile ) );
+        if( reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max() )
+            return;
+
+        samples.setSize( (int)reader->numChannels, (int)reader->lengthInSamples );
+        reader->read( &samples, 0, (int)reader->lengthInSamples, 0, true, true );
+        sourceSampleRate        = reader->sampleRate;
+        length                  = reader->lengthInSamples;
+        broadcastElapsedSamples = static_cast<int>( ( sourceSampleRate * broadcastMessageLengthInMs ) / 60 );
+
+        // The transport resamples from the file's rate to the device's.
+        transportSource.setSource( this, 0, nullptr, sourceSampleRate, juce::jmax( 2, samples.getNumChannels() ) );
+        devmgr.addAudioCallback( &player );
     }
 
     void MTSamplePlayer::start()
@@ -58,6 +73,14 @@ namespace mt
     {
         playingBackwords = false;
         transportSource.stop();
+
+        if( samples.getNumSamples() <= 0 )
+            return;
+
+        // Drops what the resampler kept of the last playback.
+        transportSource.setNextReadPosition( 0 );
+        finished        = false;
+        positionChanged = false;
 
         region      = r;
         playMode    = pm;
@@ -85,7 +108,7 @@ namespace mt
             else if( playMode == MTSamplePlayMode::samplePlayFromEnd )
             {
                 pos    = region.end;
-                length = reader->lengthInSamples;
+                length = samples.getNumSamples();
             }
             else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
             {
@@ -95,20 +118,17 @@ namespace mt
             }
             else if( playMode == MTSamplePlayMode::samplePlayModeCue )
             {
-                int previewOffSet = static_cast<int>( ( reader->sampleRate * cuePreviewLengthInMs ) / 60 );
+                int previewOffSet = static_cast<int>( ( sourceSampleRate * cuePreviewLengthInMs ) / 60 );
                 pos               = region.getStart();
                 length            = pos + previewOffSet;
                 pos               = pos - previewOffSet;
             }
-            if( reader )
-                length = juce::jmin( length, reader->lengthInSamples );
-            else
-                length = 0;
+            length = juce::jmin( length, (juce::int64)samples.getNumSamples() );
         }
         else
         {
             pos    = 0;
-            length = reader->lengthInSamples;
+            length = samples.getNumSamples();
         }
 
         //length = juce::jmin( length, reader->lengthInSamples );
@@ -116,12 +136,14 @@ namespace mt
         looping = ( playMode == MTSamplePlayMode::samplePlayModeLoopForward || playMode == MTSamplePlayMode::samplePlayModeLoopBackward || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional );
 
         transportSource.start();
+        startTimerHz( 30 );
     }
 
     juce::int64 MTSamplePlayer::getNextReadPosition() const
     {
-        if( pos == length )
-            return length + 2;
+        // Never past the end: the transport would stop itself on the audio
+        // thread and send its change message from there. The timer stops
+        // it instead.
         return pos;
     }
 
@@ -137,15 +159,26 @@ namespace mt
 
     void MTSamplePlayer::prepareToPlay( int samplesPerBlockExpected, double /*sr*/ )
     {
-        if( reader )
-        {
-            samplesPerBlock = samplesPerBlockExpected;
-            reader.reset( formatManager.createReaderFor( sourceFile ) );
-            broadcastElapsedSamples = static_cast<int>( ( reader->sampleRate * broadcastMessageLengthInMs ) / 60 );
-        }
+        samplesPerBlock = samplesPerBlockExpected;
     }
 
     void MTSamplePlayer::releaseResources() {}
+
+    void MTSamplePlayer::readSamples( juce::AudioBuffer<float>& Dest, int DestStart, int NumSamples, juce::int64 Start ) const
+    {
+        // Mono files play on every channel, as AudioFormatReader::read() did.
+        const auto numChannels = samples.getNumChannels();
+        const auto first       = juce::jlimit( (juce::int64)0, (juce::int64)samples.getNumSamples(), Start );
+        const auto last        = juce::jlimit( (juce::int64)0, (juce::int64)samples.getNumSamples(), Start + NumSamples );
+        const auto offset      = (int)( first - Start );
+        const auto count       = (int)( last - first );
+
+        if( numChannels <= 0 || count <= 0 )
+            return;
+
+        for( int ch = 0; ch < Dest.getNumChannels(); ++ch )
+            Dest.copyFrom( ch, DestStart + offset, samples, juce::jmin( ch, numChannels - 1 ), (int)first, count );
+    }
 
     void MTSamplePlayer::getNextAudioBlock( const juce::AudioSourceChannelInfo& bufferToFill )
     {
@@ -154,14 +187,16 @@ namespace mt
         if( playingBackwords )
         {
             sampleCopySize = ( pos - regionStart < bufferToFill.numSamples ) ? static_cast<int>( pos - regionStart ) : bufferToFill.numSamples;
-            reader->read( bufferToFill.buffer, 0, sampleCopySize, pos, true, true );
-            bufferToFill.buffer->reverse( 0, sampleCopySize );
+            sampleCopySize = juce::jmax( 0, sampleCopySize );
+            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
+            bufferToFill.buffer->reverse( bufferToFill.startSample, sampleCopySize );
             pos -= sampleCopySize;
         }
         else
         {
             sampleCopySize = ( length - pos < bufferToFill.numSamples ) ? static_cast<int>( length - pos ) : bufferToFill.numSamples;
-            reader->read( bufferToFill.buffer, 0, sampleCopySize, pos, true, true );
+            sampleCopySize = juce::jmax( 0, sampleCopySize );
+            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
             pos += sampleCopySize;
         }
 
@@ -170,8 +205,11 @@ namespace mt
         if( pos == length || numSamplesElapsed >= broadcastElapsedSamples )
         {
             numSamplesElapsed = 0;
-            sendChangeMessage();
+            positionChanged   = true;
         }
+
+        if( !looping && ( playingBackwords ? pos <= regionStart : pos >= length ) )
+            finished = true;
 
         // reset pos if playmode is loop
         if( looping && ( pos >= regionEnd || pos <= regionStart ) )
@@ -201,10 +239,26 @@ namespace mt
 
     double MTSamplePlayer::getSampleRate()
     {
-        if( reader )
-            return reader->sampleRate;
+        return sourceSampleRate;
+    }
 
-        return 0.0;
+    void MTSamplePlayer::timerCallback()
+    {
+        // Stopping the transport sends its change message, which reaches
+        // changeListenerCallback() and tells the listeners it stopped.
+        if( finished.exchange( false ) )
+        {
+            positionChanged = false;
+            stopTimer();
+            transportSource.stop();
+            return;
+        }
+
+        if( positionChanged.exchange( false ) )
+            sendChangeMessage();
+
+        if( !transportSource.isPlaying() )
+            stopTimer();
     }
 
     void MTSamplePlayer::changeListenerCallback( ChangeBroadcaster* source )
