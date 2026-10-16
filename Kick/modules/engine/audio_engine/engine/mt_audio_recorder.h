@@ -36,6 +36,19 @@ namespace mt
         };
     };
 
+    struct MTSampleRecorder
+        : public SampleRecorder
+        , public MTIInsertsInterface
+    {
+        explicit MTSampleRecorder( AudIO::Design& D )
+            : SampleRecorder( D ) {}
+
+        MTIInsertsInterface* getInsertsInterface()
+        {
+            return dynamic_cast<MTIInsertsInterface*>( this );
+        };
+    };
+
     //
     class MTAudioRecorderManager
     {
@@ -93,7 +106,7 @@ namespace mt
 
     private:
         AudIO::DawEngine&        _engine;
-        SampleRecorder*          _sampler{ nullptr };
+        MTSampleRecorder*        _sampler{ nullptr };
         MTLooper*                _looper{ nullptr };
         juce::AudioBuffer<float> _recBufEmpty;
 

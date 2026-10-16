@@ -36,7 +36,7 @@ namespace mt
     // Audio Recorder...
     void MTAudioRecorderManager::initRecorder()
     {
-        if( auto pRecorder = std::make_unique<SampleRecorder>( _engine ) )
+        if( auto pRecorder = std::make_unique<MTSampleRecorder>( _engine ) )
         {
             _sampler = pRecorder.get();
             _engine.addMeter( _engine.createObject( std::move( pRecorder ) ) );
@@ -79,13 +79,20 @@ namespace mt
     void MTAudioRecorderManager::setup( juce::ValueTree VT, juce::UndoManager* UM )
     {
         // Setup inserts on looper.
-        auto looperNode = VT.getOrCreateChildWithName( IDs::LOOPER, nullptr );
-        auto looperVT   = looperNode.getOrCreateChildWithName( IDs::INSERTS, nullptr );
-        _looper->setup( looperVT, UM, dynamic_cast<AudIO::DawInserts*>( _looper ) );
+        if( _looper )
+        {
+            auto looperNode = VT.getOrCreateChildWithName( IDs::LOOPER, nullptr );
+            auto looperVT   = looperNode.getOrCreateChildWithName( IDs::INSERTS, nullptr );
+            _looper->setup( looperVT, UM, dynamic_cast<AudIO::DawInserts*>( _looper ) );
+        }
 
         // Setup inserts on Sampler.
-        auto samplerNode = VT.getOrCreateChildWithName( IDs::SAMPLER, nullptr );
-        auto samplerVT   = looperNode.getOrCreateChildWithName( IDs::SAMPLER, nullptr );
+        if( _sampler )
+        {
+            auto samplerNode = VT.getOrCreateChildWithName( IDs::SAMPLER, nullptr );
+            auto samplerVT   = samplerNode.getOrCreateChildWithName( IDs::INSERTS, nullptr );
+            _sampler->setup( samplerVT, UM, dynamic_cast<AudIO::DawInserts*>( _sampler ) );
+        }
     }
 
     void MTAudioRecorderManager::setupRecorder( double timeInSeconds, float Gain, float Pan, bool Looping, bool Overdub )
