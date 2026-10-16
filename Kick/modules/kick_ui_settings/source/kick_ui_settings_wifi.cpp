@@ -53,11 +53,24 @@ namespace kick_ui
         };
 
         scanWifi.onClick = [&]() {
-            if( scanWifi.getToggleState() )
+            if( scanWifi.getToggleState() && !scanning )
             {
                 DBG( "Scanning Wifi" );
-                std::vector<juce::String> list = mt::WifiManager().scanWiFiNetworks();
-                wifiList.setListOptions( list );
+                scanning = true;
+
+                // A scan takes seconds: wait for it on a thread of its own,
+                // and show the result if this page is still there.
+                juce::Component::SafePointer<SettingsWifi> self( this );
+                juce::Thread::launch( [self]() {
+                    auto list = mt::WifiManager::getWifiInterface()->scanWiFiNetworks();
+                    juce::MessageManager::callAsync( [self, list]() {
+                        if( self != nullptr )
+                        {
+                            self->wifiList.setListOptions( list );
+                            self->scanning = false;
+                        }
+                    } );
+                } );
             }
         };
 
@@ -78,9 +91,9 @@ namespace kick_ui
     void SettingsWifi::connectWifi( bool Connect )
     {
         if( Connect )
-            mt::WifiManager().getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), settings.wifi.pwd() );
+            mt::WifiManager::getWifiInterface()->connectToWiFi( wifiList.getSelectedValue(), settings.wifi.pwd() );
         else
-            mt::WifiManager().getWifiInterface()->disconnectWiFi();
+            mt::WifiManager::getWifiInterface()->disconnectWiFi();
     }
 
     void SettingsWifi::handleEnabledClick()
@@ -88,10 +101,10 @@ namespace kick_ui
         bool status = enabled.getToggleState();
         if( status )
         {
-            mt::WifiManager().enableWiFi();
+            mt::WifiManager::getWifiInterface()->enableWiFi();
         }
         else
-            mt::WifiManager().disableWiFi();
+            mt::WifiManager::getWifiInterface()->disableWiFi();
     }
 
     void SettingsWifi::refresh()
@@ -127,7 +140,7 @@ namespace kick_ui
     {
         if( settings.wifi.enabled() )
         {
-            mt::WifiManager().getWifiInterface()->connectToWiFi( settings.wifi.ssid(), settings.wifi.pwd() );
+            mt::WifiManager::getWifiInterface()->connectToWiFi( settings.wifi.ssid(), settings.wifi.pwd() );
         }
     }
 

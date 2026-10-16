@@ -21,7 +21,11 @@
 
 #pragma once
 
+#include <map>
+#include <mutex>
 #include <string>
+
+#include "kick_WpaCtrl.h"
 
 namespace mt
 {
@@ -30,27 +34,34 @@ namespace mt
     public:
         WifiManager();
         ~WifiManager();
-        bool                            enableWiFi();
-        bool                            disableWiFi();
+        bool enableWiFi();
+        bool disableWiFi();
+
+        /** Scans for networks and returns their names. It waits for the scan
+            to finish, which takes seconds: call it off the message thread. */
         const std::vector<juce::String> scanWiFiNetworks();
         void                            displayWiFiNetworks( const std::vector<juce::String>& networks );
-        bool                            connectToWiFi( const juce::String& ssid, const juce::String& password, int priority = 5 );
-        bool                            disconnectWiFi();
 
+        /** Connects to a network, adding it to wpa_supplicant's configuration
+            if it is not there, and saves the configuration. An empty
+            password keeps a known network's passphrase, and makes a new
+            network an open one. */
+        bool connectToWiFi( const juce::String& ssid, const juce::String& password, int priority = 5 );
+        bool disconnectWiFi();
+
+        // Used from the scanning thread too, so created thread-safely.
         static WifiManager* getWifiInterface()
         {
-            static WifiManager* _wifiInterface;
-            if( NULL == _wifiInterface )
-            {
-                _wifiInterface = new WifiManager();
-            }
-
-            return _wifiInterface;
+            static WifiManager _wifiInterface;
+            return &_wifiInterface;
         }
 
     private:
-        std::vector<juce::String> networks;
-        juce::String              wpaCli( const juce::StringArray& args, bool* ok = nullptr );
-        int                       findNetwork( const juce::String& ssid );
+        // The networks the last scan found, by the names it returned.
+        std::mutex                            scanLock;
+        std::map<juce::String, wpa::ScanResult> lastScan;
+
+        static std::string controlPath();
+        static int         findNetwork( wpa::WpaCtrl& ctrl, const std::string& ssid );
     };
 }

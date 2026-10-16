@@ -19,28 +19,58 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include <iostream>
+
 #if( JUCE_LINUX || __linux__ )
-    #include <iostream>
-    #include <fcntl.h>
-    #include <linux/i2c-dev.h>
-    #include <sys/ioctl.h>
-    #include <unistd.h>
+    #include <dirent.h>
+    #include <sys/stat.h>
 #endif
 
-#include "kick_Process.h"
+#include "kick_NetInfo.h"
+#include "kick_WpaCtrl.h"
 
 // Wi-Fi is wpa_supplicant's job: the system runs it for the interface, and
 // the system's network manager configures the address once it is
 // associated. The application only talks to it through its control
-// interface, with wpa_cli, so it needs no privileges beyond access to the
-// control interface's socket directory.
+// interface, so it needs no privileges beyond access to the control
+// interface's socket directory, and passphrases never appear on a command
+// line.
 #ifndef KICK_WPA_CTRL_DIR
     #define KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant"
 #endif
-#define WIFI_INTERFACE "wlan0"
 
 namespace mt
 {
+    namespace
+    {
+        // How long a scan may take before its results are read anyway.
+        constexpr int scanTimeoutMs = 10000;
+
+        /** A name for an SSID to show: its text if it is UTF-8, or else the
+            SSID with the other bytes written as \xNN. */
+        juce::String ssidToDisplayName( const std::string& ssid )
+        {
+            if( juce::CharPointer_UTF8::isValidString( ssid.data(), (int)ssid.size() ) )
+                return juce::String::fromUTF8( ssid.data(), (int)ssid.size() );
+
+            juce::String name;
+            for( char byte : ssid )
+            {
+                const auto c = static_cast<unsigned char>( byte );
+                if( c >= 0x20 && c < 0x7f )
+                    name += (juce::juce_wchar)c;
+                else
+                    name += "\\x" + juce::String::toHexString( (int)c ).paddedLeft( '0', 2 );
+            }
+            return name;
+        }
+
+        bool setNetwork( wpa::WpaCtrl& ctrl, int id, const std::string& variable, const std::string& value )
+        {
+            return ctrl.command( "SET_NETWORK " + std::to_string( id ) + " " + variable + " " + value );
+        }
+    }
+
     WifiManager::WifiManager()
     {
     }
@@ -49,91 +79,120 @@ namespace mt
     {
     }
 
-    juce::String WifiManager::wpaCli( const juce::StringArray& args, bool* ok )
+    std::string WifiManager::controlPath()
     {
-        juce::StringArray command { "wpa_cli", "-p", KICK_WPA_CTRL_DIR, "-i", WIFI_INTERFACE };
-        command.addArray( args );
+        const std::string dir   = KICK_WPA_CTRL_DIR;
+        std::string       iface = net::wifiInterface();
 
-        juce::String output;
-        const int    status = process::run( command, &output );
-        output              = output.trim();
+#if( JUCE_LINUX || __linux__ )
+        // No Wi-Fi interface found: use whichever one wpa_supplicant has a
+        // control socket for.
+        if( iface.empty() )
+        {
+            if( DIR* d = opendir( dir.c_str() ) )
+            {
+                while( const dirent* entry = readdir( d ) )
+                {
+                    struct stat st {};
+                    const std::string name = entry->d_name;
+                    if( name != "." && name != ".." && stat( ( dir + "/" + name ).c_str(), &st ) == 0 && S_ISSOCK( st.st_mode ) )
+                    {
+                        iface = name;
+                        break;
+                    }
+                }
+                closedir( d );
+            }
+        }
+#endif
 
-        if( ok != nullptr )
-            *ok = status == 0 && !output.startsWith( "FAIL" );
-
-        return output;
+        return iface.empty() ? std::string() : dir + "/" + iface;
     }
 
-    int WifiManager::findNetwork( const juce::String& ssid )
+    int WifiManager::findNetwork( wpa::WpaCtrl& ctrl, const std::string& ssid )
     {
-        // "network id / ssid / bssid / flags", then one line per network
-        juce::StringArray lines;
-        lines.addLines( wpaCli( { "list_networks" } ) );
-
-        for( int i = 1; i < lines.size(); ++i )
-        {
-            const auto fields = juce::StringArray::fromTokens( lines[i], "\t", "" );
-            if( fields.size() >= 2 && fields[1] == ssid && fields[0].containsOnly( "0123456789" ) )
-                return fields[0].getIntValue();
-        }
+        for( const auto& network : wpa::parseNetworkList( ctrl.request( "LIST_NETWORKS" ) ) )
+            if( network.ssid == ssid )
+                return network.id;
 
         return -1;
     }
 
     const std::vector<juce::String> WifiManager::scanWiFiNetworks()
     {
-        std::map<juce::String, std::vector<juce::String>> wifiNetworks;
-        std::vector<juce::String>                         _networks;
+        std::vector<juce::String> _networks;
 
         DBG( "-------------------------scanning-----------------------" );
-        // The scan runs in the background; its results replace the ones
-        // scan_results returns once it is done, which takes a few seconds.
-        wpaCli( { "scan" } );
-        juce::Thread::sleep( 3000 );
-
-        // "bssid / frequency / signal level / flags / ssid", then one line
-        // per access point
-        juce::StringArray scanResults;
-        scanResults.addLines( wpaCli( { "scan_results" } ) );
-
-        for( int i = 1; i < scanResults.size(); ++i )
+        const std::string path = controlPath();
+        wpa::WpaCtrl      ctrl;
+        if( !ctrl.open( path ) )
         {
-            const auto fields = juce::StringArray::fromTokens( scanResults[i], "\t", "" );
-            if( fields.size() >= 5 && fields[4].isNotEmpty() )
-                wifiNetworks[fields[4]].push_back( fields[1] );
+            DBG( "Cannot connect to wpa_supplicant at " << path );
+            return _networks;
         }
 
-        for( const auto& entry : wifiNetworks )
-        {
-            juce::StringArray frequencyArray;
+        // The scan runs in the background, and wpa_supplicant tells the
+        // clients that listen for events when its results are ready. If a
+        // scan is already running ("FAIL-BUSY"), its results will do.
+        wpa::WpaCtrl events;
+        const bool   listening = events.open( path ) && events.attach();
+        const auto   reply     = ctrl.request( "SCAN" );
 
-            // Manually add elements from the vector to the StringArray
-            for( const auto& freq : entry.second )
+        if( reply == "OK\n" || reply == "FAIL-BUSY\n" )
+        {
+            if( listening )
             {
-                frequencyArray.add( freq );
+                const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32)scanTimeoutMs;
+                std::string message;
+                while( juce::Time::getMillisecondCounter() < deadline
+                       && events.receive( message, (int)( deadline - juce::Time::getMillisecondCounter() ) ) )
+                {
+                    const auto event = wpa::WpaCtrl::eventText( message );
+                    if( event.rfind( "CTRL-EVENT-SCAN-RESULTS", 0 ) == 0 || event.rfind( "CTRL-EVENT-SCAN-FAILED", 0 ) == 0 )
+                        break;
+                }
             }
-
-            _networks.push_back( entry.first );
-            DBG( "SSID: " + entry.first );
-            DBG( "Frequencies: " + frequencyArray.joinIntoString( ", " ) );
-            DBG( "-------------------------" );
+            else
+                juce::Thread::sleep( 3000 );
         }
+        events.close();
+
+        // One entry per network name, for the access point heard best.
+        std::map<juce::String, wpa::ScanResult> found;
+        for( const auto& result : wpa::parseScanResults( ctrl.request( "SCAN_RESULTS" ) ) )
+        {
+            const auto name = ssidToDisplayName( result.ssid );
+            auto       it   = found.find( name );
+            if( it == found.end() || result.signal > it->second.signal )
+                found[name] = result;
+        }
+
+        for( const auto& entry : found )
+        {
+            _networks.push_back( entry.first );
+            DBG( "SSID: " + entry.first + " (" + juce::String( entry.second.flags ) + ", " + juce::String( entry.second.frequency ) + " MHz, "
+                 + juce::String( entry.second.signal ) + " dBm)" );
+        }
+
+        {
+            std::lock_guard<std::mutex> lock( scanLock );
+            lastScan = std::move( found );
+        }
+
         displayWiFiNetworks( _networks );
         return _networks;
     }
 
     bool WifiManager::enableWiFi()
     {
-        bool ok = false;
-        wpaCli( { "reconnect" }, &ok );
-        return ok;
+        wpa::WpaCtrl ctrl;
+        return ctrl.open( controlPath() ) && ctrl.command( "RECONNECT" );
     }
 
     bool WifiManager::disableWiFi()
     {
-        bool ok = false;
-        wpaCli( { "disconnect" }, &ok );
-        return ok;
+        wpa::WpaCtrl ctrl;
+        return ctrl.open( controlPath() ) && ctrl.command( "DISCONNECT" );
     }
 
     void WifiManager::displayWiFiNetworks( const std::vector<juce::String>& Networks )
@@ -148,49 +207,107 @@ namespace mt
     {
         std::cout << "Network: connecting to wifi SSID: " << ssid << std::endl;
 
-        // wpa_supplicant stores the networks, so a network it already knows
-        // keeps its passphrase unless a new one is given.
-        bool known = true;
-        int  id    = findNetwork( ssid );
-        if( id < 0 )
-        {
-            known                   = false;
-            const juce::String reply = wpaCli( { "add_network" } );
-            if( !reply.containsOnly( "0123456789" ) || reply.isEmpty() )
-                return false;
-            id = reply.getIntValue();
-        }
-
         // A control character would end up in the stored configuration.
         for( auto c : password )
             if( c < 0x20 || c == 0x7f )
                 return false;
 
-        const juce::String network = juce::String( id );
-        bool               ok      = true;
-        auto               set     = [&]( const juce::StringArray& args ) {
-            bool done = false;
-            wpaCli( args, &done );
-            ok = ok && done;
-        };
+        // The SSID's bytes and security, as the last scan saw them; a name
+        // the scan did not return is taken as UTF-8 text, and as a hidden
+        // network.
+        std::string ssidBytes = ssid.toStdString();
+        bool        seen      = false;
+        bool        open      = password.isEmpty();
+        {
+            std::lock_guard<std::mutex> lock( scanLock );
+            const auto                  it = lastScan.find( ssid );
+            if( it != lastScan.end() )
+            {
+                ssidBytes = it->second.ssid;
+                seen      = true;
+                open      = it->second.isOpen();
+            }
+        }
+        if( ssidBytes.empty() || ssidBytes.size() > 32 )
+            return false;
 
-        // The SSID in hexadecimal, so that no character in it needs quoting.
-        set( { "set_network", network, "ssid", juce::String::toHexString( ssid.toRawUTF8(), (int)ssid.getNumBytesAsUTF8(), 0 ) } );
-        if( password.isNotEmpty() )
-            set( { "set_network", network, "psk", "\"" + password + "\"" } );
-        else if( !known )
-            set( { "set_network", network, "key_mgmt", "NONE" } );
-        set( { "set_network", network, "priority", juce::String( priority ) } );
-        set( { "select_network", network } );
-        set( { "save_config" } );
+        const std::string passphrase = password.toStdString();
+        const bool        rawPsk     = passphrase.size() == 64 && passphrase.find_first_not_of( "0123456789abcdefABCDEF" ) == std::string::npos;
+        if( !open && !password.isEmpty() && !rawPsk && ( passphrase.size() < 8 || passphrase.size() > 63 ) )
+        {
+            DBG( "Wi-Fi passphrases are 8 to 63 characters long" );
+            return false;
+        }
 
-        return ok;
+        wpa::WpaCtrl ctrl;
+        if( !ctrl.open( controlPath() ) )
+            return false;
+
+        // wpa_supplicant stores the networks, so a network it already knows
+        // keeps its passphrase unless a new one is given.
+        int        id    = findNetwork( ctrl, ssidBytes );
+        const bool known = id >= 0;
+        if( !known && !open && password.isEmpty() )
+        {
+            DBG( "A passphrase is needed to join " << ssid );
+            return false;
+        }
+        if( !known )
+        {
+            const auto reply = ctrl.request( "ADD_NETWORK" );
+            if( !wpa::isNetworkId( reply ) )
+                return false;
+            id = std::atoi( reply.c_str() );
+        }
+
+        // The SSID in hexadecimal, so that no byte in it needs quoting.
+        bool ok = setNetwork( ctrl, id, "ssid", wpa::toHex( ssidBytes ) );
+
+        if( !password.isEmpty() && !open )
+        {
+            if( rawPsk )
+            {
+                // A raw PSK only works with WPA2-Personal.
+                ok = ok && setNetwork( ctrl, id, "psk", passphrase );
+                ok = ok && setNetwork( ctrl, id, "key_mgmt", "WPA-PSK" );
+            }
+            else
+            {
+                // A passphrase works for WPA2-Personal and WPA3-Personal
+                // (SAE), and for networks in the transition mode between
+                // the two. WPA3 needs management frame protection, which is
+                // optional for the others. A wpa_supplicant without SAE
+                // refuses it: then WPA2 it is.
+                ok = ok && setNetwork( ctrl, id, "psk", "\"" + passphrase + "\"" );
+                ok = ok && ( setNetwork( ctrl, id, "key_mgmt", "WPA-PSK WPA-PSK-SHA256 SAE" ) || setNetwork( ctrl, id, "key_mgmt", "WPA-PSK" ) );
+                setNetwork( ctrl, id, "ieee80211w", "1" );
+            }
+        }
+        else if( open && ( !known || seen ) )
+            ok = ok && setNetwork( ctrl, id, "key_mgmt", "NONE" );
+
+        // A network that does not answer broadcast scans has to be probed
+        // for by name.
+        if( !known && !seen )
+            ok = ok && setNetwork( ctrl, id, "scan_ssid", "1" );
+
+        ok = ok && setNetwork( ctrl, id, "priority", std::to_string( priority ) );
+
+        if( !ok )
+        {
+            // Leave no half-configured network behind.
+            if( !known )
+                ctrl.command( "REMOVE_NETWORK " + std::to_string( id ) );
+            return false;
+        }
+
+        ok = ctrl.command( "SELECT_NETWORK " + std::to_string( id ) );
+        return ctrl.command( "SAVE_CONFIG" ) && ok;
     }
 
     bool WifiManager::disconnectWiFi()
     {
-        bool ok = false;
-        wpaCli( { "disconnect" }, &ok );
-        return ok;
+        wpa::WpaCtrl ctrl;
+        return ctrl.open( controlPath() ) && ctrl.command( "DISCONNECT" );
     }
 }
