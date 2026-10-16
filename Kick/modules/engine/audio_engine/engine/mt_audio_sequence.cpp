@@ -80,7 +80,11 @@ namespace mt
     MTSequence::~MTSequence()
     {
         vTree.removeListener( this );
-        stop();
+
+        // Stopping stops the clock, which another sequence may be playing on
+        // (the transport stops this one, if it plays, before deleting it).
+        if( isPlaying )
+            stop();
 
         {
             const juce::ScopedLock sl( lock );
