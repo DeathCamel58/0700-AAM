@@ -20,6 +20,8 @@
  */
 #pragma once
 
+#include "juce_core/juce_core.h"
+
 #include <exception>
 #include <string>
 
@@ -42,4 +44,22 @@ namespace ipc
         std::string e_code;
         std::string e_message;
     };
+
+    // Logs the exception being handled; call it from a catch block.
+    inline void logCurrentException( const juce::String& context )
+    {
+        try
+        {
+            throw;
+        } catch( const MTIPCException& e )
+        {
+            juce::Logger::writeToLog( context + ": " + juce::String( e.e_code ) + " " + juce::String( e.e_message ) );
+        } catch( const std::exception& e )
+        {
+            juce::Logger::writeToLog( context + ": " + juce::String( e.what() ) );
+        } catch( ... )
+        {
+            juce::Logger::writeToLog( context + ": unknown exception" );
+        }
+    }
 }

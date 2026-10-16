@@ -31,6 +31,7 @@
 #include "../utils/mt_ipc_keys.h"
 #include "../utils/mt_ipc_json.h"
 #include "../utils/mt_ipc_message_constructor.h"
+#include "../utils/mt_ipc_exception.h"
 #include "../connection/mti_ipc_connection_callback.h"
 #include "../process/mti_ipc_process_manager_callback.h"
 #include "mt_ipc_delayed_connector.h"
@@ -174,7 +175,7 @@ namespace ipc
                     connectedCB( connectionId, connectionName );
             } catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the connection of " + connectionName );
             }
         }
 
@@ -186,7 +187,7 @@ namespace ipc
                     disconnectedCB( connectionId, connectionName );
             } catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the disconnect of " + connectionName );
             }
         }
 
@@ -198,7 +199,7 @@ namespace ipc
                     messageCB( connectionId, message );
             } catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling a message on connection " + juce::String( connectionId ) );
             }
         }
 
@@ -331,7 +332,7 @@ namespace ipc
             data = nullptr;
         } catch( ... )
         {
-            // log exception.
+            ipc::logCurrentException( "Exception stopping the IPC subsystem" );
         }
     }
 
@@ -449,6 +450,7 @@ namespace ipc
         {
             // if the parent process is crashed then reconnection to parent process may result multple instances of the same processes,
             // to avoid that the processes kills itself if parent is killed and does not attempt any reconnection.
+            juce::Logger::writeToLog( "Lost the connection to the parent process (" + connName + "); quitting" );
             juce::MessageManager::callAsync( juce::JUCEApplicationBase::getInstance()->quit); 
             return;
         }

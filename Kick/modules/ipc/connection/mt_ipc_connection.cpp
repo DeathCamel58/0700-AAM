@@ -143,7 +143,7 @@ namespace ipc
             }
             catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the connection of " + connName );
             }
 			
 		}
@@ -155,7 +155,7 @@ namespace ipc
                 disConnectedCB();
             } catch( ... )
             {
-                // log exception
+                ipc::logCurrentException( "Exception handling the disconnect of " + connName );
             }
 		}
 
@@ -169,7 +169,7 @@ namespace ipc
             }
             catch( ... )
             {
-                // log exception.
+                ipc::logCurrentException( "Exception handling a message from " + connName );
             }
 			
 		}

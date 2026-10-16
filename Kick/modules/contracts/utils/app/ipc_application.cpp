@@ -29,6 +29,7 @@
 #include "contracts/main/system_ipc_helpers.h"
 #include "contracts/main/system_signals.h"
 #include "ipc/utils/mt_ipc_json.h"
+#include "ipc/utils/mt_ipc_exception.h"
 
 #include <csignal>
 
@@ -240,10 +241,26 @@ namespace contracts
 
     void IPCApplication::initialise( const juce::String& commandLine )
     {
-        std::vector<std::shared_ptr<ipc::MTIIPCMessageHandler>> handlers{};
-        addMessageHandlers( handlers );
-        juce::var config = getConfig(commandLine);
-        impl->initialise( config, handlers );
+        bool initialised = false;
+        try
+        {
+            std::vector<std::shared_ptr<ipc::MTIIPCMessageHandler>> handlers{};
+            addMessageHandlers( handlers );
+            juce::var config = getConfig( commandLine );
+            initialised      = impl->initialise( config, handlers );
+        } catch( ... )
+        {
+            ipc::logCurrentException( "Exception initialising the IPC" );
+        }
+
+        // Without its IPC the process is no use: fail, so that the
+        // supervisor sees it.
+        if( !initialised )
+        {
+            juce::Logger::writeToLog( "Failed to initialise " + getApplicationName() + "; quitting" );
+            setApplicationReturnValue( EXIT_FAILURE );
+            quit();
+        }
     }
 
     void IPCApplication::shutdown()

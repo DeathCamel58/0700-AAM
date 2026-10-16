@@ -158,7 +158,18 @@ namespace ipc
         void start()
         {
             if( beginWaitingForSocket( serverPort, bindAddress ) )
+            {
                 ipc::setListeningSocketCloseOnExec( serverPort );
+                return;
+            }
+
+            // Most likely another process still holds the port. Nothing can
+            // connect to this process, so fail, and let the supervisor start
+            // it again later.
+            juce::Logger::writeToLog( "Cannot listen on port " + juce::String( serverPort ) + " (is another process using it?); quitting" );
+            if( auto* app = juce::JUCEApplicationBase::getInstance() )
+                app->setApplicationReturnValue( EXIT_FAILURE );
+            juce::MessageManager::callAsync( juce::JUCEApplicationBase::quit );
         }
 
         bool areAllValidClientsConnected()
