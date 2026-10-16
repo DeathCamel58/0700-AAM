@@ -84,27 +84,22 @@ namespace AudIO
         auto& meters = list->meters;
 
 #if defined( METERING_LOAD_BALANCE ) && ( METERING_LOAD_BALANCE > 0 )
-        auto numMeters = utils::min( _metersPerBlock.load(), ( (int)meters.size() - _meterIdx ) );
-        if( 0 < numMeters )
+        // Round-robin: a few meters each block, starting over after the
+        // last one. The list may have shrunk since the last block.
+        const auto count = (int)meters.size();
+        if( 0 < count )
         {
-            auto it = meters.begin();
-            std::advance( it, _meterIdx );
-            for( auto i = 0; i < numMeters; ++i )
+            if( _meterIdx >= count )
+                _meterIdx = 0;
+            const auto numMeters = utils::min( _metersPerBlock.load(), count - _meterIdx );
+            for( auto i = 0; i < numMeters; ++i, ++_meterIdx )
             {
-                if( it != meters.end() )
-                {
-                    auto& [meter, objMeta] = *it;
-                    if( objMeta )
-                        meter->process( objMeta->getBuffer() );
-                    ++_meterIdx;
-                    ++it;
-                }
-                else
-                {
-                    _meterIdx = 0;
-                    break;
-                }
+                auto& [meter, objMeta] = meters[(size_t)_meterIdx];
+                if( objMeta )
+                    meter->process( objMeta->getBuffer() );
             }
+            if( _meterIdx >= count )
+                _meterIdx = 0;
         }
 #else
         for( auto& [meter, objMeta] : meters )

@@ -30,7 +30,7 @@
 //       AudIO/Tests/GraphStress.cpp -o GraphStress -lpthread
 //   ./GraphStress 30
 //
-// It first checks a few behaviors on their own (chain inserts). It passes
+// It first checks a few behaviors on their own (chain inserts, meters). It passes
 // when those checks pass, the sanitizer reports nothing and the memory pool
 // holds only the stand-in device's buffers once the design is gone.
 
@@ -51,6 +51,7 @@ namespace AudIO
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
@@ -222,6 +223,59 @@ namespace
         design->teardown();
         return ok;
     }
+
+    // The design's meters run round-robin, a few per block: they must keep
+    // coming round as meters are added and removed.
+    bool checkMeterRoundRobin()
+    {
+        auto design = std::make_unique<AudIO::Design>( 2, 2 );
+        auto out    = design->createBus();
+        design->setDesignOutput( out, true );
+
+        AudIO::Buffer<float> device( 2, true, 2, true );
+        design->prepareToPlay( 48000, BLOCK );
+        Player player( *design, device );
+        player.start();
+
+        auto addMetered = [&] {
+            auto id = design->createObject( std::make_unique<Source>() );
+            design->sendToBus( out, id, 1.f );
+            design->addMeter( id );
+            return id;
+        };
+        auto metered = [&]( const std::vector<uint32_t>& Ids ) {
+            player.waitBlocks( 50 );
+            player.stop();
+            bool all = true;
+            for( auto id : Ids )
+            {
+                // A Source peaks at 0.25 (-12 dB); a meter that never ran
+                // reads otherwise.
+                const auto& data = design->readMeter( id );
+                all &= !data.empty() && ( std::fabs( data[0].peak + 12.04f ) < 0.1f );
+            }
+            player.start();
+            return all;
+        };
+
+        std::vector<uint32_t> first;
+        for( int i = 0; i < 4; ++i )
+            first.push_back( addMetered() );
+        bool ok = check( metered( first ), "four meters are updated" );
+
+        // Fewer meters than the round-robin has been through.
+        for( int i = 0; i < 3; ++i )
+            design->removeObject( first[(size_t)i] );
+        std::vector<uint32_t> second{ first[3], addMetered(), addMetered() };
+        ok &= check( metered( second ), "meters added after removals are updated" );
+
+        std::vector<uint32_t> third{ addMetered(), addMetered(), addMetered() };
+        ok &= check( metered( third ), "meters added later are updated" );
+
+        player.stop();
+        design->teardown();
+        return ok;
+    }
 } // namespace
 
 int main( int argc, char** argv )
@@ -230,7 +284,7 @@ int main( int argc, char** argv )
 
     AudIO::MemoryPool<float>::get().initialize( poolMemory, POOL, BLOCK );
 
-    if( !checkChainInserts( false ) || !checkChainInserts( true ) )
+    if( !checkChainInserts( false ) || !checkChainInserts( true ) || !checkMeterRoundRobin() )
         return 1;
 
     auto design = std::make_unique<AudIO::Design>( 2, 2 );
