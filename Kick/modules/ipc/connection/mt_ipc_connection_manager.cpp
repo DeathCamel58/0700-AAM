@@ -72,6 +72,10 @@ namespace ipc
         }
 
     public:
+        // The map is used on the message thread, the dispatcher thread and
+        // the server's connection threads. Connections are called outside
+        // the lock.
+        juce::CriticalSection                                    connectionsLock;
         juce::HashMap<int, std::shared_ptr<MTIPCConnectionData>> connections;
         std::unique_ptr<ipc::MTIPCSocketServer>                  server{ nullptr };
         std::shared_ptr<ipc::MTIIPCConnectionCallback>           connectionCallbackPtr{ nullptr };
@@ -126,30 +130,36 @@ namespace ipc
     {
         if( data )
         {
+            const juce::ScopedLock sl( data->connectionsLock );
             data->connections.clear();
         }
     }
 
     bool MTIPCConnectionManager::areAllClientsConnected()
     {
-        bool connected = true;
-        for( auto conn : data->connections )
+        juce::Array<std::shared_ptr<ipc::MTIPCConnection>> clients;
         {
-            if( conn->connectsToServer )
+            const juce::ScopedLock sl( data->connectionsLock );
+            for( auto conn : data->connections )
             {
-                connected = conn->connection ? conn->connection->isConnected() : false;
-                if( connected )
+                if( !conn->connectsToServer )
                     continue;
-                break;
+                if( !conn->connection )
+                    return false;
+                clients.add( conn->connection );
             }
         }
-        return connected;
+        for( auto& client : clients )
+            if( !client->isConnected() )
+                return false;
+        return true;
     }
 
     void MTIPCConnectionManager::updateUnConnectedConnectionIds( std::vector<int> & ids)
     {
         if( data->server )
             data->server->updateUnConnectedConnectionIds( ids );
+        const juce::ScopedLock sl( data->connectionsLock );
         for( auto itr = data->connections.begin(); itr != data->connections.end(); itr.next() )
         {
             auto conn = itr.getValue();
@@ -192,6 +202,7 @@ namespace ipc
                     data->delayedClientStart = false;
             }
 
+            const juce::ScopedLock sl( data->connectionsLock );
             for( const juce::var& client : *clients )
             {
                 if( client.hasProperty( ipc::IPC_KEY_CONNECTION_ID ) )
@@ -219,24 +230,34 @@ namespace ipc
 
     void MTIPCConnectionManager::startClientConnections()
     {
-        for( auto itr = data->connections.begin(); itr != data->connections.end(); itr.next() )
+        juce::HashMap<int, std::shared_ptr<ipc::MTIPCConnection>> clients;
         {
-            auto conn = itr.getValue();
-            auto id   = itr.getKey();
-            if( conn->connectsToServer )
+            const juce::ScopedLock sl( data->connectionsLock );
+            for( auto itr = data->connections.begin(); itr != data->connections.end(); itr.next() )
             {
-                if( !conn->connection )
-                    conn->connection.reset( new ipc::MTIPCServerConnection( data->uuid, id, conn->config, data->connectionCallbackPtr ) );
-                // The server's process may not be listening yet: report the
-                // failure, so that the subsystem keeps trying.
-                if( !conn->connection->connect() && data->connectionCallbackPtr )
-                    data->connectionCallbackPtr->onConnectFailed( id, conn->connection->connectionName() );
+                auto conn = itr.getValue();
+                auto id   = itr.getKey();
+                if( conn->connectsToServer )
+                {
+                    if( !conn->connection )
+                        conn->connection.reset( new ipc::MTIPCServerConnection( data->uuid, id, conn->config, data->connectionCallbackPtr ) );
+                    clients.set( id, conn->connection );
+                }
             }
+        }
+
+        for( auto itr = clients.begin(); itr != clients.end(); itr.next() )
+        {
+            // The server's process may not be listening yet: report the
+            // failure, so that the subsystem keeps trying.
+            if( !itr.getValue()->connect() && data->connectionCallbackPtr )
+                data->connectionCallbackPtr->onConnectFailed( itr.getKey(), itr.getValue()->connectionName() );
         }
     }
 
     bool MTIPCConnectionManager::canAttemptReconnection( int connectionId )
     {
+        const juce::ScopedLock sl( data->connectionsLock );
         if( !data->connections.contains( connectionId ) )
             return false;
 
@@ -249,22 +270,32 @@ namespace ipc
         return false;
     }
 
+    // Closes every connection, the ones accepted by the server too, so that
+    // no connection thread calls back into the subsystem after this.
     void MTIPCConnectionManager::stop()
     {
-        for( auto conn : data->connections )
+        if( data->server )
+            data->server->stop();
+
+        juce::Array<std::shared_ptr<ipc::MTIPCConnection>> open;
         {
-            if( conn->connection && conn->connectsToServer )
+            const juce::ScopedLock sl( data->connectionsLock );
+            for( auto conn : data->connections )
             {
-                conn->connection->disconnect();
-                data->connections[conn->connection->connectionIdentifier()]->connection = nullptr;
+                if( !conn->connection )
+                    continue;
+                open.add( conn->connection );
+                if( conn->connectsToServer )
+                    conn->connection = nullptr;
             }
         }
 
-        if( data->server )
-            data->server->stop();
+        for( auto& connection : open )
+            connection->disconnect();
     }
     std::shared_ptr<ipc::MTIPCConnection> MTIPCConnectionManager::getConnection( const int connectionId )
     {
+        const juce::ScopedLock sl( data->connectionsLock );
         if( data->connections.contains( connectionId ) )
             return data->connections[connectionId]->connection;
         return nullptr;
@@ -279,13 +310,21 @@ namespace ipc
     void MTIPCConnectionManager::addNewConnection( const int connectionId, std::shared_ptr<ipc::MTIPCConnection> newConn )
     {
         newConn->setCallback( data->connectionCallbackPtr );
+        const juce::ScopedLock sl( data->connectionsLock );
         data->connections.set( connectionId, std::shared_ptr<ipc::MTIPCConnectionData>( new MTIPCConnectionData( false, newConn, nullptr ) ) );
     }
 
     void MTIPCConnectionManager::connectionRemoved( int connectionId )
     {
+        // Released after the lock: destroying a connection waits for its
+        // thread.
+        std::shared_ptr<MTIPCConnectionData> removed;
+        const juce::ScopedLock               sl( data->connectionsLock );
         if( data->connections.contains( connectionId ) )
+        {
+            removed = data->connections[connectionId];
             data->connections.remove( connectionId );
+        }
     }
 
     void MTIPCConnectionManager::disconnect( const int connectionId )
@@ -293,6 +332,7 @@ namespace ipc
         std::shared_ptr<ipc::MTIPCConnection> conn = getConnection( connectionId );
         if( conn )
             conn->disconnect();
+        const juce::ScopedLock sl( data->connectionsLock );
         data->connections.remove( connectionId );
     }
 
@@ -305,13 +345,15 @@ namespace ipc
 
     void MTIPCConnectionManager::broadcast( std::shared_ptr<ipc::MTIPCJson> message )
     {
-        for( auto conn : data->connections )
+        juce::Array<std::shared_ptr<ipc::MTIPCConnection>> open;
         {
-            if( conn->connection )
-            {
-                conn->connection->publish( message );
-            }
+            const juce::ScopedLock sl( data->connectionsLock );
+            for( auto conn : data->connections )
+                if( conn->connection )
+                    open.add( conn->connection );
         }
+        for( auto& connection : open )
+            connection->publish( message );
     }
 
     void MTIPCConnectionManager::multicast( const std::vector<int>& connectionIds, std::shared_ptr<ipc::MTIPCJson> message )

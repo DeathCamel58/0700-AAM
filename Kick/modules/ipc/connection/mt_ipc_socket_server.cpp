@@ -46,9 +46,7 @@ namespace ipc
         virtual void disconnect() override
         {
             if( disconnectNotifier )
-            {
-                juce::MessageManager::callAsync( [&]() { disconnectNotifier( connectionIdentifier() ); } );
-            }
+                disconnectNotifier( connectionIdentifier() );
             ipc::MTIPCConnection::disconnect();
         }
 
@@ -61,9 +59,7 @@ namespace ipc
         virtual void onDisconnected()
         {
             if( disconnectNotifier )
-            {
-                juce::MessageManager::callAsync( [&]() { disconnectNotifier( connectionIdentifier() ); } );
-            }
+                disconnectNotifier( connectionIdentifier() );
 
             ipc::MTIPCConnection::onDisconnected();
         }
@@ -126,14 +122,34 @@ namespace ipc
 
         ~MTIPCSocketServerImpl()
         {
-            
+            // No more callbacks to the connection manager, which is being
+            // destroyed when this is.
+            destroying = true;
+            alive.reset();
+            stopServer();
         }
 
         void clearData()
         {
+            const juce::ScopedLock sl( lock );
             validationData.clear();
             registered.clear();
             unregistered.clear();
+        }
+
+        // Stops accepting, and closes the connections that have not
+        // registered; the registered ones belong to the connection manager.
+        void stopServer()
+        {
+            stop();
+
+            juce::HashMap<int, std::shared_ptr<ipc::MTIPCClientConnection>> pending;
+            {
+                const juce::ScopedLock sl( lock );
+                pending.swapWith( unregistered );
+            }
+            for( auto conn : pending )
+                conn->disconnect();
         }
 
         // if the all the clients are connected then start will not start the server
@@ -145,6 +161,7 @@ namespace ipc
 
         bool areAllValidClientsConnected()
         {
+            const juce::ScopedLock sl( lock );
             for( auto itr = validationData.begin(); itr != validationData.end(); itr.next() )
             {
                 int key = itr.getKey();
@@ -159,6 +176,7 @@ namespace ipc
 
         void updateUnConnectedConnectionIds( std::vector<int>& ids )
         {
+            const juce::ScopedLock sl( lock );
             for( auto itr = validationData.begin(); itr != validationData.end(); itr.next() )
             {
                 int key = itr.getKey();
@@ -170,9 +188,13 @@ namespace ipc
 
 
     protected:
+        // Called on the server's thread for each accepted connection.
         juce::InterprocessConnection* createConnectionObject()
         {
-            tempConnectionId++;
+            const juce::ScopedLock sl( lock );
+            // Negative, so a temporary id never collides with a client's
+            // connection id.
+            tempConnectionId--;
             std::shared_ptr<ipc::MTIPCClientConnection> conn( new ipc::MTIPCClientConnection( tempConnectionId, connectionCallBackPtr ) );
             if( !enableValidation )
                 registered.set( tempConnectionId, conn );
@@ -181,6 +203,7 @@ namespace ipc
         }
 
     private:
+        // Called on the connection's own thread with its first messages.
         void processMessage( const int connectionId, std::shared_ptr<MTIPCJson> message )
         {
             try
@@ -192,11 +215,22 @@ namespace ipc
                 juce::String uuid               = message->getProperty( ipc::IPC_KEY_UUID );
                 juce::String connectionName     = message->getProperty( ipc::IPC_KEY_CONNECTION_NAME );
 
-                std::shared_ptr<ipc::MTIPCClientConnection> conn = unregistered[connectionId];
+                std::shared_ptr<ipc::MTIPCClientConnection> conn;
+                bool                                        validConnection;
+                {
+                    const juce::ScopedLock sl( lock );
+                    if( !unregistered.contains( connectionId ) )
+                        return;
+                    conn = unregistered[connectionId];
 
-                bool validConnection = enableValidation ? ( validationData.contains( clientConnectionId ) && validationData[clientConnectionId] == uuid )
-                                                              && ( registered[clientConnectionId] == nullptr ) :
-                                                          true;
+                    validConnection = enableValidation ? ( validationData.contains( clientConnectionId ) && validationData[clientConnectionId] == uuid )
+                                                             && ( registered[clientConnectionId] == nullptr ) :
+                                                         true;
+                    if( validConnection )
+                        registered.set( clientConnectionId, conn );
+                    unregistered.remove( connectionId );
+                    registered.remove( connectionId );
+                }
 
                 std::shared_ptr<ipc::MTIPCJson>
                     handshakeMessage = ipc::MTIPCMessageConstructor::constructHeaderMessage( ipc::MTIPCMessageType::IPC_MESSAGE_TYPE_REGISTERATION_STATUS );
@@ -208,8 +242,7 @@ namespace ipc
                     conn->setConnectionIdentifier( clientConnectionId );
                     conn->setConnectionName( connectionName );
                     conn->setCallback( nullptr );
-                    conn->setDisconnectionNotifier( std::bind( &MTIPCSocketServerImpl::onClientDisconnected, this, std::placeholders::_1 ) );
-                    registered.set( clientConnectionId, conn );
+                    conn->setDisconnectionNotifier( disconnectionNotifier() );
                     conn->publish( handshakeMessage );
 
                     if( serverCallback )
@@ -217,34 +250,73 @@ namespace ipc
                 }
                 else
                 {
+                    juce::Logger::writeToLog( "Rejected the registration of " + connectionName );
                     handshakeMessage->setProperty( ipc::IPC_KEY_REGISTERATION_STATUS, ipc::MTIPCRegistrationStatus::IPC_MESSAGE_REGISTERATION_FAILED );
                     conn->publish( handshakeMessage );
+                    // This is the connection's own thread, which destroying
+                    // the connection would wait for: release it on the
+                    // message thread.
+                    release( conn );
                 }
-                unregistered.remove( connectionId );
-                registered.remove( connectionId );
 
+            } catch( const std::exception& e )
+            {
+                juce::Logger::writeToLog( "Exception handling a registration: " + juce::String( e.what() ) );
             } catch( ... )
             {
-                // log exception.
+                juce::Logger::writeToLog( "Unknown exception handling a registration" );
             }
         }
 
+        static void release( std::shared_ptr<ipc::MTIPCClientConnection> conn )
+        {
+            juce::MessageManager::callAsync( [conn]() mutable { conn.reset(); } );
+        }
+
+        // Reports a registered connection's disconnect on the message thread,
+        // if this server still exists then.
+        std::function<void( int )> disconnectionNotifier()
+        {
+            std::weak_ptr<bool> weakAlive = alive;
+            return [this, weakAlive]( int connectionId ) {
+                juce::MessageManager::callAsync( [this, weakAlive, connectionId]() {
+                    if( weakAlive.lock() )
+                        onClientDisconnected( connectionId );
+                } );
+            };
+        }
+
+        // Called on a connection's thread, or on the message thread.
         void onClientDisconnected( int connectionId )
         {
-            if( serverCallback )
+            if( serverCallback && !destroying )
                 serverCallback->connectionRemoved( connectionId );
 
-            if( registered.contains( connectionId ) )
+            std::shared_ptr<ipc::MTIPCClientConnection> removed[2];
             {
-                registered.remove( connectionId );
+                const juce::ScopedLock sl( lock );
+                if( registered.contains( connectionId ) )
+                {
+                    removed[0] = registered[connectionId];
+                    registered.remove( connectionId );
+                }
+                if( unregistered.contains( connectionId ) )
+                {
+                    removed[1] = unregistered[connectionId];
+                    unregistered.remove( connectionId );
+                }
             }
-            if( unregistered.contains( connectionId ) )
-            {
-                unregistered.remove( connectionId );
-            }
+            for( auto& conn : removed )
+                if( conn )
+                    release( conn );
         }
 
     private:
+        // Used on the server's thread, the connections' threads and the
+        // message thread.
+        juce::CriticalSection                                           lock;
+        std::shared_ptr<bool>                                           alive{ std::make_shared<bool>( true ) };
+        std::atomic<bool>                                               destroying{ false };
         juce::HashMap<int, std::shared_ptr<ipc::MTIPCClientConnection>> unregistered;
         juce::HashMap<int, std::shared_ptr<ipc::MTIPCClientConnection>> registered;
         juce::HashMap<int, juce::String>                               validationData;
@@ -273,8 +345,7 @@ namespace ipc
 
     void MTIPCSocketServer::stop()
     {
-        impl->stop();
-        
+        impl->stopServer();
     }
 
     bool MTIPCSocketServer::areAllValidClientsConnected()
