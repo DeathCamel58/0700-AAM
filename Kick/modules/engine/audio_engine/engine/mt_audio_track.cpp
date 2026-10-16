@@ -66,10 +66,16 @@ namespace mt
         */
 
         // Setup handler for program being deleted
-        programBeingDeleted.connect( [this]( MTIProgram* MTIProg ) {
+        programDeletedConnection = programBeingDeleted.connect( [this]( MTIProgram* MTIProg ) {
             if( program.load() == MTIProg )
             {
                 setProgram( nullptr );
+                jassert( program.load() == nullptr );
+
+                // The tick thread may have loaded the program for the tick
+                // it is processing (onTick()): it must be done with it
+                // before the program is deleted.
+                manager.waitForTickThread();
             }
         } );
 
@@ -240,10 +246,19 @@ namespace mt
         */
     }
 
-    void MTTrack::play()
+    void MTTrack::prepareToPlay()
     {
         // Play the notes as they are now, even if a rebuild is still queued.
         noteSnapshotUpdater.handleUpdateNowIfNeeded();
+    }
+
+    void MTTrack::play()
+    {
+        // The tick thread, when it switches to this track's sequence, must
+        // not read the note list: the transport prepared it when it armed
+        // the switch.
+        if( juce::MessageManager::existsAndIsCurrentThread() )
+            prepareToPlay();
 
         const juce::ScopedLock sl( lock );
         isPlaying = true;
@@ -257,7 +272,8 @@ namespace mt
 
     void MTTrack::resume()
     {
-        noteSnapshotUpdater.handleUpdateNowIfNeeded();
+        if( juce::MessageManager::existsAndIsCurrentThread() )
+            prepareToPlay();
         isPlaying = true;
     }
 
@@ -301,35 +317,25 @@ namespace mt
         updateTrackPlayhead( tickPos );
     }
 
+    // The caller holds lock. Also on the tick thread (seek() when it
+    // switches sequences), so it looks at the snapshot, not the note list.
     void MTTrack::recalculateIndex( unsigned int BeginTick )
     {
-        noteIdx = 0;
-
-        // If zero
-        if( 0 == BeginTick )
-            return;
-
-        // Loop to find correct index...
-        const auto& vt = getNoteListVT();
-        while( noteIdx < vt.getNumChildren() )
-        {
-            auto     tmp = vt.getChild( noteIdx );
-            MTNoteRO note( tmp );
-            if( note.start() < (int)BeginTick )
-                noteIdx++;
-            else
-                break;
-        }
+        const auto& notes = *noteSnapshot;
+        auto        first = std::lower_bound( notes.begin(), notes.end(), (int)BeginTick, []( const SequencedNote& N, int Start ) { return N.start < Start; } );
+        noteIdx           = (int)( first - notes.begin() );
     }
 
     void MTTrack::onBeat()
     {
+        const juce::ScopedLock sl( lock );
         trackPlayhead.bnb.tick = 0;
         trackPlayhead.bnb.beat++;
     };
 
     void MTTrack::onBar()
     {
+        const juce::ScopedLock sl( lock );
         trackPlayhead.bnb.beat = 0;
         int last               = seq.isLooping.get() ? juce::jmin<int>( getLength(), seq.getLoopEnd() ) : juce::jmin<int>( getLength(), seq.getLength() );
         if( ++trackPlayhead.bnb.bar % last == 0 )
@@ -392,15 +398,18 @@ namespace mt
         if( pProgram->isAudio() )
             return;
 
-        unsigned int diffTick = Tick - prevTick;
+        // play(), stop() and seek() reset the counters under the lock.
+        const juce::ScopedLock sl( lock );
+
+        // Playing from the start restarts the clock at tick 0: count from there.
+        const auto previousTick = ( Tick >= prevTick ) ? prevTick : 0u;
+        const auto diffTick     = Tick - previousTick;
 
         tickCtr += diffTick;
         tickPos += diffTick;
         trackPlayhead.bnb.tick += diffTick;
         auto isEffectivelyMute   = isTrackEffectivelyMuted();
         auto trackMidiOutChannel = getMidiOutChannel();
-
-        const juce::ScopedLock sl( lock );
 
         // Check if any pending queued note off's are to be sent...
         for( auto p = queuedNotes.begin(); p != queuedNotes.end(); )
@@ -414,7 +423,7 @@ namespace mt
                 ++p;
         }
 
-        fillMidiMessages( Tick, prevTick, trackMidiOutChannel );
+        fillMidiMessages( Tick, previousTick, trackMidiOutChannel );
 
         prevTick = Tick;
 

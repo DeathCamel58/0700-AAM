@@ -68,7 +68,7 @@ namespace mt
             }
         }
 
-        trackNameChanged.connect( [&]( MTTrack* T ) { updateTrackList(); } );
+        trackNameConnection = trackNameChanged.connect( [&]( MTTrack* T ) { updateTrackList(); } );
         updateTrackList();
 
         getBPM();
@@ -80,7 +80,11 @@ namespace mt
     MTSequence::~MTSequence()
     {
         vTree.removeListener( this );
-        stop();
+
+        // Stopping stops the clock, which another sequence may be playing on
+        // (the transport stops this one, if it plays, before deleting it).
+        if( isPlaying )
+            stop();
 
         {
             const juce::ScopedLock sl( lock );
@@ -598,6 +602,9 @@ namespace mt
 
     void MTSequence::seek( int posInTicks )
     {
+        // The tick thread advances the counters under the lock (and seeks
+        // when it switches to this sequence).
+        const juce::ScopedLock sl( lock );
         seekSeqenceInternal( posInTicks );
 
         for( const auto& track : tracks )
@@ -636,12 +643,17 @@ namespace mt
         sequencePlayhead.clear();
     }
 
+    // Message thread, before the tick thread may start the sequence.
     void MTSequence::prepareToPlay()
     {
+        for( const auto& it : tracks )
+            it->prepareToPlay();
     }
 
     void MTSequence::play()
     {
+        const juce::ScopedLock sl( lock );
+
         // Setup starting tick.
         sequencePlayhead.bnb.bar = isLooping.get() ? juce::jmax<int>( 0, loopStart.get() - 1 ) : 0;
 
@@ -667,6 +679,7 @@ namespace mt
 
     void MTSequence::resume()
     {
+        const juce::ScopedLock sl( lock );
         for( const auto& it : tracks )
             it->resume();
 
@@ -678,6 +691,7 @@ namespace mt
 
     void MTSequence::pause()
     {
+        const juce::ScopedLock sl( lock );
         isPlaying = false;
         getMidiClock().stop();
 
@@ -687,6 +701,7 @@ namespace mt
 
     void MTSequence::stop()
     {
+        const juce::ScopedLock sl( lock );
         isPlaying = false;
         getMidiClock().stop();
 
@@ -711,6 +726,10 @@ namespace mt
     void MTSequence::onTick( unsigned int Ticks )
     {
         //double start = juce::Time::getMillisecondCounterHiRes();
+        // play(), stop() and seek() reset the counters and the playhead under
+        // the lock, and the message thread reads the playhead under it.
+        const juce::ScopedLock sl( lock );
+
         // Playing from the start restarts the clock at tick 0: count from there.
         const auto previous = prevTicks.exchange( Ticks );
         auto       diff     = ( Ticks >= previous ) ? ( Ticks - previous ) : Ticks;
@@ -742,11 +761,8 @@ namespace mt
         // Update playhead
         sequencePlayhead.normized = ( lengthFactor * (double)tickPos );
 
-        {
-            const juce::ScopedLock sl( lock );
-            for( const auto& it : tracks )
-                it->onTick( Ticks );
-        }
+        for( const auto& it : tracks )
+            it->onTick( Ticks );
 
         if( pos1_2 > ticksPer1_2 )
         {

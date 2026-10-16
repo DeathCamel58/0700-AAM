@@ -85,6 +85,7 @@ namespace mt
         MTIProgram* getProgram() const;
         int         setProgram( MTIProgram* p );
 
+        void prepareToPlay(); // Message thread.
         void play();
         void resume();
         void pause();
@@ -109,6 +110,11 @@ namespace mt
         inline int               getEffectiveNoteNo( int Note ) { return Note + seq.getTranspose() + getTranspose(); };
         inline int               getEffectiveNoteVelocity( int Velocity ) { return (int)( Velocity * levelScaler ); };
         inline const MTPlayhead& playhead() { return trackPlayhead; }
+        inline void              copyPlayheadTo( MTPlayhead& Playhead ) // The tick thread updates it under the lock.
+        {
+            const juce::ScopedLock sl( lock );
+            Playhead = trackPlayhead;
+        }
 
         // Solo Mute; don't call this API's directly without careful analysis.
         inline void setSoloMute( bool Mute ) { soloMuted = Mute; }
@@ -184,6 +190,9 @@ namespace mt
         std::atomic<unsigned int> lengthInTicks{ 0 };
         std::atomic<double>       lengthFactor{ 0 };
         //unsigned int              count;
+
+        // The signal outlives the track: disconnect when the track goes.
+        sigslot::scoped_connection programDeletedConnection;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTTrack )
     }; // MTTrack

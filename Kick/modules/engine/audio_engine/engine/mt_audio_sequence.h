@@ -102,7 +102,11 @@ namespace mt
         // Playhead...
         inline MTPlayhead& playhead() { return sequencePlayhead; }
         inline void        playheadGlobalToLocal() { sequencePlayhead = globalPlayhead; }
-        inline void        playheadLocalToGlobal() { globalPlayhead = sequencePlayhead; }
+        inline void        playheadLocalToGlobal()
+        {
+            const juce::ScopedLock sl( lock );
+            globalPlayhead = sequencePlayhead;
+        }
 
         // Positioning
         void setBBT( int knob, int value );
@@ -192,7 +196,7 @@ namespace mt
         juce::File            seqMidiFile;
 
         bool             initialized{ false };
-        bool             isPlaying{ false };
+        std::atomic<bool> isPlaying{ false }; // Also set by the tick thread when it switches sequences.
         int              selectedTrack{ 0 };
         juce::BigInteger soloingTracks;
 
@@ -214,6 +218,9 @@ namespace mt
 
         double lengthFactor{ 1 };
         int    lengthInTicks{ 1 };
+
+        // The signal outlives the sequence: disconnect when the sequence goes.
+        sigslot::scoped_connection trackNameConnection;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTSequence )
     };

@@ -23,8 +23,19 @@
 
 namespace mt
 {
-    static juce::NormalisableRange<float> meterNorm{ -100.f, 20.f };
+    static const juce::NormalisableRange<float>& getMeterNorm()
+    {
+        static const auto norm = [] {
+            juce::NormalisableRange<float> range{ -100.f, 20.f };
+            range.setSkewForCentre( 0.8f );
+            return range;
+        }();
+        return norm;
+    }
 
+    // reload() is called by the sequencer's tick thread and the message
+    // thread, process() and getMeter() by the message thread: the level
+    // reload() sees goes to process() through an atomic.
     class MTMidiMeter
     {
     public:
@@ -32,7 +43,6 @@ namespace mt
 
         explicit MTMidiMeter( int Steps )
         {
-            meterNorm.setSkewForCentre( 0.8f );
             meterData.resize( 2 );
             setSteps( Steps );
         };
@@ -44,6 +54,13 @@ namespace mt
 
         void process() noexcept
         {
+            auto newLevel = peak.exchange( DB::MIN );
+            if( newLevel > meter.getCurrentValue() )
+            {
+                meter.setCurrentAndTargetValue( newLevel );
+                meter.setTargetValue( DB::MIN );
+            }
+
             auto rms = meter.getNextValue();
             for( auto& it : meterData )
                 it.rms = rms;
@@ -54,13 +71,9 @@ namespace mt
             if( !isEnabled() )
                 return;
 
-            auto newLevel = meterNorm.convertFrom0to1( normLevel );
-            auto curLevel = meter.getCurrentValue();
-            if( newLevel > curLevel )
-            {
-                meter.setCurrentAndTargetValue( newLevel );
-                meter.setTargetValue( DB::MIN );
-            }
+            auto newLevel = getMeterNorm().convertFrom0to1( normLevel );
+            auto curLevel = peak.load();
+            while( newLevel > curLevel && !peak.compare_exchange_weak( curLevel, newLevel ) ) {}
         }
 
         const MTMeterData& getMeter() const { return meterData; }
@@ -68,6 +81,7 @@ namespace mt
     private:
         MTMeterData                meterData;
         juce::SmoothedValue<float> meter{ DB::MIN };
+        std::atomic<float>         peak{ DB::MIN }; // Highest level since process().
 
         std::atomic<bool> enabled{ true };
 

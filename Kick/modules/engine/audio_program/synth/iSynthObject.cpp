@@ -200,34 +200,127 @@ namespace mt
 
     void ISynthObject::postNoteEvent( const NoteEvent& Event )
     {
+        // Never wait for the audio thread here: the sequencer's tick thread
+        // posts too, and the audio thread may not be draining the queue at
+        // all (no device, or the program is not being processed).
         const std::lock_guard<std::mutex> lock( noteQueueLock );
 
-        // The audio thread empties the queue every block, so it is only full
-        // when the audio thread is not running (or a burst of over a
-        // thousand events came within one block): wait for one block.
-        if( 0 == noteFifo.getFreeSpace() )
-            AudIO::AudioThreadSync::get().waitForBlock( std::chrono::milliseconds( 50 ) );
+        if( !noteQueueFull.load() )
+        {
+            const auto scope = noteFifo.write( 1 );
+            if( scope.blockSize1 > 0 )
+            {
+                noteQueue[(size_t)scope.startIndex1] = Event;
+                return;
+            }
+            if( scope.blockSize2 > 0 )
+            {
+                noteQueue[(size_t)scope.startIndex2] = Event;
+                return;
+            }
 
-        const auto scope = noteFifo.write( 1 );
-        if( scope.blockSize1 > 0 )
-            noteQueue[(size_t)scope.startIndex1] = Event;
-        else if( scope.blockSize2 > 0 )
-            noteQueue[(size_t)scope.startIndex2] = Event;
-        else
-            DBG( "ISynthObject: note queue full, note event dropped" );
+            // Full. Until the audio thread has caught up, nothing more goes
+            // into the queue, so what is kept applies after all of it.
+            noteQueueFull.store( true );
+
+            const auto id      = getId();
+            const auto dropped = droppedNoteEvents.load();
+            juce::MessageManager::callAsync( [id, dropped]() {
+                juce::Logger::writeToLog( "ISynthObject " + juce::String( id ) + ": note queue full, dropping note ons until the audio thread drains it ("
+                                          + juce::String( dropped ) + " note events dropped before)" );
+            } );
+        }
+
+        keepNoteEvent( Event );
+    }
+
+    void ISynthObject::keepNoteEvent( const NoteEvent& Event )
+    {
+        // A note on can be lost, a note off cannot: the voice would hang.
+        const auto note = Event.note;
+        switch( Event.type )
+        {
+            case NoteEvent::Type::NoteOff:
+                if( CommonUtils::isValidMidiNote( note ) )
+                    keptNoteOffs.set( (size_t)note );
+                break;
+
+            case NoteEvent::Type::NoteReset:
+                if( CommonUtils::isValidMidiNote( note ) )
+                    keptNoteResets.set( (size_t)note );
+                break;
+
+            case NoteEvent::Type::NoteOffAll:
+                keptNoteOffAll = true;
+                break;
+
+            default:
+                droppedNoteEvents.fetch_add( 1 );
+                break;
+        }
     }
 
     void ISynthObject::processNoteEvents()
     {
         const auto ready = noteFifo.getNumReady();
-        if( 0 == ready )
-            return;
+        if( 0 < ready )
+        {
+            const auto scope = noteFifo.read( ready );
+            for( auto i = 0; i < scope.blockSize1; ++i )
+                handleNoteEvent( noteQueue[(size_t)( scope.startIndex1 + i )] );
+            for( auto i = 0; i < scope.blockSize2; ++i )
+                handleNoteEvent( noteQueue[(size_t)( scope.startIndex2 + i )] );
+        }
 
-        const auto scope = noteFifo.read( ready );
-        for( auto i = 0; i < scope.blockSize1; ++i )
-            handleNoteEvent( noteQueue[(size_t)( scope.startIndex1 + i )] );
-        for( auto i = 0; i < scope.blockSize2; ++i )
-            handleNoteEvent( noteQueue[(size_t)( scope.startIndex2 + i )] );
+        if( noteQueueFull.load() )
+            processKeptNoteEvents();
+    }
+
+    void ISynthObject::processKeptNoteEvents()
+    {
+        NoteEvent        offAll;
+        bool             isOffAll{ false };
+        std::bitset<128> offs;
+        std::bitset<128> resets;
+        {
+            // Never wait on the audio thread: if a producer is posting, try
+            // again next block.
+            const std::unique_lock<std::mutex> lock( noteQueueLock, std::try_to_lock );
+            if( !lock.owns_lock() )
+                return;
+
+            // What was queued before the queue filled up must be handled
+            // first; nothing was queued since.
+            if( 0 < noteFifo.getNumReady() )
+                return;
+
+            isOffAll = std::exchange( keptNoteOffAll, false );
+            offs     = std::exchange( keptNoteOffs, {} );
+            resets   = std::exchange( keptNoteResets, {} );
+            noteQueueFull.store( false );
+        }
+
+        if( isOffAll )
+        {
+            offAll.type = NoteEvent::Type::NoteOffAll;
+            handleNoteEvent( offAll );
+        }
+
+        NoteEvent event;
+        for( size_t note = 0; note < offs.size(); ++note )
+        {
+            event.note = (int)note;
+            if( offs[note] )
+            {
+                event.type = NoteEvent::Type::NoteOff;
+                handleNoteEvent( event );
+            }
+            if( resets[note] )
+            {
+                event.type = NoteEvent::Type::NoteReset;
+                handleNoteEvent( event );
+            }
+        }
     }
 
     void ISynthObject::handleNoteEvent( const NoteEvent& Event )
@@ -292,6 +385,10 @@ namespace mt
         // queued while nothing played it, rather than play it all at once.
         const std::lock_guard<std::mutex> lock( noteQueueLock );
         noteFifo.reset();
+        keptNoteOffAll = false;
+        keptNoteOffs.reset();
+        keptNoteResets.reset();
+        noteQueueFull.store( false );
     }
 
     void ISynthObject::teardown()
