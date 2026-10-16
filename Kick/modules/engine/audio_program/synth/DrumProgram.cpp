@@ -132,7 +132,7 @@ namespace mt
                     }
                 }; // switch
 
-                if( auto soundSlice = pNote.layers[(size_t)layerToPlay].slice.get() )
+                if( const auto& soundSlice = pNote.layers[(size_t)layerToPlay].slice )
                 {
                     // Start playback.
                     postNoteOn( Note, Velocity, notePoly, soundSlice );
