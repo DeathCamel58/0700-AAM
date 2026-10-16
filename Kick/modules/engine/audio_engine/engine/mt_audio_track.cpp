@@ -66,7 +66,7 @@ namespace mt
         */
 
         // Setup handler for program being deleted
-        programBeingDeleted.connect( [this]( MTIProgram* MTIProg ) {
+        programDeletedConnection = programBeingDeleted.connect( [this]( MTIProgram* MTIProg ) {
             if( program.load() == MTIProg )
             {
                 setProgram( nullptr );

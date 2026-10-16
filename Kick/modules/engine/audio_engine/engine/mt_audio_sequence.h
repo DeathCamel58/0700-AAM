@@ -219,6 +219,9 @@ namespace mt
         double lengthFactor{ 1 };
         int    lengthInTicks{ 1 };
 
+        // The signal outlives the sequence: disconnect when the sequence goes.
+        sigslot::scoped_connection trackNameConnection;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTSequence )
     };
 

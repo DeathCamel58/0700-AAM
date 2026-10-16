@@ -68,7 +68,7 @@ namespace mt
             }
         }
 
-        trackNameChanged.connect( [&]( MTTrack* T ) { updateTrackList(); } );
+        trackNameConnection = trackNameChanged.connect( [&]( MTTrack* T ) { updateTrackList(); } );
         updateTrackList();
 
         getBPM();

@@ -191,6 +191,9 @@ namespace mt
         std::atomic<double>       lengthFactor{ 0 };
         //unsigned int              count;
 
+        // The signal outlives the track: disconnect when the track goes.
+        sigslot::scoped_connection programDeletedConnection;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTTrack )
     }; // MTTrack
 
