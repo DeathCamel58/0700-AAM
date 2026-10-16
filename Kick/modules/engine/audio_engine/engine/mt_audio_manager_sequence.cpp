@@ -229,6 +229,8 @@ namespace mt
                 manager.stop();
                 pSelectedSequence = nullptr;
             }
+            // The tick thread must be done with it before it goes.
+            manager.detachSequence( ptr.get() );
 
             vTree.removeChild( ptr->getVT(), undoManager );
             sequences.erase( sequences.begin() + Index );
