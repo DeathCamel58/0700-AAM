@@ -39,6 +39,7 @@
     #include <net/if.h>
     #include <unistd.h>
 #endif
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -47,6 +48,7 @@
 #include <functional>
 #include "kick_Process.h"
 #include "kick_NetInfo.h"
+#include "kick_SysFile.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
 #define BAUDRATE   B115200

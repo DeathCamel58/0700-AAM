@@ -131,6 +131,11 @@ add_compile_definitions(KICK_MEDIA_DIR="${KICK_MEDIA_DIR}")
 set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
 add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
 
+## The backlight (kick_Hwpref.cpp): its name in /sys/class/backlight or its
+## sysfs directory; empty: the first backlight there is.
+set(KICK_BACKLIGHT_DEVICE "" CACHE STRING "Backlight name or sysfs directory; empty: the first one")
+add_compile_definitions(KICK_BACKLIGHT_DEVICE="${KICK_BACKLIGHT_DEVICE}")
+
 ## The front-panel MCU's serial port (input_events.cpp) and the CV DAC's I2C
 ## bus (kick_I2c.cpp).
 set(KICK_MCU_SERIAL_DEVICE "/dev/ttymxc0" CACHE FILEPATH "Front-panel MCU serial port")

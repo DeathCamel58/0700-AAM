@@ -28,6 +28,13 @@
     #define KICK_POWER_KEY_DEVICE "/dev/input/event2"
 #endif
 
+// The backlight, by its name in /sys/class/backlight or its sysfs
+// directory; the build system can set it (see CMakeLists.txt). Empty: the
+// first backlight there is.
+#ifndef KICK_BACKLIGHT_DEVICE
+    #define KICK_BACKLIGHT_DEVICE ""
+#endif
+
 // A systemd unit that performs the factory reset, or empty if the
 // application only removes its own state; the build system can set it.
 #ifndef KICK_FACTORY_RESET_UNIT
@@ -750,26 +757,55 @@ namespace mt
         return 0;
     }
 
+    // The backlight's sysfs directory, or an empty string if there is none.
+    static std::string findBacklight()
+    {
+        const std::string configured = KICK_BACKLIGHT_DEVICE;
+        const std::string classDir   = "/sys/class/backlight";
+
+        if( !configured.empty() )
+            return configured[0] == '/' ? configured : classDir + "/" + configured;
+
+        std::vector<std::string> names;
+        std::error_code          ec;
+        for( const auto& entry : fs::directory_iterator( classDir, ec ) )
+            names.push_back( entry.path().filename().string() );
+
+        if( names.empty() )
+            return {};
+
+        std::sort( names.begin(), names.end() );
+        return classDir + "/" + names.front();
+    }
+
     int HwPref::setBrightness( int value )
     {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        if( value < 20 )
-        {
-            value = 20;
-        }
-        std::string setBrightness = "echo  " + std::to_string( value ) + " > /sys/devices/platform/backlight/backlight/backlight/brightness";
-        DBG( "Command = " << setBrightness );
+        // The setting is a percentage. Below 20% the screen is too dark to
+        // find the setting again, so it goes no lower.
+        value = juce::jlimit( 20, 100, value );
 
-        int returnCode = system( setBrightness.c_str() );
-        if( returnCode == 0 )
+        const std::string backlight = findBacklight();
+        if( backlight.empty() )
         {
-            DBG( "Command executed successfully." );
+            DBG( "No backlight found" );
+            return 0;
+        }
+
+        // The levels go from 0 to max_brightness, which depends on the
+        // driver (from a handful of PWM steps to thousands).
+        const long maxBrightness = std::strtol( sysfile::readLine( backlight + "/max_brightness" ).c_str(), nullptr, 10 );
+        if( maxBrightness <= 0 )
+        {
+            DBG( "Cannot read the maximum brightness of " << backlight );
+            return 0;
+        }
+
+        const long level = juce::jmax( 1L, ( value * maxBrightness + 50 ) / 100 );
+        if( sysfile::write( backlight + "/brightness", std::to_string( level ) ) )
             return 1;
-        }
-        else
-        {
-            DBG( "Command execution failed or returned non-zero: " );
-        }
+
+        DBG( "Cannot set the brightness of " << backlight << " to " << level << ": " << strerror( errno ) );
 #endif
         return 0;
     }
