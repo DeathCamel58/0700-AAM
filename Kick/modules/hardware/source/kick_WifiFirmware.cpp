@@ -111,7 +111,7 @@ namespace mt
 
     int WifiManager::findNetwork( wpa::WpaCtrl& ctrl, const std::string& ssid )
     {
-        for( const auto& network : wpa::parseNetworkList( ctrl.request( "LIST_NETWORKS" ) ) )
+        for( const auto& network : wpa::listNetworks( ctrl ) )
             if( network.ssid == ssid )
                 return network.id;
 
@@ -159,7 +159,7 @@ namespace mt
 
         // One entry per network name, for the access point heard best.
         std::map<juce::String, wpa::ScanResult> found;
-        for( const auto& result : wpa::parseScanResults( ctrl.request( "SCAN_RESULTS" ) ) )
+        for( const auto& result : wpa::readScanResults( ctrl ) )
         {
             const auto name = ssidToDisplayName( result.ssid );
             auto       it   = found.find( name );
@@ -291,7 +291,9 @@ namespace mt
         if( !known && !seen )
             ok = ok && setNetwork( ctrl, id, "scan_ssid", "1" );
 
-        ok = ok && setNetwork( ctrl, id, "priority", std::to_string( priority ) );
+        // The other networks stay enabled, to be joined when this one is
+        // out of reach; this one comes first.
+        ok = ok && setNetwork( ctrl, id, "priority", std::to_string( std::max( priority, wpa::highestPriority( ctrl, id ) + 1 ) ) );
 
         if( !ok )
         {
@@ -301,7 +303,7 @@ namespace mt
             return false;
         }
 
-        ok = ctrl.command( "SELECT_NETWORK " + std::to_string( id ) );
+        ok = wpa::selectNetwork( ctrl, id );
         return ctrl.command( "SAVE_CONFIG" ) && ok;
     }
 

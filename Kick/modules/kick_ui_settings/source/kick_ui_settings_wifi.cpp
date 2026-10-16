@@ -140,14 +140,6 @@ namespace kick_ui
 #endif
     }
 
-    void SettingsWifi::initializeInterfaceState()
-    {
-        if( settings.wifi.enabled() )
-        {
-            mt::WifiManager::getWifiInterface()->connectToWiFi( settings.wifi.ssid(), {} );
-        }
-    }
-
     void SettingsWifi::setupHeader( kick_ui::KickModeHeader& Hdr ) {}
 
     void SettingsWifi::handleCommand( CPktMgr::HWMsg_t& ) {}

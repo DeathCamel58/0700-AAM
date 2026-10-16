@@ -27,6 +27,13 @@
 // covers everything before it. Bytes that are not part of a valid frame,
 // such as noise on the line or a frame cut short, are skipped by looking
 // for the next 'M' 'T'.
+//
+// Out of step with the stream (the port opened in the middle of a frame, or
+// a byte lost), an 'M' 'T' in a frame's data can pass for a header whose
+// size byte asks for up to 255 more bytes, more than many button presses
+// send. Waiting for them would hold up every frame behind it, so a header
+// still waiting for its bytes is given up once a complete, valid frame
+// follows it.
 
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +56,38 @@ namespace Controls
         constexpr uint8_t     maxType      = 7; // CPktMgr::EN_PKT_TYPE_SLIDER
         constexpr uint8_t     maxDirection = 1; // CPktMgr::EN_PKT_RESPONSE
 
+        /** The length of the frame (with its CRC) that starts at pos: 0 if
+            no frame header starts there, or if the frame is all there but
+            its CRC is wrong; -1 if it may be one whose bytes have not all
+            arrived yet. */
+        template <typename Crc>
+        long frameLength( const std::vector<uint8_t>& received, std::size_t pos, Crc& crc )
+        {
+            const std::size_t end = received.size();
+            if( received[pos] != 'M' )
+                return 0;
+            if( end - pos < headerSize )
+                return pos + 1 == end || received[pos + 1] == 'T' ? -1 : 0;
+            if( received[pos + 1] != 'T' )
+                return 0;
+
+            const uint8_t type      = received[pos + 2];
+            const uint8_t direction = received[pos + 3];
+            const uint8_t size      = received[pos + 5];
+            if( type > maxType || direction > maxDirection || size == 0 )
+                return 0;
+
+            const std::size_t length = headerSize + size; // with the data and the CRC
+            if( end - pos < length )
+                return -1;
+
+            std::vector<char> covered( received.begin() + (std::ptrdiff_t)pos, received.begin() + (std::ptrdiff_t)( pos + length - 1 ) );
+            if( (uint8_t)crc( covered ) != received[pos + length - 1] )
+                return 0; // a corrupted frame, or 'M' 'T' inside another one
+
+            return (long)length;
+        }
+
         /** Takes the complete frames out of the received bytes, which keep
             whatever may still be the start of a frame. crc is called with a
             frame's bytes up to its CRC, as a std::vector<char>&, and returns
@@ -62,41 +101,35 @@ namespace Controls
 
             while( pos < end )
             {
-                // The next 'M' 'T', or an 'M' at the very end, which may be
-                // the start of one.
-                while( pos < end && !( received[pos] == 'M' && ( pos + 1 == end || received[pos + 1] == 'T' ) ) )
-                    ++pos;
-                if( end - pos < headerSize )
-                    break;
-
-                const uint8_t type      = received[pos + 2];
-                const uint8_t direction = received[pos + 3];
-                const uint8_t size      = received[pos + 5];
-                if( type > maxType || direction > maxDirection || size == 0 )
+                long length = frameLength( received, pos, crc );
+                if( length < 0 )
                 {
-                    ++pos; // not a frame header
-                    continue;
+                    // An incomplete frame, or a false header. A valid frame
+                    // after it means it was a false one (or a frame cut
+                    // short): carry on from there. Otherwise wait for more.
+                    std::size_t next = pos + 1;
+                    while( next < end && frameLength( received, next, crc ) <= 0 )
+                        ++next;
+                    if( next == end )
+                        break;
+
+                    pos    = next;
+                    length = frameLength( received, pos, crc );
                 }
-
-                const std::size_t length = headerSize + size; // with the data and the CRC
-                if( end - pos < length )
-                    break;
-
-                std::vector<char> covered( received.begin() + (std::ptrdiff_t)pos, received.begin() + (std::ptrdiff_t)( pos + length - 1 ) );
-                if( (uint8_t)crc( covered ) != received[pos + length - 1] )
+                if( length == 0 )
                 {
-                    ++pos; // a corrupted frame, or 'M' 'T' inside another one
+                    ++pos; // not a frame
                     continue;
                 }
 
                 McuFrame frame;
-                frame.type      = type;
-                frame.direction = direction;
+                frame.type      = received[pos + 2];
+                frame.direction = received[pos + 3];
                 frame.command   = received[pos + 4];
-                frame.data.assign( received.begin() + (std::ptrdiff_t)( pos + headerSize ), received.begin() + (std::ptrdiff_t)( pos + length - 1 ) );
+                frame.data.assign( received.begin() + (std::ptrdiff_t)( pos + headerSize ), received.begin() + (std::ptrdiff_t)( pos + (std::size_t)length - 1 ) );
                 frames.push_back( std::move( frame ) );
 
-                pos += length;
+                pos += (std::size_t)length;
             }
 
             received.erase( received.begin(), received.begin() + (std::ptrdiff_t)pos );

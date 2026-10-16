@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <string>
 
 namespace mt
@@ -52,8 +54,12 @@ namespace mt
         CV() {}
         ~CV() {}
 
-        static const int       MaxCVPorts{ 8 };
-        std::map<uint8_t, int> channelNoteMap; // Each port's (1 to MaxCVPorts) start note
+        static const int MaxCVPorts{ 8 };
+
+        // Each port's (1 to MaxCVPorts) start note. The settings page sets
+        // them while the sequencer reads them to play notes, so each is an
+        // atomic, which neither side waits for.
+        std::array<std::atomic<int>, MaxCVPorts + 1> channelNoteMap{};
 
         bool           setVoltage( uint8_t channel, uint8_t Note );
         bool           setCentVoltage( uint8_t channel, uint16_t centValue );

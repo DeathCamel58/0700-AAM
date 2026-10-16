@@ -45,7 +45,9 @@ namespace mt
         /** Connects to a network, adding it to wpa_supplicant's configuration
             if it is not there, and saves the configuration. An empty
             password keeps a known network's passphrase, and makes a new
-            network an open one. */
+            network an open one. The other networks stay enabled, and this
+            one is given at least priority, and a higher priority than
+            theirs, so that it is the one joined when it is in reach. */
         bool connectToWiFi( const juce::String& ssid, const juce::String& password, int priority = 5 );
         bool disconnectWiFi();
 
