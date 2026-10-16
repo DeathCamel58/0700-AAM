@@ -124,7 +124,13 @@
             #endif
         #endif // AUDIO_DAW_CORE
 
-        #if defined( AUDIO_JUCE_EXTENSIONS ) && ( AUDIO_JUCE_EXTENSIONS > 0 )
+        #if defined( AUDIO_JUCE_EXTENSIONS ) && ( AUDIO_JUCE_EXTENSIONS > 0 ) && defined( JUCE_VERSION )
+            // Recording objects built on JUCE (AudIO_juce includes JUCE first).
+            #if defined( AUDIO_DAW_CORE ) && ( AUDIO_DAW_CORE > 0 )
+                #include "Juce/Recorder.h"
+                #include "Juce/SampleRecorder.h"
+                #include "Juce/Looper.h"
+            #endif
         #endif // AUDIO_JUCE_EXTENSIONS
 
     #endif

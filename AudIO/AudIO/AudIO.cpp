@@ -73,4 +73,12 @@
         #include "Objects/SoundFontSynthesis/SoundFonts.c"
     #endif
 
+    #if defined( AUDIO_JUCE_EXTENSIONS ) && ( AUDIO_JUCE_EXTENSIONS > 0 ) && defined( JUCE_VERSION )
+        #if defined( AUDIO_DAW_CORE ) && ( AUDIO_DAW_CORE > 0 )
+            #include "Juce/Recorder.cpp"
+            #include "Juce/SampleRecorder.cpp"
+            #include "Juce/Looper.cpp"
+        #endif
+    #endif // AUDIO_JUCE_EXTENSIONS
+
 #endif // #if !defined( AUDIO_ONLY_CORE )
