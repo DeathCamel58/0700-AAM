@@ -69,6 +69,9 @@ namespace ipc
         const int                                    hostIdForConnectionId( const int connectionId );
         void                                         getConnectedHostIds( std::vector<int>& hosts );
         void                                         restartHost( const int hostId );
+        // Called on the message thread after a child process has started,
+        // and after one has exited (before restart on kill starts it again).
+        void setChildProcessListener( std::function<void( int processIdentifier, bool running )> listener );
 
     protected:
         // reimplement the methods to handle process and message life cycles.
@@ -94,6 +97,8 @@ namespace ipc
         void connected( int connectionId, const juce::String& connName ) { handleConnect( connectionId, connName ); };
         void processMessage( int connectionId, std::shared_ptr<ipc::MTIPCJson> message );
         void onRestartAttemptCompleted( int processId, bool status );
+        void onChildProcessStarted( int processIdentifier, const juce::String& processName );
+        void onChildProcessStopped( int processIdentifier, int exitCode, const juce::String& processName );
         // Posts the function to the message thread; it does not run if the
         // subsystem has stopped by then.
         void callAsync( std::function<void()> function );
