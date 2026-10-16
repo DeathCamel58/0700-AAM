@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <unordered_map>
 #include <vector>
 
@@ -65,13 +66,32 @@ namespace AudIO
 
     private:
         bool findFreeIndex( uint32_t& Index );
+        void publishMix();
+
+        // What the audio thread mixes: the bus's input channel pairs and
+        // their gains. Published whole whenever an input is added or removed,
+        // so the audio thread never reads the bus buffer's channel list,
+        // which grows as inputs are added.
+        struct MixInput
+        {
+            ChBufferPtr<float>  left;
+            ChBufferPtr<float>  right;
+            std::atomic<float>* gain{ nullptr };
+        };
+
+        struct MixTable
+        {
+            std::vector<MixInput> inputs;
+            bool                  connected{ false };
+        };
 
         Chain                _chain{ true };
         objectMeta           _chainMeta{ _chain };
         objectMeta*          _busmeta{ nullptr };
         AudIO::Buffer<float> _mixOutBuffer{ 0, false, 2, true };
 
-        std::vector<float>                   _gains;
+        std::deque<std::atomic<float>>       _gains; // One per channel pair; a deque, so they never move.
         std::unordered_map<objectMeta*, int> _busInputMap;
+        RtPublished<MixTable>                _mix;
     };
 } // Namespace AudIO

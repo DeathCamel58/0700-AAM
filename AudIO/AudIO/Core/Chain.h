@@ -5,6 +5,7 @@
 
 #include "IChain.h"
 #include "ObjectMeta.h"
+#include "RtSync.h"
 #include "insertMeta.h"
 #include "../Objects/LevelMeter.h"
 
@@ -49,6 +50,7 @@ namespace AudIO
         bool existsInObjects( uint32_t id );
         bool existsInInserts( uint32_t id );
         bool removeInsertByIterator( std::list<insertMeta>::iterator it );
+        void publishInserts();
 
     private:
         bool m_bypass{ false };
@@ -66,7 +68,15 @@ namespace AudIO
         std::atomic<bool> m_downmixStereoToMono{ false };
         std::atomic<bool> m_downmixToLeft{ true };
 
+        // The inserts the audio thread runs, in order; published whole
+        // whenever _inserts changes.
+        struct InsertList
+        {
+            std::vector<insertMeta*> inserts;
+        };
+
         std::list<insertMeta>                                 _inserts;
+        RtPublished<InsertList>                               _insertList;
         std::unordered_map<uint32_t, std::unique_ptr<Object>> _objects;
         objectMeta*                                           _chainmeta = nullptr;
 
