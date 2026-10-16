@@ -152,7 +152,7 @@ namespace mt
         void                                             setDate( int Day, int Month, int year );
         void                                             setTime( int hour, int minute );
         DeviceInfo                                       getDeviceInfo();
-        bool                                             isStorageconnected( std::string id );
+        bool                                             isStorageconnected( std::string id ); // id: a mount point
         bool                                             isImgFile( std::string filepath );
         std::string                                      isImageFound( juce::String Path, juce::String format );
         bool                                             getFwVersion( std::string& path, linuxFwInfo& linfo, mcuFwInfo& minfo );

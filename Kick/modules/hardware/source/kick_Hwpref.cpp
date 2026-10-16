@@ -858,27 +858,13 @@ namespace mt
         return info;
     }
 
-    bool HwPref::isStorageconnected( std::string id ) // flash-> usb , sdcard->SDCARD
+    bool HwPref::isStorageconnected( std::string id ) // the mount point of a removable disk
     {
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::fstream versionFile;
-        versionFile.open( "/proc/mounts", std::ios::in );
-
-        if( versionFile.is_open() )
-        {
-            std::string str;
-            while( getline( versionFile, str ) )
-            {
-                if( str.find( id ) != std::string::npos )
-                {
-                    DBG( "USB Storage is connected" );
-                    return true;
-                }
-            }
-        }
-#endif
-        DBG( " " << id << " Storage is not connected" );
-        return false;
+        // The mount point exactly: a substring of /proc/mounts would also
+        // match other mount points, devices and mount options.
+        const bool connected = !id.empty() && isMountPoint( id );
+        DBG( " " << id << ( connected ? " Storage is connected" : " Storage is not connected" ) );
+        return connected;
     }
 
     void HwPref::setDate( int day, int month, int year )
