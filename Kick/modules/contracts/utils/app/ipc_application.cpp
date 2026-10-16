@@ -125,9 +125,6 @@ namespace contracts
                                                       handlers,
                                                       contracts::ConnectionIdStore::PARENT_CONNECTION_ID ) );
 
-            if( logToServer )
-                logger->setDispatcher( contracts::ConnectionIdStore::LOGGER_CONNECTION_ID, subsystem->dispatcher() );
-
             if(createSystemInterface)
                 systemIPCIface.reset( new contracts::SystemIPCIterface( subsystem->dispatcher(), contracts::ConnectionIdStore::MAIN_CONNECTION_ID ) );
 

@@ -29,11 +29,71 @@
 #include "logger_helpers.h"
 #include "logger.h"
 
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <sys/stat.h>
+#include <unistd.h>
+
 namespace contracts
 {
-    // this class creates a log file at startup. Call createLogFile and createMetricsFile to create the files.
-    // This will not monitor the file for deletion which needs to be implemented.
+    namespace
+    {
+        // sd-daemon(3) priority prefixes, which the journal reads from the
+        // start of each line on a service's stderr.
+        const char* journalPriority( const int level )
+        {
+            switch( level )
+            {
+                case contracts::LogLevel::LOG_LEVEL_ERROR: return "<3>";
+                case contracts::LogLevel::LOG_LEVEL_WARN:  return "<4>";
+                case contracts::LogLevel::LOG_LEVEL_DEBUG: return "<7>";
+                default:                                   return "<6>";
+            }
+        }
 
+        // True if stderr is the journal stream the service manager set up
+        // ($JOURNAL_STREAM names its device and inode, see systemd.exec(5)).
+        // Children inherit both the variable and the stream.
+        bool stderrIsJournal()
+        {
+            const char* stream = std::getenv( "JOURNAL_STREAM" );
+            struct stat st;
+            if( stream == nullptr || ::fstat( STDERR_FILENO, &st ) != 0 )
+                return false;
+
+            unsigned long long device = 0, inode = 0;
+            return std::sscanf( stream, "%llu:%llu", &device, &inode ) == 2
+                   && device == static_cast<unsigned long long>( st.st_dev )
+                   && inode == static_cast<unsigned long long>( st.st_ino );
+        }
+
+        // The first directory in $LOGS_DIRECTORY (systemd's LogsDirectory=),
+        // if it is set and writable.
+        juce::File logsDirectory()
+        {
+            const juce::String directories( std::getenv( "LOGS_DIRECTORY" ) );
+            if( directories.isEmpty() )
+                return {};
+
+            const juce::File directory( directories.upToFirstOccurrenceOf( ":", false, false ) );
+            return directory.isDirectory() && directory.hasWriteAccess() ? directory : juce::File();
+        }
+    }
+
+    /*
+     * Writes every log line to stderr. Under systemd that is the journal,
+     * which adds the time and keeps the priority given by an sd-daemon
+     * prefix; elsewhere each line carries the time and level in text. Child
+     * processes inherit KickMain's stderr, so they log the same way rather
+     * than through the IPC.
+     *
+     * Only when $LOGS_DIRECTORY names a writable directory are the lines
+     * also appended to a file there (and metrics to a CSV file), without
+     * syncing each line to storage. The previous default, a "logs" directory
+     * next to the executable, is not writable on the device, and every line
+     * was opened, appended, synced and closed.
+     */
     class LoggerImpl
     {
     public:
@@ -43,161 +103,134 @@ namespace contracts
                     bool                                         logToServer  = false,
                     int                                          connectionId = -1,
                     std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher   = nullptr )
-            : connectionId( connectionId ), dispatcherWkptr( dispatcher ), processName( processName ), logFileName( logFileBaseName ), metricsFileName( metricsFileBaseName )
+            : processName( processName ), logFileName( logFileBaseName ), metricsFileName( metricsFileBaseName ), toJournal( stderrIsJournal() )
         {
-            logMethod = logToServer ? std::bind( &LoggerImpl ::logMessagePrivate, this, std::placeholders::_1, std::placeholders::_2,
-                                                 std::placeholders::_3, std::placeholders::_4 ) :
-                                      std::bind( &LoggerImpl ::logMessageToFile, this, std::placeholders::_1, std::placeholders::_2,
-                                                 std::placeholders::_3, std::placeholders::_4 );
-
-            metricsMethod = logToServer ? std::bind( &LoggerImpl ::logMetricsPrivate, this, std::placeholders::_1, std::placeholders::_2,
-                                                     std::placeholders::_3, std::placeholders::_4 ) :
-                                          std::bind( &LoggerImpl ::logMetricsToFile, this, std::placeholders::_1, std::placeholders::_2,
-                                                     std::placeholders::_3, std::placeholders::_4 );
-
+            juce::ignoreUnused( logToServer, connectionId, dispatcher );
             createMetricsFile();
             createLogFile();
         }
 
         ~LoggerImpl()
         {
-            pLogFile.reset();
-            pMetricsFile.reset();
+            closeFile( pLogFile );
+            closeFile( pMetricsFile );
         }
 
     public:
         void createLogFile()
         {
-            juce::String filePath =
-                juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory().getFullPathName()
-                + juce::File::getSeparatorString() + contracts::LOGS_DIR + juce::File::getSeparatorString() + logFileName + "_" + juce::Time::getCurrentTime().formatted( LOG_FILE_NAME_TIME_FORMAT ) + LOGGER_FILE_EXTN;
-
-            {
-                const juce::ScopedLock lk( logCS );
-                pLogFile.reset( new juce::File( filePath ) );
-                if( !pLogFile->exists() )
-                    pLogFile->create();
-            }
+            const juce::ScopedLock lk( logCS );
+            openFile( pLogFile, logFileName, LOGGER_FILE_EXTN );
         }
 
         void createMetricsFile()
         {
-            juce::String filePath =
-                juce::File::getSpecialLocation( juce::File::currentExecutableFile ).getParentDirectory().getFullPathName()
-                + juce::File::getSeparatorString() + contracts::METRICS_DIR + juce::File::getSeparatorString() + metricsFileName + "_" + juce::Time::getCurrentTime().formatted( LOG_FILE_NAME_TIME_FORMAT ) + METRICS_FILE_EXTN;
-
-            {
-                const juce::ScopedLock lk( metricCS );
-                pMetricsFile.reset( new juce::File( filePath ) );
-                if( !pMetricsFile->exists() )
-                    pMetricsFile->create();
-            }
+            const juce::ScopedLock lk( metricCS );
+            openFile( pMetricsFile, metricsFileName, METRICS_FILE_EXTN );
         }
 
         const long getLogFileSize()
         {
-            return pLogFile->getSize();
+            const juce::ScopedLock lk( logCS );
+            return pLogFile ? std::ftell( pLogFile ) : 0;
         }
 
         const long getMetricsFileSize()
         {
-            return pMetricsFile->getSize();
-        }
-
-        void setDispatcher( const int connId, std::shared_ptr<ipc::MTIPCMessageDispatcher> pDisptacter )
-        {
-            this->connectionId    = connId;
-            this->dispatcherWkptr = pDisptacter;
+            const juce::ScopedLock lk( metricCS );
+            return pMetricsFile ? std::ftell( pMetricsFile ) : 0;
         }
 
         void logMessage( const juce::String& message, int level, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
         {
-            logMethod( message, level, origin, timeInMilliseconds );
+            const juce::String name = origin.isEmpty() ? processName : origin;
+            const juce::String text = message.trimEnd();
+
+            const juce::String textLine = "[" + contracts::getFormattedTime( timeInMilliseconds ) + "] [" + name + "] "
+                                          + contracts::logLevelString( level ) + " " + text + "\n";
+            juce::String stderrLine = textLine;
+            if( toJournal )
+            {
+                // The journal adds the time, and makes one entry per line:
+                // give each line the priority, and the process name, as all
+                // the processes share KickMain's stream.
+                const juce::String prefix = juce::String( journalPriority( level ) ) + name + ": ";
+                stderrLine = prefix + text.replace( "\n", "\n" + prefix ) + "\n";
+            }
+
+            const juce::ScopedLock lk( logCS );
+            writeAll( STDERR_FILENO, stderrLine );
+            if( pLogFile )
+                appendToFile( pLogFile, textLine );
         }
 
         void logMetric( const juce::String& name, const juce::var& value, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
         {
-            metricsMethod( name, value, origin, timeInMilliseconds );
-        }
-
-    private:
-        void logMessageToFile( const juce::String& message, int level, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
-        {
-            if( !pLogFile ) return;
-
-            juce::String name     = origin.isEmpty() ? processName : origin;
-            juce::String time     = contracts::getFormattedTime( timeInMilliseconds );
-            juce::String logLevel = contracts::logLevelString( level );
-            juce::String msg      = "[" + time + "] [" + name + "] " + logLevel + " " + message + juce::newLine;
-            {
-                const juce::ScopedLock lk( logCS );
-                pLogFile->appendText( msg );
-            }
-        }
-
-        void logMetricsToFile( const juce::String& metricName, const juce::var& metricValue, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
-        {
-            if( !pMetricsFile ) return;
-
-            juce::String name = origin.isEmpty() ? processName : origin;
-            juce::String time = contracts::getFormattedTime( timeInMilliseconds );
-            juce::String msg  = time + "," + name + ",METRIC," + metricName + "," + metricValue.toString() + juce::newLine;
+            const juce::String processOrName = origin.isEmpty() ? processName : origin;
             {
                 const juce::ScopedLock lk( metricCS );
-                pMetricsFile->appendText( msg );
+                if( pMetricsFile )
+                {
+                    appendToFile( pMetricsFile, contracts::getFormattedTime( timeInMilliseconds ) + "," + processOrName + ",METRIC," + name + "," + value.toString() + "\n" );
+                    return;
+                }
             }
-        }
-
-        void logMessagePrivate( const juce::String& message, const int level, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
-        {
-            std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher = dispatcherWkptr.lock();
-            if( canDispatchMessage( connectionId, dispatcher ) )
-            {
-                std::shared_ptr<ipc::MTIPCJson> msg = ipc::MTIPCMessageConstructor::constructEventMessage( contracts::LoggerMessageType::LOGGER_MESSAGE_TYPE_LOG );
-                msg->setProperty(contracts::IPC_KEY_LOG_TYPE, contracts::LogType::LOG_TYPE_LOG);
-                msg->setProperty( contracts::IPC_KEY_LOG_LEVEL, level );
-                msg->setProperty( contracts::IPC_KEY_LOG_MESSAGE, message );
-                dispatcher->publish( connectionId, msg );
-            }
-            else
-                logMessageToFile( message, level, origin, timeInMilliseconds );
-        }
-        // timeInMilliseconds is used only in case of loging to a file, if the value is 0 then the current time will be considered.
-        void logMetricsPrivate( const juce::String& name, const juce::var& value, const juce::String& origin = "", const juce::int64 timeInMilliseconds = 0 )
-        {
-            std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher = dispatcherWkptr.lock();
-            if( canDispatchMessage( connectionId, dispatcher ) )
-            {
-                std::shared_ptr<ipc::MTIPCJson> msg = ipc::MTIPCMessageConstructor::constructEventMessage( contracts::LoggerMessageType::LOGGER_MESSAGE_TYPE_LOG );
-                msg->setProperty( contracts::IPC_KEY_LOG_TYPE, contracts::LogType::LOG_TYPE_METRIC );
-                msg->setProperty( contracts::IPC_KEY_METRIC_NAME, name );
-                msg->setProperty( contracts::IPC_KEY_METRIC_VALUE, value );
-                dispatcher->publish( connectionId, msg );
-            }
-            else
-                logMetricsToFile( name, value, origin, timeInMilliseconds );
-        }
-
-        inline bool canDispatchMessage( const int id, std::shared_ptr<ipc::MTIPCMessageDispatcher> dispatcher )
-        {
-            return ( dispatcher && dispatcher->canDispatch( id ) );
+            logMessage( "metric " + name + " = " + value.toString(), contracts::LogLevel::LOG_LEVEL_DEBUG, origin, timeInMilliseconds );
         }
 
     private:
-        int                                        connectionId;
-        std::weak_ptr<ipc::MTIPCMessageDispatcher> dispatcherWkptr;
+        void openFile( std::FILE*& file, const juce::String& baseName, const char* extension )
+        {
+            closeFile( file );
+            const juce::File directory = logsDirectory();
+            if( directory == juce::File() )
+                return;
 
-        std::unique_ptr<juce::File> pLogFile{ nullptr };
-        std::unique_ptr<juce::File> pMetricsFile{ nullptr };
+            const juce::File path = directory.getChildFile( baseName + "_" + juce::Time::getCurrentTime().formatted( LOG_FILE_NAME_TIME_FORMAT ) + extension );
+            file = std::fopen( path.getFullPathName().toRawUTF8(), "ae" );
+        }
+
+        static void closeFile( std::FILE*& file )
+        {
+            if( file )
+                std::fclose( file );
+            file = nullptr;
+        }
+
+        static void appendToFile( std::FILE* file, const juce::String& line )
+        {
+            std::fputs( line.toRawUTF8(), file );
+            std::fflush( file );
+        }
+
+        // One write() per line, so lines from several threads and
+        // processes on the same stream do not interleave.
+        static void writeAll( int fd, const juce::String& line )
+        {
+            const char* data = line.toRawUTF8();
+            size_t      left = line.getNumBytesAsUTF8();
+            while( left > 0 )
+            {
+                const ssize_t written = ::write( fd, data, left );
+                if( written < 0 && errno == EINTR )
+                    continue;
+                if( written <= 0 )
+                    return;
+                data += written;
+                left -= static_cast<size_t>( written );
+            }
+        }
+
+    private:
+        std::FILE* pLogFile{ nullptr };
+        std::FILE* pMetricsFile{ nullptr };
 
         juce::String          processName;
         juce::String          logFileName;
         juce::String          metricsFileName;
+        const bool            toJournal;
         juce::CriticalSection logCS;
         juce::CriticalSection metricCS;
-
-        std::function<void( const juce::String&, const juce::var&, const juce::String&, const juce::int64 )> metricsMethod;
-        std::function<void( const juce::String&, const int level, const juce::String&, const juce::int64 )>  logMethod;
     };
 
     contracts::LoggerImpl* contracts::Logger::pImpl = nullptr;
@@ -265,9 +298,11 @@ namespace contracts
         }
     }
 
+    // Logs are no longer forwarded to KickMain: every process writes them to
+    // the stderr it inherited from KickMain.
     void Logger::setDispatcher( const int connId, std::shared_ptr<ipc::MTIPCMessageDispatcher> pDisptacter )
     {
-        pImpl->setDispatcher( connId, pDisptacter );
+        juce::ignoreUnused( connId, pDisptacter );
     }
 
     void Logger::logMessage( const juce::String& message )
