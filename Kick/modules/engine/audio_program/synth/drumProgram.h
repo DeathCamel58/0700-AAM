@@ -35,7 +35,7 @@ namespace mt
         void noteOn( int Note, int Velocity ) override;
 
     private:
-        void noteOn( const MTIProgram::PlayableNotes& Notes, int Note, int Velocity );
+        void noteOn( const MTIProgram::PlayableNotes& Notes, int Note, int Velocity, std::bitset<MIDI::NUMERIC_MAX>& Started );
 
         MTDrumProgram*                            pDrum{ nullptr };
         std::vector<std::unique_ptr<ISynthVoice>> voices;

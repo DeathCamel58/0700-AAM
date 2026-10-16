@@ -66,12 +66,15 @@ namespace mt
         // Read the pads from the program's published copy: this runs on the
         // sequencer's tick thread too, while the UI edits the pads.
         const MTIProgram::PlayableNotesReader notes( *pDrum );
-        noteOn( *notes, Note, Velocity );
+        std::bitset<MIDI::NUMERIC_MAX>        started;
+        noteOn( *notes, Note, Velocity, started );
     }
 
-    void DrumProgram::noteOn( const MTIProgram::PlayableNotes& Notes, int Note, int Velocity )
+    void DrumProgram::noteOn( const MTIProgram::PlayableNotes& Notes, int Note, int Velocity, std::bitset<MIDI::NUMERIC_MAX>& Started )
     {
-        if( !CommonUtils::isValidMidiNote( Note ) ) return;
+        // Pads can trigger each other in a loop: play each one once.
+        if( !CommonUtils::isValidMidiNote( Note ) || Started[(size_t)Note] ) return;
+        Started.set( (size_t)Note );
 
         const auto& pNote = Notes[Note];
         if( pNote.assigned )
@@ -138,7 +141,7 @@ namespace mt
 
             // Trigger playback of clips simultaneously.
             for( auto it : pNote.simultaneousPlay )
-                noteOn( Notes, it, Velocity );
+                noteOn( Notes, it, Velocity, Started );
         }
     }
 };
