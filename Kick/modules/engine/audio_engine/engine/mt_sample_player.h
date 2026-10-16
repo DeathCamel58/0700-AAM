@@ -1,9 +1,9 @@
 #pragma once
 namespace mt{
-    // Plays a sample file for the sample editor. The file is decoded into
-    // memory when it is set, so the audio thread never reads the disk, and
-    // played at the device's rate. Position and stop notifications reach
-    // the listeners from a timer on the message thread.
+    // Plays a sample file for the sample editor. A background thread reads
+    // the file ahead of the playback, so the audio thread never reads the
+    // disk, and it is played at the device's rate. Position and stop
+    // notifications reach the listeners from a timer on the message thread.
     class MTSamplePlayer : public juce::PositionableAudioSource,
         public juce::ChangeBroadcaster,
         public juce::ChangeListener,
@@ -70,7 +70,6 @@ namespace mt{
     private:
         void changeListenerCallback( ChangeBroadcaster* source );
         void timerCallback() override;
-        void readSamples( juce::AudioBuffer<float>& Dest, int DestStart, int NumSamples, juce::int64 Start ) const;
 
     private:
         juce::AudioSourcePlayer player;
@@ -84,10 +83,12 @@ namespace mt{
         juce::int64 regionStart = 0;
         juce::int64 regionEnd = 0;
         bool playingBackwords = false;
-        int samplesPerBlock = 0;
+
+        class ReadAhead;
+        juce::TimeSliceThread readThread{ "Sample editor read-ahead" };
+        std::unique_ptr<ReadAhead> readAhead;
 
         juce::File sourceFile;
-        juce::AudioBuffer<float> samples;
         double sourceSampleRate = 0.0;
         MTSampleRegion region;
         MTSamplePlayMode playMode = MTSamplePlayMode::samplePlayFromStart;

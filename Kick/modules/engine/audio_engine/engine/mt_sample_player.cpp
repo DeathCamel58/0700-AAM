@@ -5,11 +5,230 @@
 
 namespace mt
 {
+    // Moves pos to where a loop goes on from when it reaches an end of
+    // [first, last), or turns a bidirectional loop around. False when the
+    // playback does not loop.
+    static bool wrapPlayback( MTSamplePlayMode mode, bool looping, juce::int64 first, juce::int64 last, juce::int64& pos, bool& backwards )
+    {
+        if( !looping )
+            return false;
+
+        if( mode == MTSamplePlayMode::samplePlayModeLoopForward )
+            pos = first;
+        else if( mode == MTSamplePlayMode::samplePlayModeLoopBackward )
+            pos = last;
+        else
+            backwards = !backwards;
+
+        return true;
+    }
+
+    // Reads the file on a background thread, in chunks, where the player
+    // will play next: in the direction it plays and across a loop's wrap.
+    // The audio thread only copies chunks that have been read, so it never
+    // waits for the disk, and the memory used does not grow with the
+    // file's length.
+    class MTSamplePlayer::ReadAhead : public juce::TimeSliceClient
+    {
+    public:
+        static constexpr int numChunks = 12;
+        static constexpr int chunkSize = 32768;
+
+        // About 3.4 s at 48 kHz, read before it is played.
+        static constexpr juce::int64 readAheadSamples = 5 * (juce::int64)chunkSize;
+
+        explicit ReadAhead( std::unique_ptr<juce::AudioFormatReader> r )
+            : reader( std::move( r ) )
+            , numChannels( (int)reader->numChannels )
+            , length( reader->lengthInSamples )
+        {
+            for( auto& c : chunks )
+                c.samples.setSize( numChannels, chunkSize );
+            setPlan( MTSamplePlayMode::samplePlayFromStart, false, 0, length, 0, false );
+        }
+
+        juce::int64 getLength() const { return length; }
+        int         getNumChannels() const { return numChannels; }
+
+        // Called on the message thread when the playback starts.
+        void setPlan( MTSamplePlayMode mode, bool looping, juce::int64 first, juce::int64 last, juce::int64 pos, bool backwards )
+        {
+            {
+                const juce::ScopedLock sl( planLock );
+                plan = { mode, looping, first, last };
+            }
+            setPlayhead( pos, backwards );
+        }
+
+        // Called on the audio thread after each block.
+        void setPlayhead( juce::int64 pos, bool backwards )
+        {
+            playhead         = pos;
+            playingBackwards = backwards;
+        }
+
+        // Called on the audio thread. Copies [start, start + num) to dest,
+        // leaving the parts outside the file silent. Returns false, with
+        // that part of dest cleared, if some of it has not been read yet.
+        bool read( juce::AudioBuffer<float>& dest, int destStart, int num, juce::int64 start )
+        {
+            const auto first = juce::jlimit( (juce::int64)0, length, start );
+            const auto last  = juce::jlimit( (juce::int64)0, length, start + num );
+
+            for( auto p = first; p < last; )
+            {
+                const auto index = p / chunkSize;
+                const auto end   = juce::jmin( last, ( index + 1 ) * chunkSize );
+                if( !copyFromChunk( index, dest, destStart + (int)( p - start ), (int)( p - index * chunkSize ), (int)( end - p ) ) )
+                {
+                    dest.clear( destStart, num );
+                    return false;
+                }
+                p = end;
+            }
+            return true;
+        }
+
+        int useTimeSlice() override
+        {
+            const auto wanted = getWantedChunks();
+
+            for( int i = 0; i < wanted.size(); ++i )
+            {
+                if( findChunk( wanted[i] ) != nullptr )
+                    continue;
+
+                for( auto& c : chunks )
+                {
+                    if( !wanted.contains( c.index.load() ) )
+                    {
+                        load( c, wanted[i] );
+                        return 0;
+                    }
+                }
+            }
+            return 10;
+        }
+
+    private:
+        struct Chunk
+        {
+            // Held by the audio thread while it copies, and by the reading
+            // thread while it changes index; -1 while the chunk is read.
+            juce::SpinLock           lock;
+            std::atomic<juce::int64> index{ -1 };
+            juce::AudioBuffer<float> samples;
+        };
+
+        struct Plan
+        {
+            MTSamplePlayMode mode    = MTSamplePlayMode::samplePlayFromStart;
+            bool             looping = false;
+            juce::int64      first   = 0;
+            juce::int64      last    = 0;
+        };
+
+        Chunk* findChunk( juce::int64 index )
+        {
+            for( auto& c : chunks )
+                if( c.index.load() == index )
+                    return &c;
+            return nullptr;
+        }
+
+        bool copyFromChunk( juce::int64 index, juce::AudioBuffer<float>& dest, int destStart, int offset, int count )
+        {
+            auto* c = findChunk( index );
+            if( c == nullptr )
+                return false;
+
+            const juce::SpinLock::ScopedTryLockType tl( c->lock );
+            if( !tl.isLocked() || c->index.load() != index )
+                return false;
+
+            // Mono files play on every channel, as AudioFormatReader::read() does.
+            for( int ch = 0; ch < dest.getNumChannels(); ++ch )
+                dest.copyFrom( ch, destStart, c->samples, juce::jmin( ch, numChannels - 1 ), offset, count );
+            return true;
+        }
+
+        void load( Chunk& c, juce::int64 index )
+        {
+            {
+                const juce::SpinLock::ScopedLockType sl( c.lock );
+                c.index = -1;
+            }
+
+            const auto start = index * chunkSize;
+            reader->read( &c.samples, 0, (int)juce::jmin( (juce::int64)chunkSize, length - start ), start, true, true );
+
+            const juce::SpinLock::ScopedLockType sl( c.lock );
+            c.index = index;
+        }
+
+        // The chunks the next readAheadSamples played come from, in the
+        // order they are played, following the loop as the player does.
+        juce::Array<juce::int64> getWantedChunks()
+        {
+            Plan p;
+            {
+                const juce::ScopedLock sl( planLock );
+                p = plan;
+            }
+            auto pos       = juce::jlimit( p.first, juce::jmax( p.first, p.last ), playhead.load() );
+            bool backwards = playingBackwards.load();
+
+            juce::Array<juce::int64> wanted;
+            const auto               add = [&]( juce::int64 from, juce::int64 to ) {
+                for( auto i = from / chunkSize; i <= ( to - 1 ) / chunkSize && wanted.size() < numChunks; ++i )
+                    wanted.addIfNotAlreadyThere( i );
+            };
+
+            // A short loop wraps many times within the samples read ahead.
+            auto budget = readAheadSamples;
+            for( int steps = 0; budget > 0 && wanted.size() < numChunks && steps < 64; ++steps )
+            {
+                const auto available = backwards ? pos - p.first : p.last - pos;
+                if( available <= 0 )
+                {
+                    if( !wrapPlayback( p.mode, p.looping, p.first, p.last, pos, backwards ) )
+                        break;
+                    continue;
+                }
+
+                const auto step = juce::jmin( available, budget );
+                if( backwards )
+                {
+                    add( pos - step, pos );
+                    pos -= step;
+                }
+                else
+                {
+                    add( pos, pos + step );
+                    pos += step;
+                }
+                budget -= step;
+            }
+            return wanted;
+        }
+
+        std::unique_ptr<juce::AudioFormatReader> reader;
+        const int                                numChannels;
+        const juce::int64                        length;
+        Chunk                                    chunks[numChunks];
+
+        juce::CriticalSection    planLock;
+        Plan                     plan;
+        std::atomic<juce::int64> playhead{ 0 };
+        std::atomic<bool>        playingBackwards{ false };
+    };
+
     MTSamplePlayer::MTSamplePlayer()
     {
         formatManager.registerBasicFormats();
         player.setSource( &transportSource );
         transportSource.addChangeListener( this );
+        readThread.startThread();
     }
 
     MTSamplePlayer::~MTSamplePlayer()
@@ -19,6 +238,8 @@ namespace mt
         devmgr.removeAudioCallback( &player );
         player.setSource( nullptr );
         transportSource.setSource( nullptr );
+        readThread.removeAllClients();
+        readThread.stopThread( 2000 );
     }
 
     void MTSamplePlayer::setSource( juce::File source )
@@ -29,27 +250,31 @@ namespace mt
         devmgr.removeAudioCallback( &player );
         transportSource.setSource( nullptr );
 
+        // Waits for a read in progress to finish.
+        readThread.removeAllClients();
+        readAhead.reset();
+
         pos              = 0;
         length           = 0;
         sourceFile       = source;
         sourceSampleRate = 0.0;
-        samples.setSize( 0, 0 );
 
         if( sourceFile == juce::File{} )
             return;
 
+        // Only the header is read here; the samples are read by readThread.
         std::unique_ptr<juce::AudioFormatReader> reader( formatManager.createReaderFor( sourceFile ) );
-        if( reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max() )
+        if( reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels <= 0 )
             return;
 
-        samples.setSize( (int)reader->numChannels, (int)reader->lengthInSamples );
-        reader->read( &samples, 0, (int)reader->lengthInSamples, 0, true, true );
         sourceSampleRate        = reader->sampleRate;
         length                  = reader->lengthInSamples;
         broadcastElapsedSamples = static_cast<int>( ( sourceSampleRate * broadcastMessageLengthInMs ) / 60 );
+        readAhead               = std::make_unique<ReadAhead>( std::move( reader ) );
+        readThread.addTimeSliceClient( readAhead.get() );
 
         // The transport resamples from the file's rate to the device's.
-        transportSource.setSource( this, 0, nullptr, sourceSampleRate, juce::jmax( 2, samples.getNumChannels() ) );
+        transportSource.setSource( this, 0, nullptr, sourceSampleRate, juce::jmax( 2, readAhead->getNumChannels() ) );
         devmgr.addAudioCallback( &player );
     }
 
@@ -74,66 +299,66 @@ namespace mt
         playingBackwords = false;
         transportSource.stop();
 
-        if( samples.getNumSamples() <= 0 )
+        if( readAhead == nullptr )
             return;
+        const juce::int64 numSamples = readAhead->getLength();
 
         // Drops what the resampler kept of the last playback.
         transportSource.setNextReadPosition( 0 );
         finished        = false;
         positionChanged = false;
 
-        region      = r;
-        playMode    = pm;
-        regionStart = region.start;
-        regionEnd   = region.end;
+        region   = r;
+        playMode = pm;
 
+        // The part of the file that is played, [first, last).
+        juce::int64 first = 0;
+        juce::int64 last  = numSamples;
         if( region.isValid() )
         {
-            if( playMode == MTSamplePlayMode::samplePlayFromStart || playMode == MTSamplePlayMode::samplePlayModeLoopForward
-                || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional )
+            if( playMode == MTSamplePlayMode::samplePlayToStart )
             {
-                pos    = region.start;
-                length = region.end;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayToStart )
-            {
-                pos    = 0;
-                length = region.start;
+                last = region.start;
             }
             else if( playMode == MTSamplePlayMode::samplePlayToEnd )
             {
-                pos    = 0;
-                length = region.end;
+                last = region.end;
             }
             else if( playMode == MTSamplePlayMode::samplePlayFromEnd )
             {
-                pos    = region.end;
-                length = samples.getNumSamples();
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
-            {
-                playingBackwords = true;
-                length           = region.end;
-                pos              = length - samplesPerBlock;
+                first = region.end;
             }
             else if( playMode == MTSamplePlayMode::samplePlayModeCue )
             {
-                int previewOffSet = static_cast<int>( ( sourceSampleRate * cuePreviewLengthInMs ) / 60 );
-                pos               = region.getStart();
-                length            = pos + previewOffSet;
-                pos               = pos - previewOffSet;
+                const auto previewOffSet = static_cast<juce::int64>( ( sourceSampleRate * cuePreviewLengthInMs ) / 60 );
+                first                    = region.start - previewOffSet;
+                last                     = region.start + previewOffSet;
             }
-            length = juce::jmin( length, (juce::int64)samples.getNumSamples() );
-        }
-        else
-        {
-            pos    = 0;
-            length = samples.getNumSamples();
+            else
+            {
+                first = region.start;
+                last  = region.end;
+            }
         }
 
-        //length = juce::jmin( length, reader->lengthInSamples );
+        // A region reaching past the file's end would leave a loop playing
+        // silence there, or never reach its end.
+        regionStart = juce::jlimit( (juce::int64)0, numSamples, first );
+        regionEnd   = juce::jlimit( regionStart, numSamples, last );
+        length      = regionEnd;
 
-        looping = ( playMode == MTSamplePlayMode::samplePlayModeLoopForward || playMode == MTSamplePlayMode::samplePlayModeLoopBackward || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional );
+        playingBackwords = ( playMode == MTSamplePlayMode::samplePlayModeLoopBackward );
+        pos              = playingBackwords ? regionEnd : regionStart;
+
+        // An empty region is not looped, so its playback ends at once.
+        looping = regionStart < regionEnd
+                  && ( playMode == MTSamplePlayMode::samplePlayModeLoopForward || playMode == MTSamplePlayMode::samplePlayModeLoopBackward
+                       || playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional );
+
+        // Until the first chunk is read, the audio thread plays silence
+        // without moving on, so nothing is skipped.
+        readAhead->setPlan( playMode, looping, regionStart, regionEnd, pos, playingBackwords );
+        readThread.moveToFrontOfQueue( readAhead.get() );
 
         transportSource.start();
         startTimerHz( 30 );
@@ -157,83 +382,67 @@ namespace mt
         return looping;
     }
 
-    void MTSamplePlayer::prepareToPlay( int samplesPerBlockExpected, double /*sr*/ )
-    {
-        samplesPerBlock = samplesPerBlockExpected;
-    }
+    void MTSamplePlayer::prepareToPlay( int /*samplesPerBlockExpected*/, double /*sr*/ ) {}
 
     void MTSamplePlayer::releaseResources() {}
-
-    void MTSamplePlayer::readSamples( juce::AudioBuffer<float>& Dest, int DestStart, int NumSamples, juce::int64 Start ) const
-    {
-        // Mono files play on every channel, as AudioFormatReader::read() did.
-        const auto numChannels = samples.getNumChannels();
-        const auto first       = juce::jlimit( (juce::int64)0, (juce::int64)samples.getNumSamples(), Start );
-        const auto last        = juce::jlimit( (juce::int64)0, (juce::int64)samples.getNumSamples(), Start + NumSamples );
-        const auto offset      = (int)( first - Start );
-        const auto count       = (int)( last - first );
-
-        if( numChannels <= 0 || count <= 0 )
-            return;
-
-        for( int ch = 0; ch < Dest.getNumChannels(); ++ch )
-            Dest.copyFrom( ch, DestStart + offset, samples, juce::jmin( ch, numChannels - 1 ), (int)first, count );
-    }
 
     void MTSamplePlayer::getNextAudioBlock( const juce::AudioSourceChannelInfo& bufferToFill )
     {
         bufferToFill.clearActiveBufferRegion();
-        int sampleCopySize = 0;
-        if( playingBackwords )
+        if( readAhead == nullptr )
+            return;
+
+        // Plays [regionStart, regionEnd). Forwards, pos is the first sample
+        // played next; backwards, it is the end of what is played next, so
+        // a block reads [pos - n, pos) and reverses it. A loop wraps within
+        // the block instead of leaving the rest of it silent.
+        int done = 0;
+        while( done < bufferToFill.numSamples )
         {
-            sampleCopySize = ( pos - regionStart < bufferToFill.numSamples ) ? static_cast<int>( pos - regionStart ) : bufferToFill.numSamples;
-            sampleCopySize = juce::jmax( 0, sampleCopySize );
-            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
-            bufferToFill.buffer->reverse( bufferToFill.startSample, sampleCopySize );
-            pos -= sampleCopySize;
-        }
-        else
-        {
-            sampleCopySize = ( length - pos < bufferToFill.numSamples ) ? static_cast<int>( length - pos ) : bufferToFill.numSamples;
-            sampleCopySize = juce::jmax( 0, sampleCopySize );
-            readSamples( *bufferToFill.buffer, bufferToFill.startSample, sampleCopySize, pos );
-            pos += sampleCopySize;
+            const auto wanted    = (juce::int64)( bufferToFill.numSamples - done );
+            const auto destStart = bufferToFill.startSample + done;
+            int        count     = 0;
+
+            if( playingBackwords )
+            {
+                count = (int)juce::jmin( wanted, pos - regionStart );
+                if( count > 0 )
+                {
+                    if( !readAhead->read( *bufferToFill.buffer, destStart, count, pos - count ) )
+                        break;
+                    bufferToFill.buffer->reverse( destStart, count );
+                    pos -= count;
+                }
+            }
+            else
+            {
+                count = (int)juce::jmin( wanted, regionEnd - pos );
+                if( count > 0 )
+                {
+                    if( !readAhead->read( *bufferToFill.buffer, destStart, count, pos ) )
+                        break;
+                    pos += count;
+                }
+            }
+
+            if( count > 0 )
+                done += count;
+            else if( !wrapPlayback( playMode, looping, regionStart, regionEnd, pos, playingBackwords ) )
+                break;
         }
 
+        readAhead->setPlayhead( pos, playingBackwords );
+
+        const bool atEnd = playingBackwords ? pos <= regionStart : pos >= regionEnd;
+        if( !looping && atEnd )
+            finished = true;
+
         // send playheade position message
-        numSamplesElapsed += sampleCopySize;
-        if( pos == length || numSamplesElapsed >= broadcastElapsedSamples )
+        numSamplesElapsed += done;
+        if( done > 0 && ( atEnd || numSamplesElapsed >= broadcastElapsedSamples ) )
         {
             numSamplesElapsed = 0;
             positionChanged   = true;
-        }
-
-        if( !looping && ( playingBackwords ? pos <= regionStart : pos >= length ) )
-            finished = true;
-
-        // reset pos if playmode is loop
-        if( looping && ( pos >= regionEnd || pos <= regionStart ) )
-        {
-            if( playMode == MTSamplePlayMode::samplePlayModeLoopForward )
-            {
-                pos = regionStart;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBackward )
-            {
-                pos = regionEnd;
-            }
-            else if( playMode == MTSamplePlayMode::samplePlayModeLoopBidirectional )
-            {
-                if( pos <= regionStart )
-                {
-                    playingBackwords = false;
-                }
-                else
-                {
-                    pos              = length - samplesPerBlock;
-                    playingBackwords = true;
-                }
-            }
         }
     }
 
