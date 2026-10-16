@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include <bitset>
+
 #include "mt_midi_meter.h"
 #include "mt_audio_iprogram_atomics.h"
 #include "contracts/dcl/dcl_contracts.h"
@@ -68,6 +70,82 @@ namespace mt
     public:
         explicit MTIProgram( juce::ValueTree& VT, juce::UndoManager* UM = nullptr );
         virtual ~MTIProgram();
+
+        ///
+        /// What playing a note reads, for the threads that play notes (the
+        /// sequencer's tick thread, MIDI input, the pads). The samples, their
+        /// layers and the map that holds them belong to the message thread,
+        /// which adds, removes and edits them while notes play; so the
+        /// program publishes an immutable copy of what note handling needs,
+        /// and replaces it whenever that changes.
+        ///
+        struct PlayableLayer
+        {
+            bool                         hasSource{ false };
+            std::shared_ptr<ASoundSlice> slice; // Kept alive while the copy is.
+            int                          velStart{ MIDI::MIN };
+            int                          velEnd{ MIDI::MAX };
+        };
+
+        struct PlayableNote
+        {
+            bool                                  assigned{ false }; // A sample exists for the note.
+            bool                                  mute{ false };
+            int                                   keyNote{ -1 };
+            int                                   muteGroup{ -1 };
+            int                                   polyphony{ 1 };
+            LayerPlayType                         layerPlay{ LayerPlayType::CYCLE };
+            ClipPlayType                          padPlay{ ClipPlayType::CLIP_ONE_SHOT };
+            std::array<int, MAX_SIMUL_ACTIONS>    simultaneousPlay{};
+            std::array<int, MAX_SIMUL_ACTIONS>    simultaneousMute{};
+            std::array<PlayableLayer, MAX_LAYERS> layers;
+        };
+
+        struct PlayableNotes
+        {
+            std::array<PlayableNote, MIDI::NUMERIC_MAX>   notes;
+            std::array<SamplePlayType, MIDI::NUMERIC_MAX> samplePlay{};
+            std::bitset<MIDI::NUMERIC_MAX>                soloNotes;
+
+            // A note outside 0..127 has no sample and is not soloed.
+            const PlayableNote& operator[]( int Note ) const
+            {
+                static const PlayableNote none{};
+                return CommonUtils::isValidMidiNote( Note ) ? notes[(size_t)Note] : none;
+            }
+
+            // As the program's functions of the same names.
+            bool isNoteSolo( int Note ) const { return CommonUtils::isValidMidiNote( Note ) && soloNotes[(size_t)Note]; }
+            bool isNoteMutedDueToSolo( int Note ) const { return soloNotes.any() && !isNoteSolo( Note ); }
+            bool isNoteEffectivelyMuted( int Note ) const { return ( *this )[Note].mute || isNoteMutedDueToSolo( Note ); }
+
+            // Calls Func with the key note of every other sample in mute group MG.
+            template<typename Function>
+            void forNotesInMuteGroup( int Note, int MG, Function&& Func ) const
+            {
+                if( 0 <= MG )
+                    for( const auto& it : notes )
+                        if( it.assigned && MG == it.muteGroup && Note != it.keyNote )
+                            Func( it.keyNote );
+            }
+        };
+
+        // Holds the published copy for as long as it exists; any thread.
+        class PlayableNotesReader
+        {
+        public:
+            explicit PlayableNotesReader( const MTIProgram& Program );
+            ~PlayableNotesReader();
+
+            const PlayableNotes& operator*() const noexcept { return *notes; }
+            const PlayableNotes* operator->() const noexcept { return notes; }
+
+        private:
+            const MTIProgram&    program;
+            const PlayableNotes* notes;
+
+            JUCE_DECLARE_NON_COPYABLE( PlayableNotesReader )
+        };
 
         std::function<void()>             onNameChanged     = []() {};
         std::function<void()>             onGainChanged     = []() {};
@@ -218,7 +296,7 @@ namespace mt
         /// Program Note
         bool isNoteSolo( int Note ) { return soloingNotes[Note]; }
         bool isNoteMutedDueToSolo( int Note ) { return !soloingNotes.isZero() && !soloingNotes[Note]; }
-        void setNoteSolo( int Note, bool Solo ) { soloingNotes.setBit( Note, Solo ); }
+        void setNoteSolo( int Note, bool Solo );
         int  resetNotesSolo();
         int  getNumSoloNotes();
 
@@ -268,18 +346,33 @@ namespace mt
     protected:
         void       rebuildSampleMap();
         MTISample* createSample( int Note );
+        void       publishPlayableNotes();
 
         inline void reloadMidiMeter( float normLevel ) { midiMeter.reload( normLevel ); }
 
         virtual std::unique_ptr<MTISample> iSampleCreator( int Note ) { return nullptr; };
         virtual std::unique_ptr<MTISample> iSampleCreator( juce::ValueTree& VT, juce::UndoManager* UM ) { return nullptr; };
         virtual void                       valueTreePropertyChanged( juce::ValueTree& treeWhosePropertyHasChanged, const juce::Identifier& Property );
+        void                               valueTreeChildAdded( juce::ValueTree& Parent, juce::ValueTree& Child ) override;
+        void                               valueTreeChildRemoved( juce::ValueTree& Parent, juce::ValueTree& Child, int Index ) override;
+        void                               valueTreeChildOrderChanged( juce::ValueTree& Parent, int OldIndex, int NewIndex ) override;
 
     private:
         inline void soloChangeHandler( bool Solo )
         {
             soloingPrograms.setBit( MTIProgramData::index, Solo );
         }
+
+        struct PlayableNotesUpdater : public juce::AsyncUpdater
+        {
+            explicit PlayableNotesUpdater( MTIProgram& P )
+                : program( P ) {}
+            void        handleAsyncUpdate() override { program.publishPlayableNotes(); }
+            MTIProgram& program;
+        };
+
+        void sampleTreeChanged( const juce::ValueTree& Tree );
+        void freeRetiredPlayableNotes();
 
     protected:
         std::map<int, std::unique_ptr<MTISample>> iSampleMap;
@@ -295,6 +388,15 @@ namespace mt
         static juce::BigInteger soloingPrograms;
 
         MTMidiMeter midiMeter{ 40 };
+
+        // The published copy: a reader counts itself in playableNotesReaders,
+        // then loads playableNotes. A replaced copy is freed, on the message
+        // thread, once no reader has been seen after the replacement.
+        std::atomic<const PlayableNotes*>                 playableNotes{ nullptr };
+        mutable std::atomic<int>                          playableNotesReaders{ 0 };
+        std::unique_ptr<const PlayableNotes>              currentPlayableNotes;
+        std::vector<std::unique_ptr<const PlayableNotes>> retiredPlayableNotes;
+        PlayableNotesUpdater                              playableNotesUpdater{ *this };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( MTIProgram )
     };

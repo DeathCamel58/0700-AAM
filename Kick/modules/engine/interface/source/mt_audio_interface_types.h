@@ -323,9 +323,10 @@ namespace mt
     class ASoundSlice; // Forward declare.
     struct MTISource
     {
-        ASoundSlice*              src{ nullptr }; /// Do not set this directly.
-        CachedValue<juce::String> source;
-        CachedValue<int>          slice;
+        ASoundSlice*                 src{ nullptr }; /// Do not set this directly.
+        std::shared_ptr<ASoundSlice> srcRef; // Keeps src alive, even once its asset is removed.
+        CachedValue<juce::String>    source;
+        CachedValue<int>             slice;
 
         MTISource( juce::ValueTree& VT, juce::UndoManager* UM );
     };
@@ -377,6 +378,7 @@ namespace mt
         std::array<std::unique_ptr<MTILayer>, MAX_LAYERS> layers;
 
         MTISample( juce::ValueTree& VT, juce::UndoManager* UM );
+        virtual ~MTISample() = default; // Programs delete drum, keygroup and clip samples as MTISample.
 
         void                                 removeSource( const juce::String& Source );
         juce::String                         getSource( int Layer = 0 );
