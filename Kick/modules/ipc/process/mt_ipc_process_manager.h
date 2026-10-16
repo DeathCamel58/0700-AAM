@@ -50,7 +50,7 @@ namespace ipc
         void startProcessInThread(const int pid );
         bool stopProcess( const int processIdentifier );
         bool waitForProcessToExit( const int processIdentifier );
-        const juce::String& processName( const int processIdentifier );
+        juce::String processName( const int processIdentifier );
     private:
         void starterThreadExitNotifier( int pid );
 

@@ -20,13 +20,24 @@
  */
 
 #include "kick_Hwpref.h"
+#include "kick_RemovableMedia.h"
+
+// The power key's input device; the build system can override it (see
+// CMakeLists.txt).
+#ifndef KICK_POWER_KEY_DEVICE
+    #define KICK_POWER_KEY_DEVICE "/dev/input/event2"
+#endif
+
+// A systemd unit that performs the factory reset, or empty if the
+// application only removes its own state; the build system can set it.
+#ifndef KICK_FACTORY_RESET_UNIT
+    #define KICK_FACTORY_RESET_UNIT ""
+#endif
 
 namespace mt
 {
     namespace fs = std::filesystem;
 
-    const char* FACTORY_RESET_CMD = "/bin/rm -rf /home/Kick/projects* /home/Kick/prefs";
-    const char* POWEROFF          = "/sbin/poweroff";
 
     HwPref::HwPref()
         : juce::Thread( "powerbutton" )
@@ -37,7 +48,11 @@ namespace mt
 
     void HwPref::run()
     {
-        const char* devicePath = "/dev/input/event2"; // Replace X with the appropriate event number
+        const char* devicePath = KICK_POWER_KEY_DEVICE;
+
+        // How long to wait before trying the device again after it could
+        // not be opened or read; doubled on every failure, up to 30 s.
+        int retryMs = 500;
 
         while( !threadShouldExit() )
         {
@@ -45,12 +60,16 @@ namespace mt
             if( !inputDevice.is_open() ) // Check if inputDevice is not valid
             {
                 // Open the input device file
+                inputDevice.clear();
                 inputDevice.open( devicePath, std::ios::binary );
                 if( !inputDevice.is_open() )
                 {
-                    DBG( "Error opening Input device" );
-                    // Handle the error (e.g., return, continue loop, or retry opening)
-                    continue; // Continue the loop if opening failed
+                    DBG( "Error opening Input device " << devicePath );
+                    // It may appear later, or not exist on this hardware:
+                    // try again, without spinning on a CPU core.
+                    wait( retryMs );
+                    retryMs = juce::jmin( retryMs * 2, 30000 );
+                    continue;
                 }
             }
 
@@ -58,16 +77,19 @@ namespace mt
             struct input_event ev;
             if( inputDevice.read( reinterpret_cast<char*>( &ev ), sizeof( struct input_event ) ) )
             {
-                // Process the input event
-                if( ev.type == EV_KEY && ev.code == KEY_STOP )
+                retryMs = 500;
+
+                // Process the input event. The key is KEY_STOP or, from a
+                // power key driver such as the i.MX SNVS one, KEY_POWER.
+                if( ev.type == EV_KEY && ( ev.code == KEY_STOP || ev.code == KEY_POWER ) )
                 {
                     if( ev.value == 1 )
                     {
-                        DBG( "KEY_STOP pressed" );
+                        DBG( "Power key pressed" );
                     }
                     else if( ev.value == 0 )
                     {
-                        DBG( "KEY_STOP released" );
+                        DBG( "Power key released" );
                         if( powerButtonUI )
                             powerButtonUI();
                     }
@@ -75,69 +97,72 @@ namespace mt
             }
             else
             {
-                continue; // Continue the loop if reading failed
+                // The device went away or cannot be read: open it again
+                // after a while.
+                DBG( "Error reading Input device " << devicePath );
+                inputDevice.close();
+                wait( retryMs );
+                retryMs = juce::jmin( retryMs * 2, 30000 );
+                continue;
             }
 #endif
             juce::Thread::sleep( 300 );
         }
     }
 
-    std::string HwPref::executeCommand( const std::string& command )
-    {
-        std::string result = "";
-#if( JUCE_LINUX || __linux__ )
-        char buffer[128];
-
-        FILE* pipe = popen( command.c_str(), "r" );
-        if( !pipe )
-        {
-            return "Error";
-        }
-
-        while( !feof( pipe ) )
-        {
-            if( fgets( buffer, 128, pipe ) != nullptr )
-            {
-                result += buffer;
-            }
-        }
-
-        pclose( pipe );
-#endif
-        return result;
-    }
-
-    int HwPref::executeSetCommand( const std::string& command )
-    {
-        int result = 0;
-#if( JUCE_LINUX || __linux__ )
-        result = std::system( command.c_str() );
-#endif
-        return result;
-    }
-
+    // The system's network manager owns the Ethernet interface: it brings
+    // the link up, runs DHCP on it and keeps the address and routes. A DHCP
+    // client or an interface configuration of our own would fight it (and
+    // needs root), so DHCP is always on and the rest is not done here.
     int HwPref::startDhcp( void )
     {
-	    DBG("Starting DHCP");
-        std::string command = "/usr/sbin/udhcpc -i eth0 &";
-        return executeSetCommand( command.c_str() );
+        DBG( "DHCP is run by the system's network manager" );
+        return 0;
     }
 
     int HwPref::stopDhcp( void )
     {
-	    DBG("Stoping DHCP");
-        std::string command = "killall udhcpc";
-        return executeSetCommand( command.c_str() );
+        DBG( "DHCP is run by the system's network manager; not stopping it" );
+        return -1;
     }
 
     int HwPref::factoryReset( void )
     {
-        return executeSetCommand( FACTORY_RESET_CMD );
+        // A system that resets more than the application's own state (its
+        // own configuration, say) provides a unit that does it all and
+        // restarts the device. Started without waiting, as it stops the
+        // application.
+        if( std::string( KICK_FACTORY_RESET_UNIT ).size() > 0 )
+            return process::run( { "systemctl", "start", "--no-block", KICK_FACTORY_RESET_UNIT } );
+
+        // Remove the projects and the preferences from the state directory
+        // (what "rm -rf <state>/projects* <state>/prefs" did).
+        std::error_code       ec;
+        std::vector<fs::path> paths;
+
+        for( const auto& entry : fs::directory_iterator( KICK_STATE_DIR, ec ) )
+        {
+            const auto name = entry.path().filename().string();
+            if( name.rfind( "projects", 0 ) == 0 || name == "prefs" )
+                paths.push_back( entry.path() );
+        }
+
+        int result = 0;
+        for( const auto& path : paths )
+        {
+            fs::remove_all( path, ec );
+            if( ec )
+                result = -1;
+        }
+
+        return result;
     }
 
     int HwPref::shutdown( void )
     {
-        return executeSetCommand( POWEROFF );
+        // Through systemd, which shuts down cleanly and lets an
+        // unprivileged user power off where the system's policy allows it.
+        return process::run( { "systemctl", "poweroff" } );
     }
 
     // Function to compare firmware versions
@@ -215,15 +240,15 @@ namespace mt
 
     bool HwPref::extractImage( std::string path )
     {
-        bool        status         = true;
-        std::string imageFormat    = ".swu";
-        std::string creatFolderCmd = "mkdir " + path;
-        DBG( "FwUpdate ->extractImage->  " << creatFolderCmd );
-        system( creatFolderCmd.c_str() );
-        std::string outFullpath = decrptionDir + decryptedFwname;
-        std::string cmd         = "mount -o loop -t ext4  " + outFullpath + " " + extractDir;
-        DBG( "FwUpdate ->extractImage->  " << cmd );
-        system( cmd.c_str() );
+        bool            status      = true;
+        std::string     imageFormat = ".swu";
+        std::error_code ec;
+        DBG( "FwUpdate ->extractImage-> creating " << path );
+        fs::create_directory( path, ec );
+        std::string             outFullpath = decrptionDir + decryptedFwname;
+        const juce::StringArray mount { "mount", "-o", "loop", "-t", "ext4", outFullpath, extractDir };
+        DBG( "FwUpdate ->extractImage->  " << mount.joinIntoString( " " ) );
+        process::run( mount );
         std::vector<std::string> swuFiles = getSWUFiles( extractDir, imageFormat );
         if( swuFiles.empty() )
         {
@@ -463,15 +488,23 @@ namespace mt
 
     bool HwPref::removeHeaderFromImage( std::string fwfilepath )
     {
-        std::string cmd = "tail -c +" + std::to_string( fw_ver_index ) + " " + fwfilepath + " > " + decrptionDir + fwHeaderFile;
-        DBG( "removing Header from image" << cmd );
-        int result = system( cmd.c_str() ); // Execute the command using system call
+        // Copy everything from byte fw_ver_index on (counting from 1, as
+        // "tail -c +N" did) into the file that is decrypted next.
+        const std::string outFilepath = decrptionDir + fwHeaderFile;
+        DBG( "removing Header from image " << fwfilepath << " -> " << outFilepath );
+        {
+            std::ifstream in( fwfilepath, std::ios::binary );
+            std::ofstream out( outFilepath, std::ios::binary | std::ios::trunc );
 
-	if ( result != 0 )
-    {
-        DBG( "Failed to remove header from image." );
-        return false;
-    }
+            if( fw_ver_index > 0 )
+                in.seekg( fw_ver_index - 1 );
+
+            if( !in || !out || !( out << in.rdbuf() ) || !out.flush() )
+            {
+                DBG( "Failed to remove header from image." );
+                return false;
+            }
+        }
 
     // Now remove the original file
     if ( std::remove( fwfilepath.c_str() ) != 0 )
@@ -492,18 +525,21 @@ namespace mt
         bool        status        = false;
         std::string outFwfilepath = decrptionDir + decryptedFwname;
         std::string inFwfilepath  = decrptionDir + fwHeaderFile;
-        std::string cmd           = "mkdir -p " + decrptionDir; // Create decryption directory if not exists
 #if( JUCE_LINUX || __linux__ )
-        system( cmd.c_str() ); // Execute the command using system call to create directory
+        std::error_code ec;
+        fs::create_directories( decrptionDir, ec ); // Create decryption directory if not exists
 
         if( isImgFile( fwfilepath ) )
         { // Check if it's an img file
             if( removeHeaderFromImage( fwfilepath ) )
             { // Remove header from image
-                std::string command = "openssl enc -aes-256-cbc -pbkdf2 -d -salt -in " + inFwfilepath + " -out " + outFwfilepath + " -k '" + decrptKey + "'";
+                // The passphrase goes to openssl on its standard input, not
+                // on its command line, where any user could read it.
+                const juce::StringArray command { "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-d", "-salt",
+                                                  "-in", inFwfilepath, "-out", outFwfilepath, "-pass", "stdin" };
 
-                std::cout << "Decrypting image: " << command << std::endl;
-                int result = system( command.c_str() ); // Execute the command using system call
+                std::cout << "Decrypting image: " << inFwfilepath << " -> " << outFwfilepath << std::endl;
+                int result = process::runWithInput( command, decrptKey + "\n" );
 
                 if( result == 0 )
                 {
@@ -602,8 +638,9 @@ namespace mt
     bool HwPref::isEthernetCableConnected()
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string ethtoolOutput = executeCommand( "ethtool eth0 | grep 'Link detected'" );
-        return ( ethtoolOutput.find( "yes" ) != std::string::npos );
+        std::ifstream carrier( "/sys/class/net/eth0/carrier" );
+        int           detected = 0;
+        return ( carrier >> detected ) && detected == 1;
 #endif
         return false;
     }
@@ -611,16 +648,10 @@ namespace mt
     bool HwPref::ethernetEnable( bool status )
     {
 #if( JUCE_LINUX || __linux__ )
-        std::string command = status ? "ifconfig eth0 up" : "ifconfig eth0 down";
-        int         result  = system( command.c_str() ); // Execute the command using system call
-        if( result == 0 )
-        {
-            return true; // Command executed successfully
-        }
-        else
-        {
-            return false; // Command execution failed
-        }
+        // The system's network manager brings the link up and down.
+        juce::ignoreUnused( status );
+        DBG( "Ethernet is managed by the system's network manager; not turning it " << ( status ? "on" : "off" ) );
+        return false;
 #else
         return true; // Not supported on non-Linux systems
 #endif
@@ -651,11 +682,12 @@ namespace mt
     int HwPref::setIP( const std::string& interface, const std::string& ipAddress, const std::string& subnetMask, const std::string& gateway )
     {
         DBG( "SetIP Fucntion Called" );
-        int         result  = 0;
-        std::string command = "ifconfig " + interface + " " + ipAddress + " netmask " + subnetMask;
-	DBG("cmd = " <<command);
+        int result = 0;
 #if( JUCE_LINUX || __linux__ )
-        result = executeSetCommand( command.c_str() );
+        // The system's network manager owns the interface's addresses.
+        juce::ignoreUnused( interface, ipAddress, subnetMask, gateway );
+        DBG( "Not setting " << interface << " to " << ipAddress << "/" << subnetMask << ": addresses come from the system's network manager" );
+        result = -1;
 #endif
         return result;
     }
@@ -700,27 +732,14 @@ namespace mt
     std::string HwPref::getGateway( const std::string& interface )
     {
 #if( JUCE_LINUX || __linux__ )
-        // Command to retrieve routing information
-        std::string command = "ip route show";
-        char        buffer[128];
-        std::string result = "";
-
-        // Open the command for reading
-        FILE* pipe = popen( command.c_str(), "r" );
-        if( !pipe )
+        // Retrieve routing information
+        juce::String output;
+        if( process::run( { "ip", "route", "show" }, &output ) < 0 )
         {
             std::cerr << "Failed to run command\n";
             return "";
         }
-
-        // Read the output of the command
-        while( fgets( buffer, sizeof( buffer ), pipe ) != nullptr )
-        {
-            result += buffer;
-        }
-
-        // Close the pipe
-        pclose( pipe );
+        std::string result = output.toStdString();
 
         // Parse the result to find the line corresponding to the desired interface
         std::istringstream iss( result );
@@ -749,16 +768,22 @@ namespace mt
         DBG( "GetIP Fucntion Called" );
         std::string ipAddress = "0.0.0.0";
 
-        std::string command = "ip -4 addr show " + interface + " | awk '/inet / {split($2, a, \"\\\\/\"); print a[1]}'";
 #if( JUCE_LINUX || __linux__ )
 
-        // Get the local IP address
-        ipAddress = executeCommand( command );
-        info.IP   = ipAddress;
+        // Get the local IP address: the "inet <address>/<prefix>" of
+        // "ip -4 -o addr show dev <interface>"
+        juce::String output;
+        process::run( { "ip", "-4", "-o", "addr", "show", "dev", interface }, &output );
+        const auto fields = juce::StringArray::fromTokens( output, " \t\n", "" );
+        const auto inet   = fields.indexOf( "inet" );
+        if( inet >= 0 && inet + 1 < fields.size() )
+            ipAddress = fields[inet + 1].upToFirstOccurrenceOf( "/", false, false ).toStdString();
+        info.IP = ipAddress;
 
-        // Get Ethernet adapter status
-        std::string ifconfigOutput = executeCommand( "ifconfig eth0" );
-        if( ifconfigOutput.find( "UP" ) != std::string::npos )
+        // Get the adapter status
+        std::ifstream operstate( "/sys/class/net/" + interface + "/operstate" );
+        std::string   state;
+        if( ( operstate >> state ) && state == "up" )
         {
             info.status = true;
             DBG( "Ethernet Adapter Status: Operational" );
@@ -817,11 +842,10 @@ namespace mt
     int HwPref::setTimeZone( juce::String& str )
     {
 #if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        std::string cmd = "timedatectl set-timezone " + str.toStdString();
-        int         ret = system( cmd.c_str() );
+        int ret = process::run( { "timedatectl", "set-timezone", str } );
         if( ret == 0 )
         {
-            DBG( "setting timezone Success" << cmd );
+            DBG( "setting timezone Success " << str );
             return 1;
         }
         else
@@ -877,16 +901,16 @@ namespace mt
         std::strncpy( info.memoryStatus.used, juce::String( rInfo.usedRam ).toRawUTF8(), sizeof( info.memoryStatus.used ) );
 
         mt::sysSizeInfo sInfo;
-        std::string     internalPath = "/home/Kick";
+        std::string     internalPath = KICK_STATE_DIR;
         mt::SystemResource::getResourceInterface().sizeInfo( internalPath, sInfo );
 
         std::strncpy( info.internalStorageStatus.availableSpace, juce::String( sInfo.avaSize ).toRawUTF8(), sizeof( info.internalStorageStatus.availableSpace ) );
         std::strncpy( info.internalStorageStatus.totalSpace, juce::String( sInfo.totalSize ).toRawUTF8(), sizeof( info.internalStorageStatus.totalSpace ) );
         std::strncpy( info.internalStorageStatus.usedSpace, juce::String( sInfo.usedSize ).toRawUTF8(), sizeof( info.internalStorageStatus.usedSpace ) );
 
-        internalPath = "/mnt/flash";
+        internalPath = getRemovableMediaPath( RemovableMedia::UsbDisk );
 
-        if( isStorageconnected( "flash" ) )
+        if( !internalPath.empty() )
         {
             mt::SystemResource::getResourceInterface().sizeInfo( internalPath, sInfo );
 
@@ -927,13 +951,14 @@ namespace mt
 
     void HwPref::setDate( int day, int month, int year )
     {
-        //date - s "2024-05-15"
-        std::string cmd = std::to_string( year ) + "-" + std::to_string( month ) + "-" + std::to_string( day );
-        DBG( "Setting Day -> " << cmd );
-        // Execute the command
-        int result = std::system( cmd.c_str() );
-        // Check if the command executed successfully
-        if( result == 0 )
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // timedatectl sets the date and the time together: keep the time.
+        std::time_t now = std::time( nullptr );
+        std::tm     local {};
+        localtime_r( &now, &local );
+
+        DBG( "Setting Day -> " << year << "-" << month << "-" << day );
+        if( setDateTime( year, month, day, local.tm_hour, local.tm_min, local.tm_sec ) )
         {
             DBG( "Date successfully updated to: " << day << "/" << month << "/" << year );
         }
@@ -941,16 +966,19 @@ namespace mt
         {
             DBG( "Failed to update date." );
         }
+#endif
     }
 
     void HwPref::setTime( int hour, int minute )
     {
-        std::string cmd = std::to_string( hour ) + ":" + std::to_string( minute ) + ":00";
-        DBG( "Setting Day -> " << cmd );
-        // Execute the command
-        int result = std::system( cmd.c_str() );
-        // Check if the command executed successfully
-        if( result == 0 )
+#if defined( __linux__ ) || defined( __linux ) || defined( linux )
+        // timedatectl sets the date and the time together: keep the date.
+        std::time_t now = std::time( nullptr );
+        std::tm     local {};
+        localtime_r( &now, &local );
+
+        DBG( "Setting Time -> " << hour << ":" << minute << ":00" );
+        if( setDateTime( local.tm_year + 1900, local.tm_mon + 1, local.tm_mday, hour, minute, 0 ) )
         {
             DBG( "Time successfully updated to: " << hour << "/" << minute );
         }
@@ -958,8 +986,21 @@ namespace mt
         {
             DBG( "Failed to update Time." );
         }
+#endif
 
         DBG( "Setting Day -> " << hour << "::" << minute );
+    }
+
+    bool HwPref::setDateTime( int year, int month, int day, int hour, int minute, int second )
+    {
+        char localTime[32];
+        std::snprintf( localTime, sizeof( localTime ), "%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second );
+
+        // A clock set by hand would be overwritten by network time, and
+        // timedated refuses to set it while network time is on, so turn it
+        // off first.
+        process::run( { "timedatectl", "set-ntp", "false" } );
+        return process::run( { "timedatectl", "set-time", localTime } ) == 0;
     }
 
     // Get the number of days in a month, considering leap years

@@ -243,27 +243,24 @@ namespace ipc
 		return started;
 	}
 
+	// The process monitor thread reports the exit, as it does for a process
+	// that exits by itself. Reporting it here as well reported it twice: with
+	// restart on kill enabled, that started two instances of the process, and
+	// once the monitor thread had dropped the executor, the second report
+	// dereferenced a null one.
 	bool MTIPCProcessManager::stopProcess( const int processIdentifier )
 	{
-		bool stopped = data->executors[processIdentifier]->stop();
-        if( stopped && data->callback )
-		{
-            juce::String processName( DEFAULT_PROCESS_NAME );
-            if( data->configurations.contains( processIdentifier ) )
-                processName = data->configurations[processIdentifier]->getProperty( ipc::IPC_KEY_PROCESS_NAME, DEFAULT_PROCESS_NAME );
-
-			juce::MessageManager::callAsync(
-                [&, processIdentifier, processName]() { data->callback->processExited( processIdentifier, data->executors[processIdentifier]->exitCode(), processName ); } );
-		}
-		return stopped;
+		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executors[processIdentifier];
+		return executor == nullptr || executor->stop();
 	}
 
 	bool MTIPCProcessManager::waitForProcessToExit(const int processIdentifier)
 	{
-		return data->executors[processIdentifier]->join();
+		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executors[processIdentifier];
+		return executor == nullptr || executor->join();
 	}
 
-    const juce::String& MTIPCProcessManager::processName( const int processIdentifier )
+    juce::String MTIPCProcessManager::processName( const int processIdentifier )
     {
 
         if( data->configurations.contains( processIdentifier ) )

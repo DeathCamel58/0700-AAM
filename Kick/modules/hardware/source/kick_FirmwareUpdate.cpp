@@ -437,8 +437,12 @@ namespace mt
         int                 connfd = -1;
         struct progress_msg msg;
 
-        std::string filePath = "/tmp/fwupdate/Kick.swu -v &";
-        std::string command  = "/usr/bin/swupdate" + std::string( " -i " ) + filePath;
+        // Hand the image to the swupdate daemon rather than starting a second
+        // swupdate: the daemon runs with the privileges needed to write the
+        // root filesystem and the bootloader environment, and it still reports
+        // progress on socketpath.
+        std::string filePath = "/tmp/fwupdate/Kick.swu &";
+        std::string command  = "swupdate-client -v " + filePath;
 
         std::future<void> future = std::async( std::launch::async, [&command] {
             // Execute the command

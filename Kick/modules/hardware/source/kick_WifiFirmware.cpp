@@ -27,8 +27,17 @@
     #include <unistd.h>
 #endif
 
-#define WIFI_CRED_FILE "/home/Kick/wifi_credentials.txt"
-#define WIFI_CONF_FILE "/home/Kick/wpa_supplicant.conf"
+#include "kick_Process.h"
+
+// Wi-Fi is wpa_supplicant's job: the system runs it for the interface, and
+// the system's network manager configures the address once it is
+// associated. The application only talks to it through its control
+// interface, with wpa_cli, so it needs no privileges beyond access to the
+// control interface's socket directory.
+#ifndef KICK_WPA_CTRL_DIR
+    #define KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant"
+#endif
+#define WIFI_INTERFACE "wlan0"
 
 namespace mt
 {
@@ -40,86 +49,58 @@ namespace mt
     {
     }
 
-    juce::String WifiManager::executeCommand( const juce::String& command )
+    juce::String WifiManager::wpaCli( const juce::StringArray& args, bool* ok )
     {
-        juce::ChildProcess process;
-        process.start( command );
-        process.waitForProcessToFinish( -1 );
-        return process.readAllProcessOutput();
+        juce::StringArray command { "wpa_cli", "-p", KICK_WPA_CTRL_DIR, "-i", WIFI_INTERFACE };
+        command.addArray( args );
+
+        juce::String output;
+        const int    status = process::run( command, &output );
+        output              = output.trim();
+
+        if( ok != nullptr )
+            *ok = status == 0 && !output.startsWith( "FAIL" );
+
+        return output;
     }
 
-    bool WifiManager::fileExists( const std::string& filename )
+    int WifiManager::findNetwork( const juce::String& ssid )
     {
-        struct stat buffer;
-        return ( stat( filename.c_str(), &buffer ) == 0 );
-    }
+        // "network id / ssid / bssid / flags", then one line per network
+        juce::StringArray lines;
+        lines.addLines( wpaCli( { "list_networks" } ) );
 
-    std::map<std::string, std::string> WifiManager::loadWifiCredentials()
-    {
-        std::ifstream                      file( WIFI_CRED_FILE );
-        std::map<std::string, std::string> wifiMap;
-        std::string                        line;
-
-        while( std::getline( file, line ) )
+        for( int i = 1; i < lines.size(); ++i )
         {
-            std::stringstream ss( line );
-            std::string       ssid, password;
-            if( std::getline( ss, ssid, ':' ) && std::getline( ss, password ) )
-            {
-                wifiMap[ssid] = password;
-            }
-        }
-        return wifiMap;
-    }
-
-    void WifiManager::saveWifiCredential( const std::string& ssid, const std::string& password )
-    {
-        if( !fileExists( WIFI_CRED_FILE ) )
-        {
-            std::ofstream file( WIFI_CRED_FILE );
-            file.close();
+            const auto fields = juce::StringArray::fromTokens( lines[i], "\t", "" );
+            if( fields.size() >= 2 && fields[1] == ssid && fields[0].containsOnly( "0123456789" ) )
+                return fields[0].getIntValue();
         }
 
-        std::ofstream file( WIFI_CRED_FILE, std::ios::app );
-        file << ssid << ":" << password << std::endl;
+        return -1;
     }
 
     const std::vector<juce::String> WifiManager::scanWiFiNetworks()
     {
-        juce::String                                      currentSSID;
-        juce::String                                      currentFrequency;
         std::map<juce::String, std::vector<juce::String>> wifiNetworks;
-        std::vector<juce::String>                         scanResults;
         std::vector<juce::String>                         _networks;
-        juce::String                                      command = "iwlist wlan0 scan";
-        juce::ChildProcess                                childProcess;
 
         DBG( "-------------------------scanning-----------------------" );
-        if( childProcess.start( command ) )
-        {
-            juce::StringArray tempResults;
-            tempResults.addLines( childProcess.readAllProcessOutput() );
-            scanResults.assign( tempResults.begin(), tempResults.end() );
-            childProcess.waitForProcessToFinish( 10000 );
-        }
+        // The scan runs in the background; its results replace the ones
+        // scan_results returns once it is done, which takes a few seconds.
+        wpaCli( { "scan" } );
+        juce::Thread::sleep( 3000 );
 
-        for( const auto& line : scanResults )
-        {
-            if( line.contains( "ESSID:" ) )
-            {
-                currentSSID = line.fromFirstOccurrenceOf( "ESSID:", false, true ).trim().unquoted();
-            }
-            else if( line.contains( "Frequency:" ) )
-            {
-                currentFrequency = line.fromFirstOccurrenceOf( "Frequency:", false, true ).upToFirstOccurrenceOf( " ", false, true ).trim();
-            }
+        // "bssid / frequency / signal level / flags / ssid", then one line
+        // per access point
+        juce::StringArray scanResults;
+        scanResults.addLines( wpaCli( { "scan_results" } ) );
 
-            if( !currentSSID.isEmpty() && !currentFrequency.isEmpty() )
-            {
-                wifiNetworks[currentSSID].push_back( currentFrequency );
-                currentSSID.clear();
-                currentFrequency.clear();
-            }
+        for( int i = 1; i < scanResults.size(); ++i )
+        {
+            const auto fields = juce::StringArray::fromTokens( scanResults[i], "\t", "" );
+            if( fields.size() >= 5 && fields[4].isNotEmpty() )
+                wifiNetworks[fields[4]].push_back( fields[1] );
         }
 
         for( const auto& entry : wifiNetworks )
@@ -143,16 +124,16 @@ namespace mt
 
     bool WifiManager::enableWiFi()
     {
-        juce::String command = "ip link set wlan0 up";
-        juce::String result  = executeCommand( command );
-        return result.isEmpty();
+        bool ok = false;
+        wpaCli( { "reconnect" }, &ok );
+        return ok;
     }
 
     bool WifiManager::disableWiFi()
     {
-        juce::String command = "ip link set wlan0 down";
-        juce::String result  = executeCommand( command );
-        return result.isEmpty();
+        bool ok = false;
+        wpaCli( { "disconnect" }, &ok );
+        return ok;
     }
 
     void WifiManager::displayWiFiNetworks( const std::vector<juce::String>& Networks )
@@ -166,68 +147,50 @@ namespace mt
     bool WifiManager::connectToWiFi( const juce::String& ssid, const juce::String& password, int priority )
     {
         std::cout << "Network: connecting to wifi SSID: " << ssid << std::endl;
-        std::map<std::string, std::string> wifiMap = loadWifiCredentials();
-        std::string                        ssid1   = ssid.toStdString();
-        juce::String                       result  = "";
 
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
-        auto it = wifiMap.find( ssid1 );
-        if( it != wifiMap.end() )
+        // wpa_supplicant stores the networks, so a network it already knows
+        // keeps its passphrase unless a new one is given.
+        bool known = true;
+        int  id    = findNetwork( ssid );
+        if( id < 0 )
         {
-            std::string password1 = wifiMap[ssid1];
-            addSSID( ssid, juce::String( password1 ), priority );
-            std::cout << "SSID found in file. Using stored password." << std::endl;
-        }
-        else
-        {
-            addSSID( ssid, password, priority );
-            saveWifiCredential( ssid.toStdString(), password.toStdString() );
+            known                   = false;
+            const juce::String reply = wpaCli( { "add_network" } );
+            if( !reply.containsOnly( "0123456789" ) || reply.isEmpty() )
+                return false;
+            id = reply.getIntValue();
         }
 
-        juce::String command = "killall -9 wpa_supplicant dhclient";
-        result               = executeCommand( command );
-        sleep( 1 );
-        command = "wpa_supplicant -B -i wlan0 -c /home/Kick/wpa_supplicant.conf";
-        result  = executeCommand( command );
-        sleep( 2 );
-        command = "dhclient wlan0";
-        result  = executeCommand( command );
-#endif
-        return result.isEmpty();
+        // A control character would end up in the stored configuration.
+        for( auto c : password )
+            if( c < 0x20 || c == 0x7f )
+                return false;
+
+        const juce::String network = juce::String( id );
+        bool               ok      = true;
+        auto               set     = [&]( const juce::StringArray& args ) {
+            bool done = false;
+            wpaCli( args, &done );
+            ok = ok && done;
+        };
+
+        // The SSID in hexadecimal, so that no character in it needs quoting.
+        set( { "set_network", network, "ssid", juce::String::toHexString( ssid.toRawUTF8(), (int)ssid.getNumBytesAsUTF8(), 0 ) } );
+        if( password.isNotEmpty() )
+            set( { "set_network", network, "psk", "\"" + password + "\"" } );
+        else if( !known )
+            set( { "set_network", network, "key_mgmt", "NONE" } );
+        set( { "set_network", network, "priority", juce::String( priority ) } );
+        set( { "select_network", network } );
+        set( { "save_config" } );
+
+        return ok;
     }
 
     bool WifiManager::disconnectWiFi()
     {
-        juce::String command = "killall -9 wpa_supplicant dhclient";
-        juce::String result  = executeCommand( command );
-        return result.isEmpty();
-    }
-
-    void WifiManager::addSSID( const juce::String& ssid, const juce::String& password, int priority )
-    {
-        if( !fileExists( WIFI_CONF_FILE ) )
-        {
-            std::ofstream file( WIFI_CONF_FILE );
-            file.close();
-        }
-        juce::File configFile( WIFI_CONF_FILE );
-        if( configFile.existsAsFile() )
-        {
-            juce::String networkConfig =
-                "\nnetwork={\n"
-                "    ssid=\""
-                + ssid + "\"\n"
-                         "    psk=\""
-                + password + "\"\n"
-                             "    key_mgmt=WPA-PSK  "
-                + "\n"
-                  "}\n\n";
-
-            configFile.replaceWithText( networkConfig );
-        }
-        else
-        {
-            std::cerr << "Error: wpa_supplicant.conf file not found or not accessible." << std::endl;
-        }
+        bool ok = false;
+        wpaCli( { "disconnect" }, &ok );
+        return ok;
     }
 }

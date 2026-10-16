@@ -103,6 +103,52 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+## Install layout...
+## KickMain starts the other processes from its own directory, so every
+## process binary goes into one private directory rather than bin/. The
+## data the processes read at run time is installed once, as component
+## KickData, so that each process can be installed on its own with
+##   cmake --install <build> --component <target>
+include(GNUInstallDirs)
+set(KICK_INSTALL_LIBEXECDIR "${CMAKE_INSTALL_LIBEXECDIR}/kick")
+set(KICK_INSTALL_DATADIR    "${CMAKE_INSTALL_DATADIR}/kick")
+
+## Where the Linux build looks for things at run time (kick_paths.cpp).
+set(KICK_DATA_DIR    "/app"         CACHE PATH "Read-only data: assets, demos, templates")
+set(KICK_SAMPLES_DIR "/data/sounds" CACHE PATH "Sample library")
+set(KICK_STATE_DIR   "/home/Kick"   CACHE PATH "Writable state: projects, logs, prefs")
+add_compile_definitions(
+    KICK_DATA_DIR="${KICK_DATA_DIR}"
+    KICK_SAMPLES_DIR="${KICK_SAMPLES_DIR}"
+    KICK_STATE_DIR="${KICK_STATE_DIR}"
+)
+
+## The directory removable disks are mounted below (kick_RemovableMedia.h).
+set(KICK_MEDIA_DIR "/mnt" CACHE PATH "Mount point directory of removable disks")
+add_compile_definitions(KICK_MEDIA_DIR="${KICK_MEDIA_DIR}")
+
+## The power key's input device (kick_Hwpref.cpp).
+set(KICK_POWER_KEY_DEVICE "/dev/input/event2" CACHE FILEPATH "Power key input device")
+add_compile_definitions(KICK_POWER_KEY_DEVICE="${KICK_POWER_KEY_DEVICE}")
+
+## The front-panel MCU's serial port (input_events.cpp) and the CV DAC's I2C
+## bus (kick_I2c.cpp).
+set(KICK_MCU_SERIAL_DEVICE "/dev/ttymxc0" CACHE FILEPATH "Front-panel MCU serial port")
+set(KICK_CV_DAC_I2C_DEVICE "/dev/i2c-3"   CACHE FILEPATH "CV DAC I2C bus device")
+add_compile_definitions(
+    KICK_MCU_SERIAL_DEVICE="${KICK_MCU_SERIAL_DEVICE}"
+    KICK_CV_DAC_I2C_DEVICE="${KICK_CV_DAC_I2C_DEVICE}"
+)
+
+## A systemd unit that performs the factory reset (kick_Hwpref.cpp); empty:
+## the application removes its own projects and preferences.
+set(KICK_FACTORY_RESET_UNIT "" CACHE STRING "systemd unit that performs a factory reset")
+add_compile_definitions(KICK_FACTORY_RESET_UNIT="${KICK_FACTORY_RESET_UNIT}")
+
+## wpa_supplicant's control interface directory (kick_WifiFirmware.cpp).
+set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
+add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")
+
 ## CMake package management...
 ## Fetch 3rd Party dependencies from their respective git repositories...
 include(3rdParty.cmake)
@@ -113,6 +159,15 @@ if( TIMESTAMP )
 endif()
 add_subdirectory(modules)
 add_subdirectory(apps)
+
+install(
+    DIRECTORY
+        "${CMAKE_SOURCE_DIR}/assets"
+        "${CMAKE_SOURCE_DIR}/templates"
+        "${CMAKE_SOURCE_DIR}/demos"
+    DESTINATION "${KICK_INSTALL_DATADIR}"
+    COMPONENT KickData
+)
 
 ##
 ## Add CPack support

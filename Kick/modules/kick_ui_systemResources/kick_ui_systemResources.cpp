@@ -108,6 +108,7 @@ namespace kick_ui
         cpu.setValue( cpuusage, juce::dontSendNotification );
         ram.setValue( rInfo.perRam, juce::dontSendNotification );
         flash.setValue( sInfo.perSize, juce::dontSendNotification );
+        sdCardPath = mt::getRemovableMediaPath( mt::RemovableMedia::SdCard );
         mt::SystemResource::getResourceInterface().sizeInfo( sdCardPath, sInfo );
         if( sInfo.status )
         {
@@ -118,6 +119,7 @@ namespace kick_ui
         {
             sdcard.setVisible( false );
         }
+        usbDiskPath = mt::getRemovableMediaPath( mt::RemovableMedia::UsbDisk );
         mt::SystemResource::getResourceInterface().sizeInfo( usbDiskPath, sInfo );
         if( sInfo.status )
         {
