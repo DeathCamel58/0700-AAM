@@ -242,7 +242,7 @@ namespace AudIO
         }
     }
 
-    inline float ADSRObj::processADSR()
+    float ADSRObj::processADSR()
     {
         if( bypass )
             return 1.f;
@@ -284,12 +284,12 @@ namespace AudIO
         return output;
     }
 
-    inline float ADSRObj::getRate( float distance, float timeInSeconds ) const
+    float ADSRObj::getRate( float distance, float timeInSeconds ) const
     {
         return timeInSeconds > 0.0f ? (float)( distance / ( timeInSeconds * sampleRate() ) ) : -1.0f;
     }
 
-    inline void ADSRObj::goToNextState()
+    void ADSRObj::goToNextState()
     {
         if( state == State::attack )
         {
@@ -311,7 +311,7 @@ namespace AudIO
         output = 0.0;
     }
 
-    inline void ADSRObj::recalculateCoeffs()
+    void ADSRObj::recalculateCoeffs()
     {
         recalulateAttack();
         recalulateDecay();

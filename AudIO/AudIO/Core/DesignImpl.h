@@ -121,9 +121,9 @@ namespace AudIO
         bool handleRemove( uint32_t id );
         void processRemoveQueue();
 
-        inline void handleClearDesign();
-        inline void handleClearDesignInput();
-        inline void handleClearDesignOutput();
+        void handleClearDesign();
+        void handleClearDesignInput();
+        void handleClearDesignOutput();
 
     public:
         MeterEngine _meters;

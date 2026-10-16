@@ -45,7 +45,7 @@ namespace AudIO
         int         _metersPerBlock;
         int         _meterIdx{ 0 };
         float       _rateMs{ 0.1f };
-        inline void recalculate();
+        void recalculate();
 #endif
     };
 } // Namespace AudIO

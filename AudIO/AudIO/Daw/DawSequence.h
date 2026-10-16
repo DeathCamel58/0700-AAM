@@ -76,10 +76,10 @@ namespace AudIO
 
     private:
         int               setTrackSolo( DawTrack* Trk, const bool Solo );
-        inline const bool getTrackSolo( DawTrack* Trk );
+        const bool getTrackSolo( DawTrack* Trk );
 
         int               setMute( DawTrack* Trk, const bool Mute );
-        inline const bool getTrackMute( DawTrack* Trk );
+        const bool getTrackMute( DawTrack* Trk );
 
         std::string                            _name;
         std::vector<std::unique_ptr<DawTrack>> _tracks;

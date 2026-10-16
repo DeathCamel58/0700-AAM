@@ -464,7 +464,7 @@ namespace AudIO
         }
     }
 
-    inline void DesignImpl::handleClearDesign()
+    void DesignImpl::handleClearDesign()
     {
         if( _clearRequest.load() )
         {
@@ -486,7 +486,7 @@ namespace AudIO
         }
     }
 
-    inline void DesignImpl::handleClearDesignInput()
+    void DesignImpl::handleClearDesignInput()
     {
         if( _clearDesignInput.load() )
         {
@@ -504,7 +504,7 @@ namespace AudIO
         }
     }
 
-    inline void DesignImpl::handleClearDesignOutput()
+    void DesignImpl::handleClearDesignOutput()
     {
         if( _clearDesignOutput.load() )
         {
