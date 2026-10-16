@@ -37,7 +37,6 @@ namespace kick_ui
     private:
         void handleEnabledClick();
 
-        void initializeInterfaceState();
         void connectWifi( bool connect );
 
     private:
