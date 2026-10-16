@@ -4,6 +4,7 @@
 
 #include "Bus.h"
 #include "MeterEngine.h"
+#include "RtSync.h"
 
 #include <atomic>
 #include <list>
@@ -90,7 +91,7 @@ namespace AudIO
         uint32_t                insertDesign( std::shared_ptr<Design> obj );
         std::shared_ptr<Design> getDesign( uint32_t id );
 
-        inline void markDirty() { _dirty.store( true ); }
+        inline void markDirty() { rebuildRenderSequence(); }
         inline bool isBypassed() const { return _bypass.load(); }
         inline void setBypass( const bool bypass )
         {
@@ -112,14 +113,32 @@ namespace AudIO
         inline bool exists( uint32_t ID ) { return ( nullptr != getObject( ID ) ); }
 
     private:
+        // What the audio thread processes, in order. Built by control threads
+        // whenever the graph changes and published whole; the audio thread
+        // never looks at the containers below.
+        struct RenderSequence
+        {
+            std::vector<objectMeta*> order;
+        };
+
+        // An object taken out of the design, freed once nothing uses it.
+        struct RemovedObject
+        {
+            std::shared_ptr<Design>                                 design;
+            std::list<std::unique_ptr<Chain>>                       chain;
+            std::list<std::unique_ptr<Bus>>                         bus;
+            std::list<std::unique_ptr<Object>>                      object;
+            std::unordered_map<uint32_t, objectMeta>::node_type     meta;
+        };
+
         bool isCyclic();
-        void topologicalSort();
-        void topologicalSortUtil( objectMeta& meta );
+        void rebuildRenderSequence();
+        void topologicalSort( std::vector<objectMeta*>& order );
+        void topologicalSortUtil( objectMeta& meta, std::vector<objectMeta*>& order, uint32_t& index );
 
         bool checkCycles( objectMeta& meta );
 
         bool handleRemove( uint32_t id );
-        void processRemoveQueue();
 
         void handleClearDesign();
         void handleClearDesignInput();
@@ -130,8 +149,7 @@ namespace AudIO
 
     private:
         std::list<std::unique_ptr<Object>> _objectPointers;
-        std::vector<objectMeta*>           _dfs;
-        SPSCQUeue<uint32_t, 16>            _removeQueue;
+        RtPublished<RenderSequence>        _renderSequence;
         AudIO::Buffer<float>               _metersbuff; // empty buffer for meters
 
         std::unordered_map<uint32_t, objectMeta> _objects;
@@ -141,7 +159,6 @@ namespace AudIO
 
         uint32_t _inputCount{ 0 };
         uint32_t _outputCount{ 0 };
-        uint32_t _dfsIndex{ 0 };
         uint32_t _sampleRate;
         uint32_t _blockSize;
 
@@ -151,14 +168,12 @@ namespace AudIO
         RampedParameter<float> designOutputGain{ 0.0f };
 
         // Atomic operations...
-        std::atomic<bool> _dirty{ false };
         std::atomic<bool> _bypass{ true };
         std::atomic<bool> _running{ false };
 
         std::atomic<AudIO::Buffer<float>*> _inputObjBuffer{ nullptr };
         std::atomic<AudIO::Buffer<float>*> _outputObjBuffer{ nullptr };
 
-        std::atomic<bool> _clearRequest{ false };
         std::atomic<bool> _clearDesignInput{ false };
         std::atomic<bool> _clearDesignOutput{ false };
     };

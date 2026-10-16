@@ -3,6 +3,7 @@
 #include <unordered_map>
 
 #include "ObjectMeta.h"
+#include "RtSync.h"
 #include "../Includes/AudioDataTypes.h"
 #include "../Includes/Platform.h"
 #include "../Objects/LevelMeter.h"
@@ -34,18 +35,30 @@ namespace AudIO
         void process( Buffer<float>& buffer ) override;
 
     private:
-        using MeterMapType = std::unordered_map<uint32_t, std::pair<LevelMeter, objectMeta*>>;
+        using MeterEntry   = std::pair<std::shared_ptr<LevelMeter>, objectMeta*>;
+        using MeterMapType = std::unordered_map<uint32_t, MeterEntry>;
 
-        MeterMapType    _meters;
-        MeterData       _data{ 2 };
-        recursive_mutex _lock;
+        // The meters the audio thread runs, in the map's order. Published
+        // whole whenever the map changes; a removed meter lives on in the
+        // list it was in until the audio thread is done with that list.
+        struct MeterList
+        {
+            std::vector<MeterEntry> meters;
+        };
+
+        void publish();
+
+        MeterMapType           _meters;
+        RtPublished<MeterList> _list;
+        MeterData              _data{ 2 };
+        recursive_mutex        _lock;
 
 #if defined( METERING_LOAD_BALANCE ) && ( METERING_LOAD_BALANCE > 0 )
-        int         _loopCntr{ 1 };
-        int         _metersPerBlock;
-        int         _meterIdx{ 0 };
-        float       _rateMs{ 0.1f };
-        void recalculate();
+        int              _loopCntr{ 1 };
+        std::atomic<int> _metersPerBlock{ 1 };
+        int              _meterIdx{ 0 }; // Audio thread.
+        float            _rateMs{ 0.1f };
+        void             recalculate();
 #endif
     };
 } // Namespace AudIO

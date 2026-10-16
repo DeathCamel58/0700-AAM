@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace AudIO
 {
@@ -145,4 +146,62 @@ namespace AudIO
             return; // Freed here.
         static_cast<void>( new std::shared_ptr<void>( std::move( Garbage ) ) );
     }
+
+    //
+    // RtPublished: a snapshot that a control thread replaces and the audio
+    // thread reads, without locks. The audio thread uses get() during a block;
+    // the snapshot it got stays valid until the end of that block. Replaced
+    // snapshots are freed by later publish() calls (or the destructor), on the
+    // control thread, once the audio thread has moved past them.
+    //
+    template<typename T>
+    class RtPublished
+    {
+    public:
+        RtPublished() = default;
+        ~RtPublished() = default;
+
+        RtPublished( const RtPublished& )            = delete;
+        RtPublished& operator=( const RtPublished& ) = delete;
+
+        // Audio thread (or control thread).
+        T* get() const noexcept { return live.load(); }
+
+        // Control thread: the snapshot last published.
+        T* current() const noexcept { return owned.get(); }
+
+        // Control thread: make Next the live snapshot.
+        void publish( std::unique_ptr<T> Next )
+        {
+            auto previous = std::move( owned );
+            owned         = std::move( Next );
+            live.store( owned.get() );
+
+            collect();
+            if( previous )
+            {
+                const auto s = AudioThreadSync::get().stamp();
+                if( !AudioThreadSync::get().hasPassed( s ) )
+                    retired.push_back( { s, std::move( previous ) } );
+            }
+        }
+
+        // Control thread: free replaced snapshots the audio thread is done with.
+        void collect()
+        {
+            auto& sync = AudioThreadSync::get();
+            for( auto it = retired.begin(); it != retired.end(); )
+            {
+                if( sync.hasPassed( it->first ) )
+                    it = retired.erase( it );
+                else
+                    ++it;
+            }
+        }
+
+    private:
+        std::atomic<T*>                                      live{ nullptr };
+        std::unique_ptr<T>                                   owned;
+        std::vector<std::pair<uint32_t, std::unique_ptr<T>>> retired;
+    };
 } // Namespace AudIO

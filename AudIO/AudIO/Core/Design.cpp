@@ -256,9 +256,15 @@ namespace AudIO
     {
         autolock guard{ lockerMutex };
 
-        auto retVal = pImpl->insertDesign( obj );
-        if( 0 != retVal )
+        // Set before the audio thread can see it: a design without a parent
+        // runs as the top-level one.
+        auto previousParent = obj ? obj->pParent : nullptr;
+        if( obj )
             obj->pParent = this;
+
+        auto retVal = pImpl->insertDesign( obj );
+        if( 0 == retVal && obj )
+            obj->pParent = previousParent;
 
         return retVal;
     }
@@ -581,6 +587,7 @@ namespace AudIO
 
     void Design::clear()
     {
+        autolock guard{ lockerMutex };
         pImpl->clear();
     }
 
