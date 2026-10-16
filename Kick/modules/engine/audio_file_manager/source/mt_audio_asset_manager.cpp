@@ -148,7 +148,7 @@ namespace mt
         if( sliceVT.isValid() && sliceVT.hasType( IDs::SLICE ) )
         {
             // Create slice object
-            auto sObj = std::make_unique<ASoundSlice>( sliceVT, um );
+            auto sObj = std::make_shared<ASoundSlice>( sliceVT, um );
             sObj->setSource( asc.exists( File ) );
 
             // Add to slice map.
@@ -311,19 +311,25 @@ namespace mt
         return asset.isEmpty() ? nullptr : asc.getOrLoad( asset, LengthInSeconds );
     }
 
-    std::vector<std::unique_ptr<ASoundSlice>>& MTAudioAssetManager::getAssetSlices( const juce::String& File )
+    std::vector<std::shared_ptr<ASoundSlice>>& MTAudioAssetManager::getAssetSlices( const juce::String& File )
     {
         return sliceMap[File];
     }
 
-    std::vector<std::unique_ptr<ASoundSlice>>& MTAudioAssetManager::getAssetSlices( int Index, AssetTypes Type )
+    std::vector<std::shared_ptr<ASoundSlice>>& MTAudioAssetManager::getAssetSlices( int Index, AssetTypes Type )
     {
         return getAssetSlices( getAssetName( Type, Index ) );
     }
 
     ASoundSlice* MTAudioAssetManager::getAssetSlice( const juce::String& File, int Index )
     {
-        return ( Index < sliceMap[File].size() ) ? sliceMap[File].at( Index ).get() : nullptr;
+        return getSharedAssetSlice( File, Index ).get();
+    }
+
+    std::shared_ptr<ASoundSlice> MTAudioAssetManager::getSharedAssetSlice( const juce::String& File, int Index )
+    {
+        auto& slices = sliceMap[File];
+        return juce::isPositiveAndBelow( Index, slices.size() ) ? slices[(size_t)Index] : nullptr;
     }
 
     void MTAudioAssetManager::addAssetSlice( const juce::String& File, ASoundSlice* Slice, int Index )
@@ -336,7 +342,7 @@ namespace mt
             auto parent = slices.at( 0 )->getState().getParent();
             auto child  = Slice->getState().createCopy();
             // Create slice object.
-            auto sObj = std::make_unique<ASoundSlice>( child, um );
+            auto sObj = std::make_shared<ASoundSlice>( child, um );
             sObj->setSource( asc.exists( File ) );
             // Add to map, and tree.
             int pos = ( 0 >= Index ) ? slices.size() : Index;

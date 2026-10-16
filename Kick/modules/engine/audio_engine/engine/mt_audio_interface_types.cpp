@@ -69,7 +69,8 @@ namespace mt
     {
         auto sliceSource = [&]() {
             auto& assetMgr = getAudioInterface().getAssetManager();
-            src            = assetMgr.getAssetSlice( source.get(), slice.get() ); // Source
+            srcRef         = assetMgr.getSharedAssetSlice( source.get(), slice.get() ); // Source
+            src            = srcRef.get();
         };
 
         source.onValueChange.connect( sliceSource );

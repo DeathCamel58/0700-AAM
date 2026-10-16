@@ -76,13 +76,14 @@ namespace mt
         ASound::Ptr getAssetSound( const juce::String& File );
         ASound::Ptr getAssetSound( int Index, AssetTypes Type = AssetTypes::Samples );
 
-        std::vector<std::unique_ptr<ASoundSlice>>& getAssetSlices( const juce::String& File );
-        std::vector<std::unique_ptr<ASoundSlice>>& getAssetSlices( int Index, AssetTypes Type = AssetTypes::Samples );
+        std::vector<std::shared_ptr<ASoundSlice>>& getAssetSlices( const juce::String& File );
+        std::vector<std::shared_ptr<ASoundSlice>>& getAssetSlices( int Index, AssetTypes Type = AssetTypes::Samples );
 
-        ASoundSlice* getAssetSlice( const juce::String& File, int Index = 0 );
-        void         addAssetSlice( const juce::String& File, ASoundSlice* Slice, int Index = -1 );
-        void         removeAssetSlice( const juce::String& File, int Index );
-        void         removeAllSlices( const juce::String& File );
+        ASoundSlice*                 getAssetSlice( const juce::String& File, int Index = 0 );
+        std::shared_ptr<ASoundSlice> getSharedAssetSlice( const juce::String& File, int Index = 0 );
+        void                         addAssetSlice( const juce::String& File, ASoundSlice* Slice, int Index = -1 );
+        void                         removeAssetSlice( const juce::String& File, int Index );
+        void                         removeAllSlices( const juce::String& File );
 
         juce::ValueTree getAssetsVT() { return state; };
 
@@ -108,7 +109,9 @@ namespace mt
         std::vector<juce::String> audio;
         std::vector<juce::String> empty;
 
-        std::map<juce::String, std::vector<std::unique_ptr<ASoundSlice>>> sliceMap;
+        // Shared: the programs' layers that play a slice, and what they
+        // publish for the sequencer, keep it alive after it leaves the map.
+        std::map<juce::String, std::vector<std::shared_ptr<ASoundSlice>>> sliceMap;
 
         void updateDirectories( int Index );
         void updateFiles();
