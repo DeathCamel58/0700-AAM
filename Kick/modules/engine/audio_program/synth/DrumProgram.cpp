@@ -122,12 +122,7 @@ namespace mt
                 if( auto soundSlice = pNote->layers[layerToPlay]->src )
                 {
                     // Start playback.
-                    if( auto voice = dynamic_cast<DrumVoice*>( getFreeVoice( Note, notePoly ) ) )
-                    {
-                        voice->setSlice( soundSlice );
-                        voice->noteOn( Note, Velocity );
-                        addVoiceForPlayback( voice );
-                    }
+                    postNoteOn( Note, Velocity, notePoly, soundSlice );
                 }
             }
 

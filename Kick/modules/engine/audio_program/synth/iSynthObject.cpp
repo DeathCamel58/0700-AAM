@@ -124,15 +124,24 @@ namespace mt
     void ISynthObject::noteMute( int Note, bool Mute )
     {
         if( CommonUtils::isValidMidiNote( Note ) )
-            for( auto& it : voices )
-                it->noteMute( Note, Mute );
+        {
+            NoteEvent event;
+            event.type = NoteEvent::Type::NoteMute;
+            event.note = Note;
+            event.flag = Mute;
+            postNoteEvent( event );
+        }
     }
 
     void ISynthObject::noteReset( int Note )
     {
         if( CommonUtils::isValidMidiNote( Note ) )
-            for( auto& it : voices )
-                it->noteReset( Note );
+        {
+            NoteEvent event;
+            event.type = NoteEvent::Type::NoteReset;
+            event.note = Note;
+            postNoteEvent( event );
+        }
     }
 
     void ISynthObject::noteReset( std::vector<int>& Notes )
@@ -151,8 +160,12 @@ namespace mt
     void ISynthObject::noteOff( int Note )
     {
         if( CommonUtils::isValidMidiNote( Note ) )
-            for( auto& it : voices )
-                it->noteOff( Note );
+        {
+            NoteEvent event;
+            event.type = NoteEvent::Type::NoteOff;
+            event.note = Note;
+            postNoteEvent( event );
+        }
     }
 
     void ISynthObject::noteOff( std::vector<int>& Notes )
@@ -163,8 +176,110 @@ namespace mt
 
     void ISynthObject::noteOffAll()
     {
-        for( auto& it : voices )
-            it->noteOff();
+        NoteEvent event;
+        event.type = NoteEvent::Type::NoteOffAll;
+        postNoteEvent( event );
+    }
+
+    void ISynthObject::postNoteOn( int Note, int Velocity, int Polyphony, ASoundSlice* Slice )
+    {
+        postNoteOn( Note, Note, Velocity, Polyphony, Slice );
+    }
+
+    void ISynthObject::postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, ASoundSlice* Slice )
+    {
+        NoteEvent event;
+        event.type      = NoteEvent::Type::NoteOn;
+        event.note      = Note;
+        event.voiceNote = VoiceNote;
+        event.velocity  = Velocity;
+        event.polyphony = Polyphony;
+        event.slice     = Slice;
+        postNoteEvent( event );
+    }
+
+    void ISynthObject::postNoteEvent( const NoteEvent& Event )
+    {
+        const std::lock_guard<std::mutex> lock( noteQueueLock );
+
+        // The audio thread empties the queue every block, so it is only full
+        // when the audio thread is not running (or a burst of over a
+        // thousand events came within one block): wait for one block.
+        if( 0 == noteFifo.getFreeSpace() )
+            AudIO::AudioThreadSync::get().waitForBlock( std::chrono::milliseconds( 50 ) );
+
+        const auto scope = noteFifo.write( 1 );
+        if( scope.blockSize1 > 0 )
+            noteQueue[(size_t)scope.startIndex1] = Event;
+        else if( scope.blockSize2 > 0 )
+            noteQueue[(size_t)scope.startIndex2] = Event;
+        else
+            DBG( "ISynthObject: note queue full, note event dropped" );
+    }
+
+    void ISynthObject::processNoteEvents()
+    {
+        const auto ready = noteFifo.getNumReady();
+        if( 0 == ready )
+            return;
+
+        const auto scope = noteFifo.read( ready );
+        for( auto i = 0; i < scope.blockSize1; ++i )
+            handleNoteEvent( noteQueue[(size_t)( scope.startIndex1 + i )] );
+        for( auto i = 0; i < scope.blockSize2; ++i )
+            handleNoteEvent( noteQueue[(size_t)( scope.startIndex2 + i )] );
+    }
+
+    void ISynthObject::handleNoteEvent( const NoteEvent& Event )
+    {
+        const auto note = Event.note;
+        switch( Event.type )
+        {
+            case NoteEvent::Type::NoteOn:
+                if( auto voice = getFreeVoice( note, Event.polyphony ) )
+                {
+                    voice->setSlice( Event.slice );
+                    voice->noteOn( Event.voiceNote, Event.velocity );
+                    addVoiceForPlayback( voice );
+                }
+                break;
+
+            case NoteEvent::Type::ClipNoteOn:
+                if( auto voice = isPlayback( note ) )
+                {
+                    if( Event.flag )
+                        voice->noteOff();
+                    voice->reset();
+                    voice->noteOn( Event.voiceNote, Event.velocity );
+                }
+                else if( auto free = getFreeVoice( note, Event.polyphony ) )
+                {
+                    free->setSlice( Event.slice );
+                    free->noteOn( Event.voiceNote, Event.velocity );
+                    addVoiceForPlayback( free );
+                }
+                break;
+
+            case NoteEvent::Type::NoteOff:
+                for( auto& it : voices )
+                    it->noteOff( note );
+                break;
+
+            case NoteEvent::Type::NoteOffAll:
+                for( auto& it : voices )
+                    it->noteOff();
+                break;
+
+            case NoteEvent::Type::NoteMute:
+                for( auto& it : voices )
+                    it->noteMute( note, Event.flag );
+                break;
+
+            case NoteEvent::Type::NoteReset:
+                for( auto& it : voices )
+                    it->noteReset( note );
+                break;
+        }
     }
 
     void ISynthObject::prepareToPlay( uint32_t samplerate, uint32_t blocksize )
@@ -172,6 +287,11 @@ namespace mt
         AudIO::Object::prepareToPlay( samplerate, blocksize );
         AudIO::DawInserts::prepareToPlay( samplerate, blocksize );
         initialize( samplerate, blocksize );
+
+        // The audio thread is not running this object now. Drop what was
+        // queued while nothing played it, rather than play it all at once.
+        const std::lock_guard<std::mutex> lock( noteQueueLock );
+        noteFifo.reset();
     }
 
     void ISynthObject::teardown()
@@ -184,6 +304,8 @@ namespace mt
     {
         juce::AudioBuffer<float> bufferToFill( (float* const*)buffer.getOutputs(), buffer.getNumOutputChannels(), buffer.getBlockSize() );
         bufferToFill.clear();
+
+        processNoteEvents();
 
         if( isBypassed() )
             return;

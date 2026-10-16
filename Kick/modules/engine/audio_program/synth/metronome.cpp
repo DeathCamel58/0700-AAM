@@ -58,12 +58,7 @@ namespace mt
     void Metronome::noteOn( int Note, int Velocity )
     {
         noteOff( Note );
-        if( auto voice = getFreeVoice( Note, 1 ) )
-        {
-            voice->setSlice( &slice );
-            voice->noteOn( Note, Velocity );
-            addVoiceForPlayback( voice );
-        }
+        postNoteOn( Note, Velocity, 1, &slice );
     }
 
 };

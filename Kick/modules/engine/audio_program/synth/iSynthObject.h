@@ -53,6 +53,11 @@ namespace mt
         // Virtual functions.
         virtual void noteProcess( juce::Array<juce::MidiMessage>& ){};
 
+        // The note functions below can be called from any thread but the
+        // audio thread (the sequencer's tick thread, the message thread).
+        // They only queue the change: the voices belong to the audio thread,
+        // which applies queued changes at the start of the next block.
+
         virtual void noteOff( int Note );
         virtual void noteOff( std::vector<int>& Notes );
         virtual void noteOffAll();
@@ -71,6 +76,7 @@ namespace mt
         virtual void doProcess( juce::AudioBuffer<float>& buffer );
         virtual void postProcess( juce::AudioBuffer<float>& buffer );
 
+        // Audio thread only (they look at the voices).
         bool isPlaying( int Note );
         int  getNumPlaying( int Note ) const;
 
@@ -80,10 +86,40 @@ namespace mt
         void         playVoice( ISynthVoice* Voice );
         void         addVoiceForPlayback( ISynthVoice* Voice );
 
+    protected:
+        // A change to the voices, queued for the audio thread.
+        struct NoteEvent
+        {
+            enum class Type
+            {
+                NoteOn, // Start a free voice on slice (if Polyphony allows).
+                ClipNoteOn, // Restart the voice playing Note, or start a free one.
+                NoteOff,
+                NoteOffAll,
+                NoteMute,
+                NoteReset,
+            };
+
+            Type         type{ Type::NoteOff };
+            int          note{ -1 }; // Note the voice is allocated for.
+            int          voiceNote{ -1 }; // Note the voice is started with.
+            int          velocity{ 0 };
+            int          polyphony{ 1 };
+            bool         flag{ false }; // NoteMute: mute; ClipNoteOn: note off first.
+            ASoundSlice* slice{ nullptr };
+        };
+
+        void postNoteOn( int Note, int Velocity, int Polyphony, ASoundSlice* Slice );
+        void postNoteOn( int Note, int VoiceNote, int Velocity, int Polyphony, ASoundSlice* Slice );
+        void postNoteEvent( const NoteEvent& Event );
+
     private:
         void process( AudIO::Buffer<float>& buffer );
         void prepareToPlay( uint32_t samplerate, uint32_t blocksize );
         void teardown();
+
+        void processNoteEvents(); // Audio thread.
+        void handleNoteEvent( const NoteEvent& Event ); // Audio thread.
 
     protected:
         MTIAtomicProgramMaster master;
@@ -92,6 +128,12 @@ namespace mt
         std::atomic<bool>                         bypass_{ true };
         std::atomic<bool>                         outMeterEnabled_{ true };
         std::vector<std::unique_ptr<ISynthVoice>> voices;
+
+        // Single consumer (the audio thread); the producers take the lock.
+        static constexpr int                  NOTE_QUEUE_SIZE{ 1024 };
+        juce::AbstractFifo                    noteFifo{ NOTE_QUEUE_SIZE };
+        std::array<NoteEvent, NOTE_QUEUE_SIZE> noteQueue;
+        std::mutex                            noteQueueLock;
 
         AudIO::MeterData  outMeterData;
         AudIO::LevelMeter meter;
