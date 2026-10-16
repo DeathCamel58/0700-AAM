@@ -43,6 +43,13 @@ namespace kick_ui
 
         void AssignSampleStartUp( void );
 
+        // Destroys the screens, the LED control and the bars. The instance
+        // is a function-local static, destroyed only after JUCE has shut
+        // down, and after the statics that the screens first used (they are
+        // created after it): call this while JUCE is still running, once the
+        // window no longer shows it.
+        void shutdown();
+
     private:
         KickHome();
         ~KickHome();

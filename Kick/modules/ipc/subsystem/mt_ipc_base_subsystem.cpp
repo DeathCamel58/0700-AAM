@@ -125,6 +125,7 @@ namespace ipc
         int                                                             parentProcessConnectionId;
         juce::HashMap<int, std::shared_ptr<ipc::MTIPCProcessRestarter>> delayedRestarters;
         juce::HashMap<int, int>                                         connectionIdtoConnectedHost;
+        std::function<void( int, bool )>                                childProcessListener;
 
     };
 
@@ -254,8 +255,8 @@ namespace ipc
         {
             juce::Logger::writeToLog( "Initializing Processes..." );
             data->pmCallback.reset(
-                new ipc::MTIPCProcessManagerCallback( whileRunning<int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStarted, this, std::placeholders::_1, std::placeholders::_2 ) ),
-                                                      whileRunning<int, int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3 ) ),
+                new ipc::MTIPCProcessManagerCallback( whileRunning<int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::onChildProcessStarted, this, std::placeholders::_1, std::placeholders::_2 ) ),
+                                                      whileRunning<int, int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::onChildProcessStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3 ) ),
                                                       whileRunning<int, const juce::String&>( data, std::bind( &ipc::MTIPCBaseSubsystem::childProcessStartFailed, this, std::placeholders::_1, std::placeholders::_2 ) ),
                                                       whileRunning<int>( data, std::bind( &ipc::MTIPCBaseSubsystem::restartChildProcess, this, std::placeholders::_1 ) ) ) );
 
@@ -382,6 +383,26 @@ namespace ipc
     std::shared_ptr<ipc::MTIPCProcessManager> MTIPCBaseSubsystem::processManager()
     {
         return data ? data->processManager : nullptr;
+    }
+
+    void MTIPCBaseSubsystem::setChildProcessListener( std::function<void( int, bool )> listener )
+    {
+        if( data )
+            data->childProcessListener = std::move( listener );
+    }
+
+    void MTIPCBaseSubsystem::onChildProcessStarted( int processIdentifier, const juce::String& processName )
+    {
+        if( data->childProcessListener )
+            data->childProcessListener( processIdentifier, true );
+        childProcessStarted( processIdentifier, processName );
+    }
+
+    void MTIPCBaseSubsystem::onChildProcessStopped( int processIdentifier, int exitCode, const juce::String& processName )
+    {
+        if( data->childProcessListener )
+            data->childProcessListener( processIdentifier, false );
+        childProcessStopped( processIdentifier, exitCode, processName );
     }
 
     void MTIPCBaseSubsystem::restartChildProcess( int processIdentifier )

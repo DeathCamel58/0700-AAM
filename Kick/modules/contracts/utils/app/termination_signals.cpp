@@ -26,7 +26,8 @@
  #include <cerrno>
  #include <csignal>
  #include <cstring>
- #include <fcntl.h>
+ #include <pthread.h>
+ #include <sys/signalfd.h>
  #include <unistd.h>
 #endif
 
@@ -37,18 +38,31 @@ namespace contracts
     {
         const int terminationSignals[] = { SIGTERM, SIGINT, SIGHUP };
 
-        // Written by the signal handler, so a plain int: only one
-        // TerminationSignals exists at a time.
-        int signalWriteFd = -1;
-
-        void writeSignalToPipe( int signalNumber )
+        sigset_t terminationSignalSet()
         {
-            const int           savedErrno = errno;
-            const unsigned char byte       = static_cast<unsigned char>( signalNumber );
-            // Nothing useful can be done if the pipe is full: the message
-            // thread already has a signal to handle.
-            [[maybe_unused]] const ssize_t written = ::write( signalWriteFd, &byte, 1 );
-            errno = savedErrno;
+            sigset_t set;
+            sigemptyset( &set );
+            for( const int signalNumber : terminationSignals )
+                sigaddset( &set, signalNumber );
+            return set;
+        }
+
+        // Runs in the child of every fork(), so that the programs this
+        // process starts do not inherit the blocked signals (exec keeps the
+        // mask). Their action is the default, so no handler of this
+        // process's runs in the child. Async-signal-safe. (posix_spawn()
+        // and system() do not run it: what they start keeps them blocked.)
+        void unblockInChild()
+        {
+            const sigset_t set = terminationSignalSet();
+            ::sigprocmask( SIG_UNBLOCK, &set, nullptr );
+        }
+
+        // Threads started before the signals were blocked would still get
+        // them, with the default action: say so.
+        int countThreads()
+        {
+            return juce::File( "/proc/self/task" ).getNumberOfChildFiles( juce::File::findDirectories );
         }
     }
 #endif
@@ -57,56 +71,53 @@ namespace contracts
         : onSignal( std::move( callback ) )
     {
 #if JUCE_LINUX
-        jassert( signalWriteFd < 0 );
+        jassert( signalFd < 0 );
 
-        int fds[2];
-        if( ::pipe2( fds, O_CLOEXEC | O_NONBLOCK ) != 0 )
+        const int threads = countThreads();
+        if( threads > 1 )
+            juce::Logger::writeToLog( juce::String( threads - 1 ) + " other threads are already running, which may still receive SIGTERM, SIGINT and SIGHUP" );
+
+        // No handler of this process's (such as JUCE's for SIGINT) runs in a
+        // forked child before it execs, once that child unblocks them.
+        for( const int signalNumber : terminationSignals )
+            std::signal( signalNumber, SIG_DFL );
+
+        const sigset_t set = terminationSignalSet();
+        ::pthread_sigmask( SIG_BLOCK, &set, nullptr );
+
+        static const bool registered = ::pthread_atfork( nullptr, nullptr, unblockInChild ) == 0;
+        juce::ignoreUnused( registered );
+
+        signalFd = ::signalfd( -1, &set, SFD_CLOEXEC | SFD_NONBLOCK );
+        if( signalFd < 0 )
         {
-            juce::Logger::writeToLog( "Cannot create the signal pipe: " + juce::String( std::strerror( errno ) ) );
+            juce::Logger::writeToLog( "Cannot create the signal descriptor: " + juce::String( std::strerror( errno ) ) );
             return;
         }
-        readFd        = fds[0];
-        signalWriteFd = fds[1];
 
-        juce::LinuxEventLoop::registerFdCallback( readFd, [this]( int ) { readSignals(); } );
-
-        // This replaces JUCE's own SIGINT handler, which only quits once
-        // the next message arrives.
-        struct sigaction action{};
-        action.sa_handler = writeSignalToPipe;
-        sigemptyset( &action.sa_mask );
-        action.sa_flags = SA_RESTART;
-        for( const int signalNumber : terminationSignals )
-            ::sigaction( signalNumber, &action, nullptr );
+        juce::LinuxEventLoop::registerFdCallback( signalFd, [this]( int ) { readSignals(); } );
 #endif
     }
 
     TerminationSignals::~TerminationSignals()
     {
 #if JUCE_LINUX
-        if( readFd < 0 )
+        if( signalFd < 0 )
             return;
 
-        for( const int signalNumber : terminationSignals )
-            std::signal( signalNumber, SIG_DFL );
-
-        juce::LinuxEventLoop::unregisterFdCallback( readFd );
-        ::close( signalWriteFd );
-        ::close( readFd );
-        signalWriteFd = -1;
+        juce::LinuxEventLoop::unregisterFdCallback( signalFd );
+        ::close( signalFd );
 #endif
     }
 
     void TerminationSignals::readSignals()
     {
 #if JUCE_LINUX
-        unsigned char signalNumbers[16];
-        ssize_t       count;
-        while( ( count = ::read( readFd, signalNumbers, sizeof( signalNumbers ) ) ) > 0 )
+        signalfd_siginfo info;
+        while( ::read( signalFd, &info, sizeof( info ) ) == static_cast<ssize_t>( sizeof( info ) ) )
         {
-            for( ssize_t i = 0; i < count; ++i )
-                if( onSignal )
-                    onSignal( signalNumbers[i] );
+            if( onSignal )
+                onSignal( static_cast<int>( info.ssi_signo ) );
         }
 #endif
     }

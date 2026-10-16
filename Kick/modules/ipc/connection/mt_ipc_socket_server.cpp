@@ -265,6 +265,14 @@ namespace ipc
                 {
                     juce::Logger::writeToLog( "Rejected the registration of " + connectionName );
                     handshakeMessage->setProperty( ipc::IPC_KEY_REGISTERATION_STATUS, ipc::MTIPCRegistrationStatus::IPC_MESSAGE_REGISTERATION_FAILED );
+                    // The connection is no longer in either map, so
+                    // stopServer() will not close it, and its thread keeps
+                    // running until the posted release does, which it never
+                    // does once the message loop has quit. Detach it from
+                    // this server first, so that the peer closing it later
+                    // cannot call into a destroyed server. (Its callback is
+                    // only read on this thread.)
+                    conn->setCallback( nullptr );
                     conn->publish( handshakeMessage );
                     // This is the connection's own thread, which destroying
                     // the connection would wait for: release it on the

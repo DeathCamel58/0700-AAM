@@ -195,7 +195,13 @@ public:
     void shutdown() override
     {
         // Add your application's shutdown code here ...
-        w.reset();
+        if( w )
+        {
+            w.reset();
+            // The window does not own the home screen, a static that would
+            // otherwise destroy its screens after JUCE has shut down.
+            kick_ui::KickHome::Instance().shutdown();
+        }
 
         dclInterface.reset();
         audioEngineInterface.reset();

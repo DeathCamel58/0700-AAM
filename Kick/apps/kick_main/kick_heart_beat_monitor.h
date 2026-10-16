@@ -32,6 +32,10 @@ const int HEART_BEAT_MONITOR_TIMEOUT_IN_MS( 2000 );
 // that loop may be busy (with the UI, say). It must leave time for the
 // restart within the service's WatchdogSec (30 s).
 const int HEART_BEAT_RESTART_TIMEOUT_IN_MS( 10000 );
+// How long a restarted child may take to send its first heartbeat (the
+// engine loads its samples from eMMC on startup) before it is restarted
+// again. Meanwhile it neither holds up the watchdog nor counts as silent.
+const int HEART_BEAT_STARTUP_GRACE_IN_MS( 30000 );
 
 namespace kick
 {
@@ -42,15 +46,15 @@ namespace kick
         // Checks the children's heartbeats every HEART_BEAT_MONITOR_TIMEOUT_IN_MS
         // on the message thread, so the result also shows that KickMain's own
         // message loop is running. Calls onHeartBeatNotReceived for each host
-        // that has been quiet for HEART_BEAT_RESTART_TIMEOUT_IN_MS, then
-        // onHeartBeatsVerified with the expected hosts that have not sent a
-        // heartbeat for that long, or ever.
+        // that has been quiet for HEART_BEAT_RESTART_TIMEOUT_IN_MS, or did not
+        // send a heartbeat within HEART_BEAT_STARTUP_GRACE_IN_MS of a restart,
+        // then onHeartBeatsVerified with the state after those restarts.
         class KickHearBeatMonitor : private juce::Timer
         {
         public:
             KickHearBeatMonitor( std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData,
                                  std::function<void( const int )>               onHeartBeatNotReceived,
-                                 std::function<void( const juce::Array<int>& )> onHeartBeatsVerified = nullptr )
+                                 std::function<void( const KickHeartBeatData::Verification& )> onHeartBeatsVerified = nullptr )
                 : heartBeatData( heartBeatData )
                 , onHeartBeatNotReceived( onHeartBeatNotReceived )
                 , onHeartBeatsVerified( onHeartBeatsVerified )
@@ -76,19 +80,21 @@ namespace kick
         private:
             void timerCallback() override
             {
-                const auto result = heartBeatData->verify( KickHeartBeatData::now(), HEART_BEAT_RESTART_TIMEOUT_IN_MS );
+                const auto result = heartBeatData->verify( KickHeartBeatData::now(), HEART_BEAT_RESTART_TIMEOUT_IN_MS, HEART_BEAT_STARTUP_GRACE_IN_MS );
 
                 if( onHeartBeatNotReceived )
                     for( const int hostId : result.silentHostIds )
                         onHeartBeatNotReceived( hostId );
 
+                // Again, so that a host restarted just now counts as starting.
                 if( onHeartBeatsVerified )
-                    onHeartBeatsVerified( result.missingHostIds );
+                    onHeartBeatsVerified( result.silentHostIds.isEmpty() ? result
+                                                                         : heartBeatData->verify( KickHeartBeatData::now(), HEART_BEAT_RESTART_TIMEOUT_IN_MS, HEART_BEAT_STARTUP_GRACE_IN_MS ) );
             }
 
             std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
             std::function<void( const int )>               onHeartBeatNotReceived;
-            std::function<void( const juce::Array<int>& )> onHeartBeatsVerified;
+            std::function<void( const KickHeartBeatData::Verification& )> onHeartBeatsVerified;
         };
     }
 }

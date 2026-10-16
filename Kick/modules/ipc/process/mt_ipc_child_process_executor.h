@@ -42,11 +42,13 @@ namespace ipc
         // still running IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS
         // later.
         bool stop();
+        // Sends SIGKILL and waits a few seconds for the process to go;
+        // returns false if it has not (it is then reaped in the background).
         bool kill();
         // Returns true if it had to kill the process.
         bool killIfOverdue();
         // Waits for the process to exit, killing it after
-        // IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS.
+        // IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS as kill() does.
         bool join();
         // The exit status, or 128 plus the signal number for a process that
         // a signal killed (as a shell reports it).

@@ -29,8 +29,11 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <system_error>
+#include <thread>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
@@ -40,6 +43,11 @@ namespace ipc
 {
     namespace
     {
+        // How long a process may take to go after SIGKILL. One that takes
+        // longer is stuck in the kernel (in a hung driver, say) and cannot
+        // exit until the kernel call returns.
+        const int PROCESS_WAIT_AFTER_KILL_IN_MILLI_SECONDS( 2000 );
+
         // Runs in the forked child, before exec: async-signal-safe calls
         // only. Closes every descriptor from 'first' on except 'keep'.
         void closeDescriptorsFrom( int first, int keep, int maxFd )
@@ -90,10 +98,7 @@ namespace ipc
         ~MTIPCChildProcessExecutorImpl()
         {
             if( isRunning() )
-            {
-                kill( SIGKILL );
-                reap( 0 );
-            }
+                killAndReap();
         }
 
         bool startChildProcess()
@@ -120,10 +125,26 @@ namespace ipc
                 return false;
             }
 
+            // Until the child has reset the signal handlers and closed this
+            // process's descriptors, a signal must not run one of this
+            // process's handlers in it, with this process's descriptors.
+            // Block every signal across fork(); the child unblocks them once
+            // that is done.
+            sigset_t allSignals, previousMask;
+            sigfillset( &allSignals );
+            ::pthread_sigmask( SIG_SETMASK, &allSignals, &previousMask );
+
             const std::lock_guard<std::mutex> lock( mutex );
             const pid_t                       child = ::fork();
             if( child == 0 )
             {
+                struct sigaction defaultAction{};
+                defaultAction.sa_handler = SIG_DFL;
+                sigemptyset( &defaultAction.sa_mask );
+                for( int signalNumber = 1; signalNumber < NSIG; ++signalNumber )
+                    if( signalNumber != SIGKILL && signalNumber != SIGSTOP )
+                        ::sigaction( signalNumber, &defaultAction, nullptr );
+
                 // The death signal is sent when the thread that forked exits:
                 // processes are started on the message thread, which lives as
                 // long as this process.
@@ -131,12 +152,11 @@ namespace ipc
                 if( ::getppid() != parentPid )
                     ::_exit( 127 );
 
+                closeDescriptorsFrom( STDERR_FILENO + 1, errorPipe[1], maxFd );
+
                 sigset_t noSignals;
                 sigemptyset( &noSignals );
                 ::sigprocmask( SIG_SETMASK, &noSignals, nullptr );
-                ::signal( SIGPIPE, SIG_DFL );
-
-                closeDescriptorsFrom( STDERR_FILENO + 1, errorPipe[1], maxFd );
                 ::execv( argv[0], argv );
 
                 const int error = errno;
@@ -144,10 +164,12 @@ namespace ipc
                 ::_exit( 127 );
             }
 
+            const int forkError = errno;
+            ::pthread_sigmask( SIG_SETMASK, &previousMask, nullptr );
             ::close( errorPipe[1] );
             if( child < 0 )
             {
-                juce::Logger::writeToLog( "Cannot start " + path + ": " + juce::String( std::strerror( errno ) ) );
+                juce::Logger::writeToLog( "Cannot start " + path + ": " + juce::String( std::strerror( forkError ) ) );
                 ::close( errorPipe[0] );
                 return false;
             }
@@ -222,10 +244,39 @@ namespace ipc
             return true;
         }
 
-        void reap( int options )
+        // Sends SIGKILL and waits a bounded time for the process to go. A
+        // process stuck in the kernel would block a blocking waitpid() (on
+        // the message thread, holding up shutdown) until the service
+        // manager killed this process: it is left to a background thread to
+        // reap instead, so that it does not stay a zombie, and is treated as
+        // gone, so that its pid, which another process may get once it has
+        // been reaped, is never signalled again.
+        bool killAndReap()
         {
+            kill( SIGKILL );
+            if( waitForExit( PROCESS_WAIT_AFTER_KILL_IN_MILLI_SECONDS ) )
+                return true;
+
             const std::lock_guard<std::mutex> lock( mutex );
-            reapLocked( options );
+            if( pid <= 0 || exited )
+                return true;
+
+            juce::Logger::writeToLog( config->getProperty( ipc::IPC_KEY_PROCESS_NAME, "" ).toString() + " (pid "
+                                      + juce::String( pid ) + ") did not exit after SIGKILL; reaping it in the background" );
+            try
+            {
+                std::thread( [child = pid]() {
+                    int childStatus;
+                    while( ::waitpid( child, &childStatus, 0 ) < 0 && errno == EINTR )
+                        ;
+                } ).detach();
+            } catch( const std::system_error& e )
+            {
+                juce::Logger::writeToLog( "Cannot start a thread to reap it: " + juce::String( e.what() ) );
+            }
+            exited    = true;
+            abandoned = true;
+            return false;
         }
 
         int exitCode()
@@ -233,6 +284,8 @@ namespace ipc
             const std::lock_guard<std::mutex> lock( mutex );
             if( !exited )
                 return 0;
+            if( abandoned )
+                return 128 + SIGKILL;
             if( WIFSIGNALED( status ) )
                 return 128 + WTERMSIG( status );
             return WIFEXITED( status ) ? WEXITSTATUS( status ) : 0;
@@ -243,6 +296,8 @@ namespace ipc
             const std::lock_guard<std::mutex> lock( mutex );
             if( !exited )
                 return "is running";
+            if( abandoned )
+                return "did not exit after SIGKILL";
             if( WIFSIGNALED( status ) )
                 return "was killed by " + signalName( WTERMSIG( status ) ) + ( WCOREDUMP( status ) ? " (core dumped)" : "" );
             if( WIFEXITED( status ) )
@@ -278,6 +333,8 @@ namespace ipc
         double                     killDeadline{ -1.0 };
         int                        status{ 0 };
         bool                       exited{ false };
+        // Left to a background thread to reap: see killAndReap().
+        bool                       abandoned{ false };
     };
 
     MTIPCChildProcessExecutor::MTIPCChildProcessExecutor( std::shared_ptr<juce::var> config )
@@ -306,7 +363,7 @@ namespace ipc
 
     bool MTIPCChildProcessExecutor::kill()
     {
-        return impl->kill( SIGKILL );
+        return impl->killAndReap();
     }
 
     bool MTIPCChildProcessExecutor::killIfOverdue()
@@ -319,9 +376,7 @@ namespace ipc
         if( impl->waitForExit( IPC_PROCESS_WAIT_TO_FINISH_TIMEOUT_IN_MILLI_SECONDS ) )
             return true;
 
-        impl->kill( SIGKILL );
-        impl->reap( 0 );
-        return true;
+        return impl->killAndReap();
     }
 
     int MTIPCChildProcessExecutor::exitCode()

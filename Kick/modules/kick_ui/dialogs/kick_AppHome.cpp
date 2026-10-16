@@ -245,9 +245,18 @@ namespace kick_ui
 
     KickHome::~KickHome()
     {
+        shutdown();
+    }
+
+    void KickHome::shutdown()
+    {
+        cancelPendingUpdate();
         removeKeyListener( &contracts::getKeypressDetector() );
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
+        removeAllChildren();
         ctrlBar_.reset();
+        ledControl_.reset();
+        screens_.clear();
     }
 
     IScreen* KickHome::getScreen( Screen screen )
@@ -322,8 +331,10 @@ namespace kick_ui
         auto bounds = getLocalBounds();
         {
             auto b = bounds;
-            ctrlBar_->setBounds( b.removeFromTop( ui::layout::header.getHeight() ) );
-            statusBar_->setBounds( b.removeFromBottom( ui::layout::statusBar.getHeight() ) );
+            if( ctrlBar_ )
+                ctrlBar_->setBounds( b.removeFromTop( ui::layout::header.getHeight() ) );
+            if( statusBar_ )
+                statusBar_->setBounds( b.removeFromBottom( ui::layout::statusBar.getHeight() ) );
         }
     }
 
