@@ -41,7 +41,7 @@ namespace AudIO
         //Buffer( Buffer const& )            = delete;
         Buffer& operator=( Buffer const& ) = delete;
 
-        inline bool hasInputs() const { return 0 < outputs.size(); }
+        inline bool hasInputs() const { return 0 < inputs.size(); }
         inline bool hasOutputs() const { return 0 < outputs.size(); }
 
         inline bool     isOutputMono() const { return 1 == (uint32_t)outputs.size(); }
