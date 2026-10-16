@@ -47,13 +47,9 @@ namespace ipc
         int  exitCode( const int processIdentifier );
         bool isRunning( const int processIdentifier );
         bool startProcess( const int processIdentifier );
-        void startProcessInThread(const int pid );
         bool stopProcess( const int processIdentifier );
         bool waitForProcessToExit( const int processIdentifier );
         juce::String processName( const int processIdentifier );
-    private:
-        void starterThreadExitNotifier( int pid );
-
     private:
         std::shared_ptr<MTIPCProcessManagerData>          data;
         std::unique_ptr<ipc::MTIPCProcessMonitorThread>    processMonitorThread;

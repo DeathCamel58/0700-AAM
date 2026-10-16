@@ -30,31 +30,6 @@
 const juce::String DEFAULT_PROCESS_NAME( "" );
 namespace ipc
 {
-    class MTIPCProcessStarterThread : public juce::Thread
-    {
-    public:
-        MTIPCProcessStarterThread( const int processId, std::function<bool( int )> processStartMethod,
-                                   std::function<void( int )> exitNotifier )
-            : juce::Thread( "Process_Starter_Thread " + juce::String( processId ) ), processIdentifier( processId ),
-            processStartMethod( processStartMethod ), exitNotifier( exitNotifier )
-        {
-        }
-
-        void run()
-        {
-            if( !processStartMethod ) return;
-
-            processStartMethod( processIdentifier );
-            juce::MessageManager::callAsync( [&]() { exitNotifier( processIdentifier ); } );
-        }
-
-    private:
-        int                        processIdentifier;
-        std::function<bool( int )> processStartMethod;
-        std::function<void( int )> exitNotifier;
-    };
-
-
 	class MTIPCProcessManagerData
 	{
 	public:
@@ -63,13 +38,27 @@ namespace ipc
 			executors.clear();
 		}
 
-	public:
+        std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor( const int processIdentifier )
+        {
+            const juce::ScopedLock sl( executorsLock );
+            return executors.contains( processIdentifier ) ? executors[processIdentifier] : nullptr;
+        }
 
+        juce::String processName( const int processIdentifier )
+        {
+            if( configurations.contains( processIdentifier ) )
+                return configurations[processIdentifier]->getProperty( ipc::IPC_KEY_PROCESS_NAME, DEFAULT_PROCESS_NAME );
+            return DEFAULT_PROCESS_NAME;
+        }
+
+	public:
+		// Started and stopped on the message thread, and reaped on the
+		// monitor thread.
+		juce::CriticalSection                                                executorsLock;
 		juce::HashMap<int, std::shared_ptr<ipc::MTIPCChildProcessExecutor>> executors;
+		// Set up by initialize(), read-only afterwards.
 		juce::HashMap<int, std::shared_ptr<juce::var>> configurations;
 		std::shared_ptr<ipc::MTIIPCProcessManagerCallback> callback;
-        juce::HashMap<int, std::shared_ptr<ipc::MTIPCProcessStarterThread>> starters;
-
 	};
 
 	class MTIPCProcessMonitorThread : public juce::Thread
@@ -86,33 +75,35 @@ namespace ipc
 
 		virtual void run() override
 		{
-
-			int count = 0;
-			int sleepDuration = 100;
-			int timeoutInmilliSeconds = (ipc::IPC_PROCESS_MONITOR_THREAD_TIMEOUT_IN_MILLI_SECONDS) / sleepDuration;
-
-			while (!threadShouldExit())
+			// stopThread() wakes the wait.
+			while( !threadShouldExit() && !wait( ipc::IPC_PROCESS_MONITOR_THREAD_TIMEOUT_IN_MILLI_SECONDS ) )
 			{
-                juce::Thread::sleep( sleepDuration );
-				count++;
-				if (count == timeoutInmilliSeconds)
+				juce::Array<int>                                       exitedIds;
+				juce::Array<std::shared_ptr<MTIPCChildProcessExecutor>> exitedExecutors;
 				{
-					count = 0;
-
-					for (auto itr = data->executors.begin(); itr != data->executors.end(); itr.next())
+					const juce::ScopedLock sl( data->executorsLock );
+					for( auto itr = data->executors.begin(); itr != data->executors.end(); itr.next() )
 					{
-						if (itr.getValue()->isRunning())
+						if( itr.getValue()->isRunning() )
 							continue;
-						int pid = itr.getKey();
-						int exitcode = itr.getValue()->exitCode();
-						data->executors.remove(pid);
-                        juce::String processName( "" );
-                        if( data->configurations.contains(pid) )
-                            processName = data->configurations[pid]->getProperty( ipc::IPC_KEY_PROCESS_NAME, "" );
-						itr.reset();
-						if (data->callback)
-							juce::MessageManager::callAsync([&, pid, exitcode, processName]() { data->callback->processExited(pid, exitcode, processName); });
+						exitedIds.add( itr.getKey() );
+						exitedExecutors.add( itr.getValue() );
 					}
+					for( int pid : exitedIds )
+						data->executors.remove( pid );
+				}
+
+				for( int i = 0; i < exitedIds.size(); ++i )
+				{
+					const int          pid         = exitedIds[i];
+					const int          exitcode    = exitedExecutors[i]->exitCode();
+					const juce::String processName = data->processName( pid );
+					juce::Logger::writeToLog( processName + " " + exitedExecutors[i]->exitDescription() );
+
+					// Holds the callback, not this thread, which may be gone
+					// by the time the message is delivered.
+					if( auto callback = data->callback )
+						juce::MessageManager::callAsync( [callback, pid, exitcode, processName]() { callback->processExited( pid, exitcode, processName ); } );
 				}
 			}
 		}
@@ -133,20 +124,10 @@ namespace ipc
 	MTIPCProcessManager::~MTIPCProcessManager()
 	{
 		data.reset();
-        processMonitorThread->stopThread( 1500 );
+		if( processMonitorThread )
+			processMonitorThread->stopThread( 1500 );
 		processMonitorThread.reset();
 	}
-
-    void MTIPCProcessManager::starterThreadExitNotifier(const int pid)
-    {
-        if( data->starters.contains( pid ) )
-        {
-            std::shared_ptr<ipc::MTIPCProcessStarterThread> th = data->starters[pid];
-            th->stopThread(1000);
-            th->waitForThreadToExit( 1000 );
-            data->starters.remove( pid );
-        }
-    }
 
 	void MTIPCProcessManager::initialize(std::shared_ptr<juce::var> config)
 	{
@@ -177,6 +158,8 @@ namespace ipc
 	{
 		if(processMonitorThread && processMonitorThread->isThreadRunning())
 			processMonitorThread->stopThread(1500);
+
+		const juce::ScopedLock sl( data->executorsLock );
 		for (auto executor : data->executors)
 		{
 			executor->stop();
@@ -186,7 +169,13 @@ namespace ipc
 
 	void MTIPCProcessManager::wait()
 	{
-		for (auto executor : data->executors)
+		juce::Array<std::shared_ptr<ipc::MTIPCChildProcessExecutor>> executors;
+		{
+			const juce::ScopedLock sl( data->executorsLock );
+			for( auto executor : data->executors )
+				executors.add( executor );
+		}
+		for (auto executor : executors)
 		{
 			executor->join();
 		}
@@ -194,50 +183,42 @@ namespace ipc
 
 	int MTIPCProcessManager::exitCode( const int processIdentifier )
 	{
-		return data->executors[processIdentifier]->exitCode();
+		auto executor = data->executor( processIdentifier );
+		return executor ? executor->exitCode() : 0;
 	}
 
 	bool MTIPCProcessManager::isRunning( const int processIdentifier )
 	{
-		return data->executors[processIdentifier]->isRunning();
+		auto executor = data->executor( processIdentifier );
+		return executor && executor->isRunning();
 	}
-
-    void MTIPCProcessManager::startProcessInThread( const int pid )
-    {
-        std::shared_ptr<ipc::MTIPCProcessStarterThread> th( new ipc::MTIPCProcessStarterThread(
-            pid, std::bind( &MTIPCProcessManager::startProcess, this, std::placeholders::_1 ),
-            std::bind( &MTIPCProcessManager::starterThreadExitNotifier, this, std::placeholders::_1 ) ) );
-
-        data->starters.set( pid, th );
-        th->startThread();
-    }
 
 	bool MTIPCProcessManager::startProcess( const int processIdentifier )
 	{
+		if( !data->configurations.contains( processIdentifier ) )
+			return false;
+
 		std::shared_ptr<juce::var> processConfig = data->configurations[processIdentifier];
 		std::shared_ptr< ipc::MTIPCChildProcessExecutor> exe(new ipc::MTIPCChildProcessExecutor(processConfig));		
 		bool started = exe->start();
 
-       
-
         if( started )
         {
+            const juce::ScopedLock sl( data->executorsLock );
             data->executors.set( processIdentifier, exe );
         }
 
-        juce::String processName( "" );
-        if( data->configurations.contains( processIdentifier ) )
-            processName = data->configurations[processIdentifier]->getProperty( ipc::IPC_KEY_PROCESS_NAME, "" );
+        juce::String processName = data->processName( processIdentifier );
         juce::Logger::writeToLog( started ? processName + " Started..." : "Failed to Start " + processName);
 
 
-        if( data->callback )
+        if( auto callback = data->callback )
         {
             started ?
                 juce::MessageManager::callAsync(
-                    [&, processIdentifier, processName]() { data->callback->processStarted( processIdentifier, processName ); } ) :
+                    [callback, processIdentifier, processName]() { callback->processStarted( processIdentifier, processName ); } ) :
                 juce::MessageManager::callAsync(
-                    [&, processIdentifier, processName]() { data->callback->failedToStartProcess( processIdentifier, processName ); } );
+                    [callback, processIdentifier, processName]() { callback->failedToStartProcess( processIdentifier, processName ); } );
         }
 		
 		return started;
@@ -250,21 +231,18 @@ namespace ipc
 	// dereferenced a null one.
 	bool MTIPCProcessManager::stopProcess( const int processIdentifier )
 	{
-		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executors[processIdentifier];
+		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executor( processIdentifier );
 		return executor == nullptr || executor->stop();
 	}
 
 	bool MTIPCProcessManager::waitForProcessToExit(const int processIdentifier)
 	{
-		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executors[processIdentifier];
+		std::shared_ptr<ipc::MTIPCChildProcessExecutor> executor = data->executor( processIdentifier );
 		return executor == nullptr || executor->join();
 	}
 
     juce::String MTIPCProcessManager::processName( const int processIdentifier )
     {
-
-        if( data->configurations.contains( processIdentifier ) )
-            return data->configurations[processIdentifier]->getProperty( ipc::IPC_KEY_PROCESS_NAME, DEFAULT_PROCESS_NAME );
-        return DEFAULT_PROCESS_NAME;
+        return data->processName( processIdentifier );
     }
 }

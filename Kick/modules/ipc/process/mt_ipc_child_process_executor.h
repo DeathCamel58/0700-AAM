@@ -26,6 +26,7 @@
 namespace juce
 {
     class var;
+    class String;
 }
 
 namespace ipc
@@ -39,7 +40,11 @@ namespace ipc
         bool start();
         bool stop();
         bool join();
+        // The exit status, or 128 plus the signal number for a process that
+        // a signal killed (as a shell reports it).
         int  exitCode();
+        // "exited with status 1", "was killed by SIGSEGV (core dumped)", ...
+        juce::String exitDescription();
         bool isRunning();
 
     private:
