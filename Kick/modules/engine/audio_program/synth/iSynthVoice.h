@@ -30,6 +30,7 @@ namespace mt
         using Ptr = juce::ReferenceCountedObjectPtr<ISynthVoice>;
 
         explicit ISynthVoice( const MTIAtomicProgramMaster& Master, ASoundSlice* Slice = nullptr );
+        virtual ~ISynthVoice() = default; // The programs delete drum and audio voices as ISynthVoice.
 
         // Getters and Setters
         inline bool isFree() { return State::FREE == state.load(); }
