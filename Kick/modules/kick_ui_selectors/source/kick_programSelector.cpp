@@ -333,7 +333,9 @@ namespace kick_ui
     {
         auto& ae      = mt::getAudioInterface();
         auto  program = selector->getSelectedProgram();
-        progLabel.setText( program, juce::dontSendNotification );
+        // Without a program, say so (dimmed) rather than show an empty box.
+        progLabel.setText( program.isNotEmpty() ? program : TRANS( "No program" ), juce::dontSendNotification );
+        progLabel.setValueColour( ui::Theme::textColour( program.isNotEmpty() ? 2 : 3 ) );
         setProgramIcon( progIcon, ae.getProgramType( program ) );
         repaint();
     }
