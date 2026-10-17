@@ -31,16 +31,18 @@ namespace kick_ui
     {
         clearpad.setBoundsRelative( .0097f, .0185f, .1174f, .6296f );
         clearbar.setBoundsRelative( .1360f, .0185f, .1174f, .6296f );
-        padSelect.setBoundsRelative( .6203f, .0185f, .1174f, .6296f );
-        leftNudgeButton.setBoundsRelative( .8747f, .0185f, .0332f, .6296f );
-        nudgeText.setBoundsRelative( .8747f, .0f, .1174f, .6666f );
+        // The Nudge group is wider than the others: "Nudge" did not fit
+        // between its - and + buttons. The groups left of it make room.
+        padSelect.setBoundsRelative( .5953f, .0185f, .1174f, .6296f );
+        leftNudgeButton.setBoundsRelative( .8497f, .0185f, .0332f, .6296f );
+        nudgeText.setBoundsRelative( .8497f, .0f, .1424f, .6666f );
         rightNudgeButton.setBoundsRelative( .9589f, .0185f, .0332f, .6296f );
-        barLabel.setBoundsRelative( .4931f, .0f, .1174f, .6666f );
-        padLabel.setBoundsRelative( .7475f, .0f, .1174f, .6666f );
-        barMinus.setBoundsRelative( .4931f, .0185f, .0332f, .6296f );
-        barPlus.setBoundsRelative( .57729, .0185f, .0332f, .6296f );
-        padMinus.setBoundsRelative( .7475, .0185f, .0332f, .6296f );
-        padPlus.setBoundsRelative( .8317f, .0185f, .0332f, .6296f );
+        barLabel.setBoundsRelative( .4681f, .0f, .1174f, .6666f );
+        padLabel.setBoundsRelative( .7225f, .0f, .1174f, .6666f );
+        barMinus.setBoundsRelative( .4681f, .0185f, .0332f, .6296f );
+        barPlus.setBoundsRelative( .5523f, .0185f, .0332f, .6296f );
+        padMinus.setBoundsRelative( .7225f, .0185f, .0332f, .6296f );
+        padPlus.setBoundsRelative( .8067f, .0185f, .0332f, .6296f );
     }
 
     ///
@@ -92,16 +94,18 @@ namespace kick_ui
         pad.setBoundsRelative( .01889, .2727f, .0329f, .4545f );
         padValueListBox.setBoundsRelative( .052f, .1363f, .0725f, .7272f );
 
-        parameter.setBoundsRelative( .1393f, .2727f, .0888f, .4545f );
-        paramValueListBox.setBoundsRelative( .2294f, .1363f, .1196f, .7272f );
+        // The labels are as wide as their text: narrower, PARAMETER, PAGE
+        // and TIME DIV were cut short.
+        parameter.setBoundsRelative( .1393f, .2727f, .1f, .4545f );
+        paramValueListBox.setBoundsRelative( .2420f, .1363f, .1196f, .7272f );
 
-        pageLabel.setBoundsRelative( .6101f, .2727f, .0388f, .4545f );
+        pageLabel.setBoundsRelative( .5900f, .2727f, .056f, .4545f );
         page.setBoundsRelative( .6500f, .1363f, .0538f, .7272f );
 
         bar.setBoundsRelative( .7247f, .2727f, .0339f, .4545f );
         barValueListBox.setBoundsRelative( .7586f, .1363f, .065f, .7272f );
 
-        timediv.setBoundsRelative( .8443f, .2727f, .0628f, .4545f );
+        timediv.setBoundsRelative( .8300f, .2727f, .078f, .4545f );
         timeDivValueListBox.setBoundsRelative( .9110f, .1363f, .075f, .7272f );
     }
 
