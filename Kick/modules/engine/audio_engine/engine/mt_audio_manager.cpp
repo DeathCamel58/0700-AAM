@@ -205,6 +205,16 @@ namespace mt
         setSelectedSequenceAndTrack( 0, 0 );
         setSelectedProgram( 0 );
 
+        // Setting the project up (defaults filled in, selections, the
+        // views it notified) went through the undo manager: none of it is
+        // the user's to undo. What the views do on the message thread in
+        // answer comes before this in its queue.
+        undoManager.clearUndoHistory();
+        juce::MessageManager::callAsync( [this, alive = std::weak_ptr<bool>( alive )]() {
+            if( !alive.expired() )
+                undoManager.clearUndoHistory();
+        } );
+
         // Start timer for metering and playhead...
         internalTimer.setCallbackFunction( [&]() { interTimerCallbackHandler(); } );
         internalTimer.startTimerHz( 25 );

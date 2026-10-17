@@ -55,6 +55,8 @@ namespace ui
 
         void sendPercentValueToHardware( float value );
 
+        juce::String getTextFromValue( double Value ) override;
+
         double getIncrement() override;
         void   knobRotated( double deltaValue ) override;
         void   knobClicked() override;

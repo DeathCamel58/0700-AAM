@@ -39,7 +39,8 @@ namespace ui
         setTextBoxIsEditable( false );
         setScrollWheelEnabled( false );
 
-        setNumDecimalPlacesToDisplay( 2 );
+        // The decimal places shown follow the step (see getTextFromValue()),
+        // unless a slider sets them.
         setRange( 0.0, 1.0, 0.01 );
 
         onValueChange = [this]() {
@@ -118,6 +119,15 @@ namespace ui
                                                                             isCentered() ?
                                                                                 contracts::DeviceControlContracts::SliderCmd::EN_SLIDER_LEVEL_LED :
                                                                                 contracts::DeviceControlContracts::SliderCmd::EN_SLIDER_BAR_LED ) );
+    }
+
+    juce::String KickSlider::getTextFromValue( double Value )
+    {
+        // As JUCE writes it, but a whole number step shows no decimals and
+        // a continuous value one: "127", "-12.5", not "127.00".
+        if( textFromValueFunction != nullptr )
+            return juce::Slider::getTextFromValue( Value );
+        return mt::display::number( Value, getNumDecimalPlacesToDisplay() ) + getTextValueSuffix();
     }
 
     double KickSlider::getIncrement()

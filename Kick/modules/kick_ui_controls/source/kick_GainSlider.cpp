@@ -64,7 +64,7 @@ namespace ui
     void KickGainSlider::paint( juce::Graphics& g )
     {
         //    // Draw Label.
-        const juce::String& displayValue = currentDbValue < 0 ? juce::String().formatted( "%.2fdB", CommonUtils::convertToPrecision<float>( currentDbValue, 2 ) ) : juce::String().formatted( "+%.2fdB", CommonUtils::convertToPrecision<float>( currentDbValue, 2 ) );
+        const juce::String displayValue = mt::display::decibels( currentDbValue );
         mt::utils::renderText( g, displayValue, bLabel, ui::Theme::backgroundColour( 6 ), juce::Justification::centred );
 
         // Draw Marking Lines and Text...

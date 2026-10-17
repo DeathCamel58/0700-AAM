@@ -52,6 +52,7 @@
 #include "kick_NetInfo.h"
 #include "kick_OsRelease.h"
 #include "kick_SysFile.h"
+#include "kick_TimeZone.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
 #define BAUDRATE   B115200
@@ -64,6 +65,7 @@ namespace mt
         std::string IP      = "0.0.0.0";
         std::string subnet  = "0.0.0.0";
         std::string gateway = "0.0.0.0";
+        std::string dns     = "0.0.0.0";
     };
 
     struct MemoryStatus

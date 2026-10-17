@@ -15,7 +15,6 @@ namespace ui
         void         setUsbEjectStatus( bool );
         bool         getSdCardEjectStatus();
         bool         getUsbEjectStatus();
-        juce::String getFilePath( juce::String originalFullPath, juce::String replacementPath );
         static bool  isSdCardEject{ false };
         static bool  isUSBEject{ false };
         void         setHighlightLED( int index );

@@ -48,6 +48,7 @@
     #include "source/kick_atomics.h"
     #include "source/kick_common_utils.h"
     #include "source/kick_CachedValue.h"
+    #include "source/kick_DisplayFormat.h"
     #include "source/kick_Constants.h"
     #include "source/kick_Factory.h"
     #include "source/kick_MidiControllerType.h"

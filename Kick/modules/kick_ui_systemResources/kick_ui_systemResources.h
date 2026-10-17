@@ -65,6 +65,9 @@ namespace kick_ui
 
     private:
         void timerCallback() override;
+        void update( bool readCpu );
+        void showValue( ui::KickSlider& slider, double value );
+        static juce::String percentText( double value, bool known, const juce::String& unknown );
         void paint( juce::Graphics& g ) override;
         void resized() override;
         void visibilityChanged() override;
@@ -89,6 +92,13 @@ namespace kick_ui
         std::string         internalPath = KICK_STATE_DIR;
         std::string         sdCardPath;
         std::string         usbDiskPath;
+
+        // Whether each figure could be read.
+        bool cpuKnown{ false };
+        bool ramKnown{ false };
+        bool flashKnown{ false };
+        bool sdCardKnown{ false };
+        bool usbKnown{ false };
     };
 
     class KickSysResources

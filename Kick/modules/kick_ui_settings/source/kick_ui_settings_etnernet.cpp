@@ -124,7 +124,7 @@ namespace kick_ui
 
         subnet.setText( info.subnet, juce::dontSendNotification );
         gateway.setText( info.gateway, juce::dontSendNotification );
-        dns.setText( "0.0.0.0", juce::dontSendNotification );
+        dns.setText( info.dns, juce::dontSendNotification );
 
         settings.eth.ipAddress  = ( info.IP );
         settings.eth.gateway    = ( info.gateway );

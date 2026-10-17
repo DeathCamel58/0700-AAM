@@ -21,8 +21,10 @@
 
 // The state of the network interfaces, read from the kernel: the interface
 // names from sysfs, the addresses with getifaddrs(3) and the default
-// gateway from /proc/net/route. Nothing here changes the configuration,
-// which is the system's network manager's job.
+// gateway from /proc/net/route; and the DNS servers, which the kernel does
+// not know, from systemd-networkd and systemd-resolved's state files.
+// Nothing here changes the configuration, which is the system's network
+// manager's job.
 
 #include <algorithm>
 #include <cstdint>
@@ -245,6 +247,92 @@ namespace mt
             sysfile::read( "/proc/net/route", contents );
             std::istringstream routes( contents );
             return parseDefaultGateway( routes, name );
+        }
+    
+        /** An IPv4 address as networkd and resolved write a DNS server
+            ("1.2.3.4", "1.2.3.4:53", "1.2.3.4%2#dns.example"), without the
+            port, interface and server name; empty if it is not IPv4. */
+        inline std::string ipv4OfServer( const std::string& server )
+        {
+            const std::string address = server.substr( 0, server.find_first_of( ":%#" ) );
+#if defined( __linux__ )
+            struct in_addr parsed {};
+            if( !address.empty() && inet_pton( AF_INET, address.c_str(), &parsed ) == 1 )
+                return address;
+#endif
+            return {};
+        }
+
+        /** The IPv4 DNS servers of a link, from the contents of networkd's
+            state file for it (/run/systemd/netif/links/<ifindex>): its
+            DNS= line has the configured and the DHCP-acquired ones. */
+        inline std::vector<std::string> parseNetworkdDns( const std::string& contents )
+        {
+            std::vector<std::string> servers;
+            std::istringstream       lines( contents );
+            for( std::string line; std::getline( lines, line ); )
+            {
+                if( line.rfind( "DNS=", 0 ) != 0 )
+                    continue;
+                std::istringstream fields( line.substr( 4 ) );
+                for( std::string server; fields >> server; )
+                {
+                    const auto address = ipv4OfServer( server );
+                    if( !address.empty() )
+                        servers.push_back( address );
+                }
+            }
+            return servers;
+        }
+
+        /** The IPv4 name servers in a resolv.conf, but for the local stub
+            resolver of systemd-resolved (127.0.0.53, 127.0.0.54), which
+            says nothing about the network's servers. */
+        inline std::vector<std::string> parseResolvConf( const std::string& contents )
+        {
+            std::vector<std::string> servers;
+            std::istringstream       lines( contents );
+            for( std::string line; std::getline( lines, line ); )
+            {
+                std::istringstream fields( line );
+                std::string        keyword, server;
+                if( !( fields >> keyword >> server ) || keyword != "nameserver" )
+                    continue;
+                const auto address = ipv4OfServer( server );
+                if( !address.empty() && address != "127.0.0.53" && address != "127.0.0.54" )
+                    servers.push_back( address );
+            }
+            return servers;
+        }
+
+        /** The interface's first IPv4 DNS server, or an empty string. The
+            link's own servers come first, from networkd's state file; then
+            the servers resolved uses (/run/systemd/resolve/resolv.conf, the
+            real ones even when /etc/resolv.conf points at its stub); then
+            /etc/resolv.conf, for a system without either. root prefixes
+            every path, for tests. */
+        inline std::string dnsServer( const std::string& name, const std::string& root = "" )
+        {
+            std::string contents;
+
+            const std::string index = sysfile::readLine( root + "/sys/class/net/" + name + "/ifindex" );
+            if( !name.empty() && !index.empty() && sysfile::read( root + "/run/systemd/netif/links/" + index, contents ) )
+            {
+                const auto servers = parseNetworkdDns( contents );
+                if( !servers.empty() )
+                    return servers.front();
+            }
+
+            for( const char* file : { "/run/systemd/resolve/resolv.conf", "/etc/resolv.conf" } )
+            {
+                if( !sysfile::read( root + file, contents ) )
+                    continue;
+                const auto servers = parseResolvConf( contents );
+                if( !servers.empty() )
+                    return servers.front();
+            }
+
+            return {};
         }
     }
 }

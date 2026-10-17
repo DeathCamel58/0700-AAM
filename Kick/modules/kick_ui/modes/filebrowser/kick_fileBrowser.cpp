@@ -74,7 +74,7 @@ namespace ui
         favouriteButtonImplementation();
 
         //TOP BUTTONS
-        juce::String originalFullPath = fileUtils::getFilePath( ae.getCurrentDir().getFullPathName(), replacementPath );
+        juce::String originalFullPath = placePath( ae.getCurrentDir().getFullPathName() );
         top.searchLabel.setText( originalFullPath, juce::dontSendNotification );
 
         top.searchLabel.onKeyBoardEnd = [&]() {
@@ -521,22 +521,6 @@ namespace ui
             auto t3 = juce::Time::currentTimeMillis();
             if( tempList[Row].exists() )
             {
-                auto t5 = juce::Time::currentTimeMillis();
-
-                std::vector<std::pair<juce::File, int>> fileWithNumbers;
-
-                for( const auto& file : tempList )
-                {
-                    int num = file.getFileName().retainCharacters( "0123456789" ).getIntValue();
-                    fileWithNumbers.emplace_back( file, num );
-                }
-
-                // Sort based on the precomputed numeric values
-                std::sort( fileWithNumbers.begin(), fileWithNumbers.end(),
-                           []( const auto& a, const auto& b ) {
-                               return a.second < b.second;
-                           } );
-
                 auto t6       = juce::Time::currentTimeMillis();
                 auto callback = [this, comp, Row]( juce::int64 totalSize ) {
                     auto         t1         = juce::Time::currentTimeMillis();
@@ -546,19 +530,19 @@ namespace ui
                         if( bottom.allButton.getToggleState() )
                         {
                             if( tempList[Row].isDirectory() )
-                                comp->setProperties( "Vector", true, 22.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                                comp->setProperties( "Vector", true, 22.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
                             else if( tempList[Row].hasFileExtension( projectFileList ) )
-                                comp->setProperties( "Icon_ProjectFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                                comp->setProperties( "Icon_ProjectFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
                             else if( tempList[Row].hasFileExtension( sampleFileList ) )
-                                comp->setProperties( "Icon_SampleFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                                comp->setProperties( "Icon_SampleFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
                             else
-                                comp->setProperties( "Icon_DefaultFile", true, 22.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                                comp->setProperties( "Icon_DefaultFile", true, 22.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
                         }
                         else if( bottom.sampleButton.getToggleState() )
-                            comp->setProperties( "Icon_SampleFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                            comp->setProperties( "Icon_SampleFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
 
                         else if( bottom.projectButton.getToggleState() )
-                            comp->setProperties( "Icon_ProjectFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), tempList[Row].getLastModificationTime().toString( true, false, false, false ), tempList[Row].getLastModificationTime().toString( false, true, false, true ), sizeString );
+                            comp->setProperties( "Icon_ProjectFile", false, 14.0f, 16.0f, tempList[Row].getFileName(), mt::display::date( tempList[Row].getLastModificationTime() ), mt::display::time( tempList[Row].getLastModificationTime() ), sizeString );
 
                         DBG( "Num Rows " << numRows << " temp size  " << tempList.size() );
                         if( numRows++ == tempList.size() )
@@ -858,6 +842,7 @@ namespace ui
         for( auto dir : foundFiles )
             if( dir.getFileNameWithoutExtension().toUpperCase().toStdString().find( searchText ) != std::string::npos )
                 tempList.add( dir );
+        mt::display::sortForListing( tempList );
 
         foundFiles.clear();
         right.table->refresh();
@@ -874,6 +859,7 @@ namespace ui
             if( dir.hasFileExtension( FileList ) )
                 tempList.add( dir );
         }
+        mt::display::sortForListing( tempList );
     }
 
     void FileBrowser::load( juce::String dir )
@@ -892,7 +878,7 @@ namespace ui
         if( pth.existsAsFile() )
             ae.dirGoUp();
         pwd                   = ae.getCurrentDir().getFullPathName();
-        juce::String filePath = fileUtils::getFilePath( pwd, replacementPath );
+        juce::String filePath = placePath( pwd );
         top.searchLabel.setText( filePath, juce::dontSendNotification );
         tempList.clear();
         updateTemp( filterNum );
@@ -913,7 +899,7 @@ namespace ui
     {
         ae.dirGoUp();
         pwd                   = ae.getCurrentDir().getFullPathName();
-        juce::String filePath = fileUtils::getFilePath( pwd, replacementPath );
+        juce::String filePath = placePath( pwd );
         top.searchLabel.setText( filePath, juce::dontSendNotification );
         updateTemp( filterNum );
         juce::String pwdParentPath = ae.getCurrentDir().getParentDirectory().getFullPathName();
@@ -1102,6 +1088,15 @@ namespace ui
         return false;
     }
 
+    juce::String FileBrowser::placePath( const juce::String& path ) const
+    {
+        // The places of the Location list, under the names it shows.
+        std::vector<std::pair<juce::String, juce::String>> places;
+        for( size_t i = 0; i < row.size() && i < deviceData.size(); ++i )
+            places.emplace_back( row[i], deviceData[i].fileName );
+        return mt::display::placePath( path, places );
+    }
+
     void FileBrowser::addData( const juce::String& buttonText, const juce::String& buttonTextActive, float width, float height, const juce::String& itemName, bool isEject )
     {
         DeviceData newData;
@@ -1140,7 +1135,7 @@ namespace ui
                 {
                     data      = "Are you sure you want to permanently delete this file?";
                     fileName  = selectedFile.getLast().getFileNameWithoutExtension();
-                    timeStamp = selectedFile.getLast().getLastModificationTime().toString( true, false, false, false );
+                    timeStamp = mt::display::date( selectedFile.getLast().getLastModificationTime() );
                 }
                 else
                 {

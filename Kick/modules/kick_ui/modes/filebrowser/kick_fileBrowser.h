@@ -210,7 +210,6 @@ namespace ui
         juce::Array<juce::File>        selectedFile{ "" };
         juce::File                     sourceFile{ "" };
         int                            filterNum{ 2 }, editNum{ -1 };
-        juce::String                   replacementPath = "[Internal]";
         bool                           searchMode      = false;
         static int                     numRows;
 
@@ -247,6 +246,8 @@ namespace ui
         void setupProvider();
         void selectBtnOnClick();
         void addData( const juce::String& buttonText, const juce::String& buttonTextActive, float width, float height, const juce::String& itemName, bool isEject );
+        /** A path under the name of the Location list's place it is in. */
+        juce::String placePath( const juce::String& path ) const;
         bool checkIsCurrProj();
         void hideAuditionComponent();
         void showAuditionComponent();

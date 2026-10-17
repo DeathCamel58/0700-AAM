@@ -387,7 +387,9 @@ namespace mt
 
     void MTAudioAssetManager::updateDirectories( int Index )
     {
+        // In the order listings show, not the file system's.
         dirList = curDir.findChildFiles( juce::File::TypesOfFileToFind::findFilesAndDirectories, false );
+        display::sortForListing( dirList );
 
         if( juce::isPositiveAndBelow( Index, dirList.size() ) )
         {
@@ -405,6 +407,7 @@ namespace mt
     void MTAudioAssetManager::updateFiles()
     {
         fileList = selDir.findChildFiles( juce::File::TypesOfFileToFind::findFiles, false, "*.wav;*.bwav;*.bwf;*.aiff;*.aif;*.ogg;*.mp3;*.flac" );
+        display::sortForListing( fileList );
     }
 
     void MTAudioAssetManager::dirSelect( int Index )
