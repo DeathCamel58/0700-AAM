@@ -163,6 +163,9 @@ namespace mt
             } );
 
             setWantsKeyboardFocus( true );
+            // It takes the focus for the front panel's controls, but an
+            // outline around the whole screen says nothing.
+            setHasFocusOutline( false );
             setContentBackgroundColour( backgroundColour );
             setShowYesNoButtons( ShowYesNoButtons );
             setTitle( Title );
