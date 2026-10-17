@@ -117,6 +117,8 @@ namespace kick::window
         if( options.windowMode == WindowMode::windowed )
         {
             boundsSaveTimer.stopTimer();
+            if( !placementOffset.has_value() )
+                notePlacement();
             noteBounds();
             if( const auto bounds = boundsSaving.flush() )
                 saveBounds( *bounds );
@@ -164,11 +166,15 @@ namespace kick::window
         }
 
         setBounds( chooseWindowBounds( saved, getDisplayAreas(), preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
+        requestedPosition = getPosition();
+        juce::Logger::writeToLog( "Window: opening at " + formatWindowBounds( getBounds() ) + " (saved: "
+                                  + ( saved.has_value() ? formatWindowBounds( *saved ) : juce::String( "none" ) ) + ")" );
 
         addToDesktop();
         detail::askForPosition( *this );
         settledBounds = getBounds();
         setVisible( true );
+        placementCheck.startTimer( placementDelayInMS );
     }
 
     juce::Array<juce::Rectangle<int>> MainWindow::getDisplayAreas()
@@ -239,18 +245,46 @@ namespace kick::window
         noteBounds();
     }
 
+    void MainWindow::notePlacement()
+    {
+        placementCheck.stopTimer();
+
+        auto* peer = getPeer();
+        if( peer == nullptr )
+            return;
+
+        // The window manager's frame is known once the window is shown.
+        const auto frame = peer->getFrameSize();
+        placementOffset  = findPlacementOffset( requestedPosition, getPosition(), frame );
+        juce::Logger::writeToLog( "Window: placed with its client area at " + formatWindowBounds( getBounds() ) + ", asked for "
+                                  + juce::String( requestedPosition.x ) + " " + juce::String( requestedPosition.y )
+                                  + "; frame extents (left right top bottom) " + juce::String( frame.getLeft() ) + " "
+                                  + juce::String( frame.getRight() ) + " " + juce::String( frame.getTop() ) + " "
+                                  + juce::String( frame.getBottom() ) + "; saving with the offset "
+                                  + juce::String( placementOffset->x ) + " " + juce::String( placementOffset->y ) );
+        noteBounds();
+    }
+
     void MainWindow::noteBounds()
     {
         auto* peer = getPeer();
         if( options.windowMode != WindowMode::windowed || !options.saveBounds || peer == nullptr )
             return;
 
+        // Not until the window manager has placed the window: until then
+        // the window is not where it stays, and the offset is not known.
+        if( !placementOffset.has_value() )
+        {
+            if( isVisible() )
+                placementCheck.startTimer( placementDelayInMS );
+            return;
+        }
+
         // Not bounds the window keeps when it is shown again.
         if( isMinimised() || isFullScreen() || fillsADisplay( getBounds(), getDisplayAreas() ) )
             return;
 
-        // The window manager's frame is known once the window is shown.
-        boundsSaving.changed( formatWindowBounds( windowBoundsToSave( getBounds(), peer->getFrameSize() ) ),
+        boundsSaving.changed( formatWindowBounds( windowBoundsToSave( getBounds(), *placementOffset ) ),
                               juce::Time::getMillisecondCounter() );
         if( boundsSaving.isWaiting() )
             boundsSaveTimer.startTimer( boundsSaveDelayInMS );
@@ -271,7 +305,7 @@ namespace kick::window
 
     void MainWindow::saveBounds( const juce::String& bounds )
     {
-        juce::Logger::writeToLog( "Window: saving its bounds (" + bounds + ")" );
+        juce::Logger::writeToLog( "Window: saving its bounds (" + bounds + "; client area " + formatWindowBounds( getBounds() ) + ")" );
         options.saveBounds( bounds );
     }
 

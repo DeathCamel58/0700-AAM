@@ -140,9 +140,18 @@ namespace kick::window
         return juce::Rectangle<int>( values[0], values[1], values[2], values[3] );
     }
 
-    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::BorderSize<int> frame )
+    juce::Point<int> findPlacementOffset( juce::Point<int> requested, juce::Point<int> placed, juce::BorderSize<int> frame )
     {
-        return clientArea.translated( -frame.getLeft(), -frame.getTop() );
+        const auto offset   = placed - requested;
+        const auto maxLeft  = juce::jmax( frame.getLeft(), assumedWindowFrame.getLeft() );
+        const auto maxTop   = juce::jmax( frame.getTop(), assumedWindowFrame.getTop() );
+        const auto possible = offset.x >= 0 && offset.x <= maxLeft && offset.y >= 0 && offset.y <= maxTop;
+        return possible ? offset : juce::Point<int>( frame.getLeft(), frame.getTop() );
+    }
+
+    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::Point<int> placementOffset )
+    {
+        return clientArea - placementOffset;
     }
 
     BoundsSaving::BoundsSaving( int delayInMS )
