@@ -28,8 +28,6 @@ namespace contracts
     // return global instance.
     keyPressedDetector& getKeypressDetector() { return _keysDetector; }
 
-#if defined( _WIN32 ) || defined( _WIN64 )
-
     static const std::map<int, keyPressedDetector::cmdInfo> _keyMap = {
         { juce::KeyPress::upKey, { contracts::DeviceControlContracts::EN_KNOB_CENTER, false, CPktMgr::EN_PKT_TYPE_KNOBS, contracts::DeviceControlContracts::EN_KNOB_ROTARY } },
         { juce::KeyPress::downKey, { contracts::DeviceControlContracts::EN_KNOB_CENTER, false, CPktMgr::EN_PKT_TYPE_KNOBS, contracts::DeviceControlContracts::EN_KNOB_ROTARY } },
@@ -168,12 +166,12 @@ namespace contracts
         }
     }
 
-    bool keyPressedDetector::keyPressed( const juce::KeyPress& key, juce::Component* originatingComponent )
+    bool keyPressedDetector::keyPressed( const juce::KeyPress&, juce::Component* )
     {
         return true;
     }
 
-    bool keyPressedDetector::keyStateChanged( bool isKeyDown, juce::Component* originatingComponent )
+    bool keyPressedDetector::keyStateChanged( bool, juce::Component* )
     {
         auto mod = juce::ModifierKeys::getCurrentModifiers();
         if( shiftBtnState != mod.isShiftDown() )
@@ -181,12 +179,11 @@ namespace contracts
             shiftBtnState = mod.isShiftDown();
             CPktMgr::HWMsg_t hwMsg;
             hwMsg.data.push_back( (juce::int8)contracts::DeviceControlContracts::EN_SHIFT );
-            hwMsg.data.push_back( shiftBtnState ? (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED : (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED ); // Key Released/Pressed (in case of pad butto
+            hwMsg.data.push_back( shiftBtnState ? (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED : (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED ); // Pressed while Shift is down, as the front panel sends it
             contracts::KeyboardSignals::KeyboardEventTriggered( hwMsg );
         }
         for( const auto& [keyCode, info] : _keyMap )
             detectForKeyCode( keyCode, info );
         return true;
     }
-#endif // defined( _WIN32 ) || defined( _WIN64 )
 } // namespace
