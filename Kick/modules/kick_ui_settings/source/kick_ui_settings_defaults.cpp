@@ -175,7 +175,8 @@ namespace kick_ui
         pdSeq.setValue( settings.projects.numSeq(), juce::dontSendNotification );
         pdTracks.setValue( settings.projects.numTrackPerSeq(), juce::dontSendNotification );
 
-        enableList.setSelected( settings.projects.namingStyle(), juce::dontSendNotification );
+        auto style = std::find( namingStyles.begin(), namingStyles.end(), settings.projects.namingStyle() );
+        enableList.setSelected( style != namingStyles.end() ? (int)std::distance( namingStyles.begin(), style ) : 0, juce::dontSendNotification );
         defaultName.setText( settings.projects.namePrefix(), juce::dontSendNotification );
     }
 

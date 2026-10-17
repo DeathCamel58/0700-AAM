@@ -55,7 +55,10 @@ namespace kick_ui
         ui::KickNumber  pdSeq{ "SEQUENCES", 1, 64, 4, 1 };
         ui::KickNumber  pdTracks{ "TRACKS/SEQ", 1, 64, 4, 1 };
         ui::KickListBox bitDepath{ ui::KickListBox::withTitleBar, "BIT DEPTH", { "16", "24" }, 1 };
-        ui::KickListBox enableList{ ui::KickListBox::BoxType::withoutTitleBar, "state", { "DISABLE", "TIME STAMP", "CUSTOM" } };
+        // Shown as Off/Time Stamp/Custom; stored as namingStyles (the
+        // index is the stored defProjectState).
+        const std::vector<juce::String> namingStyles{ "DISABLE", "TIME STAMP", "CUSTOM" };
+        ui::KickListBox                 enableList{ ui::KickListBox::BoxType::withTitleBar, "NAME", { "Off", "Time Stamp", "Custom" } };
         ui::KickLabel   defaultName{ "" };
     };
 }
