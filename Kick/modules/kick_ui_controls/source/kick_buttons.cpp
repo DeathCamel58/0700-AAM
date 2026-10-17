@@ -83,7 +83,7 @@ namespace ui
     {
         // A press held long enough to show the hint does not click: with the
         // button no longer down, juce::Button::mouseUp() does not click it.
-        if( longPressHint.mouseUp() )
+        if( longPressHint.mouseUp( e ) )
             setState( juce::Button::buttonNormal );
 
         juce::Button::mouseUp( e );

@@ -21,8 +21,24 @@
 
 #include "contracts/utils/keyboard/keyboard_detector.h"
 
+#include <typeinfo>
+
 namespace mt
 {
+    namespace popupLog
+    {
+        // A component as the log names it: its name or title, else its type.
+        inline juce::String describe( const juce::Component* c )
+        {
+            if( c == nullptr )
+                return "none";
+            if( c->getName().isNotEmpty() )
+                return "\"" + c->getName() + "\"";
+            if( c->getTitle().isNotEmpty() )
+                return "\"" + c->getTitle() + "\"";
+            return juce::String( typeid( *c ).name() );
+        }
+    }
 
     class fsPopup : public juce::Component
     {
@@ -55,8 +71,41 @@ namespace mt
             resized();
         }
 
+        // Makes the pop-up a child of the layout root as it is now. A pooled
+        // pop-up is reused, and where it was put when it was made (another
+        // component, or a window of its own before the home screen
+        // registered) may no longer be where it can be seen.
+        void attachToLayout()
+        {
+            auto* root = ui::getLayoutRoot();
+            if( root == nullptr )
+            {
+                if( getParentComponent() == nullptr && !isOnDesktop() )
+                {
+                    if( auto c = juce::TopLevelWindow::getActiveTopLevelWindow() )
+                        c->addChildComponent( this );
+                    else
+                        addToDesktop( compPeer::windowIsTemporary | compPeer::windowHasDropShadow );
+                }
+                return;
+            }
+
+            if( getParentComponent() == root )
+                return;
+
+            if( isOnDesktop() || getParentComponent() != nullptr )
+                juce::Logger::writeToLog( "Pop-up: moving " + getPopupName() + " into the layout from "
+                                          + ( isOnDesktop() ? juce::String( "a window of its own" ) : popupLog::describe( getParentComponent() ) ) );
+            if( isOnDesktop() )
+                removeFromDesktop();
+            root->addChildComponent( this );
+        }
+
         virtual void show( std::function<void( int R )> Callback )
         {
+            attachToLayout();
+            setBounds( ui::layout::screen );
+
             image.clear( ui::layout::screen );
 
             // The blurred background: what the layout shows now.
@@ -73,20 +122,61 @@ namespace mt
             setAlwaysOnTop( true );
             setVisible( true );
             toFront( true );
-            enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this]( int R ) {
+
+            juce::Logger::writeToLog( "Pop-up: showing " + getPopupName() + " " + describeState() );
+
+            // Modal, it takes all the input; unseen, nothing on the screen
+            // says so or can close it, and Kick seems to ignore every tap.
+            if( !isShowing() || getLocalBounds().isEmpty() )
+            {
+                juce::Logger::writeToLog( "Pop-up: ERROR: " + getPopupName() + " cannot be seen (showing "
+                                          + juce::String( (int)isShowing() ) + ", bounds " + getBounds().toString() + "); not opening it" );
+                reset();
+                if( Callback )
+                    juce::MessageManager::callAsync( [Callback]() { Callback( UI::CANCEL ); } );
+                return;
+            }
+
+            const auto shown = ++timesShown;
+            enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this, shown]( int R ) {
+                                 juce::Logger::writeToLog( "Pop-up: " + getPopupName() + " closed (" + juce::String( R ) + ")" );
                                  if( Callback ) Callback( R );
-                                 reset();
+                                 // Not if it has been reset and shown again in
+                                 // the meantime: that would hide the new one
+                                 // and leave it modal.
+                                 if( shown == timesShown )
+                                     reset();
                              } ),
                              false );
+
+            juce::Logger::writeToLog( "Pop-up: " + getPopupName() + ( isCurrentlyModal() ? " is modal" : " is NOT the front modal" )
+                                      + " (" + juce::String( getNumCurrentlyModalComponents() ) + " modal), focus on "
+                                      + popupLog::describe( getCurrentlyFocusedComponent() ) );
         }
 
         void close( int exitCode = UI::CLOSE )
         {
-            juce::MessageManager::callAsync( [&, exitCode]() {
-                reset();
-                if( isCurrentlyModal() )
+            const auto shown = timesShown;
+            juce::MessageManager::callAsync( [this, exitCode, shown]() {
+                // Already closed, and maybe showing something else now.
+                if( shown != timesShown || !isInUse )
+                    return;
+
+                // Ending the modal state resets the pop-up (show()). Hiding it
+                // first, as this did, cancelled the modal state with 0 and
+                // freed the pop-up before that callback came, whose reset()
+                // could then hide the pop-up's next use.
+                if( isCurrentlyModal( false ) )
                     exitModalState( exitCode );
+                else
+                    reset();
             } );
+        }
+
+        // What the log calls the pop-up.
+        virtual juce::String getPopupName() const
+        {
+            return pCont != nullptr ? popupLog::describe( pCont ) : juce::String( "an empty pop-up" );
         }
 
     protected:
@@ -124,6 +214,35 @@ namespace mt
 
     private:
         juce::Image image;
+        // Counts the times shown, to tell a use's callbacks from the next's.
+        int timesShown{ 0 };
+
+        // Where the pop-up is and what could hide it, for the log.
+        juce::String describeState() const
+        {
+            juce::String s;
+            s << "in " << ( isOnDesktop() ? juce::String( "a window of its own" ) : popupLog::describe( getParentComponent() ) )
+              << ", bounds " << getBounds().toString()
+              << ", content " << ( pCont != nullptr ? pCont->getBounds().toString() : juce::String( "none" ) )
+              << ", visible " << (int)isVisible() << ", showing " << (int)isShowing();
+
+            if( auto* parent = getParentComponent() )
+            {
+                const auto        index = parent->getIndexOfChildComponent( this );
+                juce::StringArray above;
+                for( int i = index + 1; i < parent->getNumChildComponents(); ++i )
+                    if( auto* c = parent->getChildComponent( i ); c != nullptr && c->isVisible() )
+                        above.add( popupLog::describe( c ) );
+
+                s << ", z " << ( index + 1 ) << "/" << parent->getNumChildComponents();
+                if( !above.isEmpty() )
+                    s << " under " << above.joinIntoString( ", " );
+            }
+
+            s << ", " << getNumCurrentlyModalComponents() << " modal before (front "
+              << popupLog::describe( getCurrentlyModalComponent() ) << ")";
+            return s;
+        }
     };
 
     class dialogDisplayer : public ui::KickControlBase<fsPopup>
@@ -231,6 +350,11 @@ namespace mt
             setFocus( true );
 
             fsPopup::show( std::forward<std::function<void( int R )>>( Callback ) );
+        }
+
+        juce::String getPopupName() const override
+        {
+            return title.getText().isNotEmpty() ? "\"" + title.getText() + "\"" : fsPopup::getPopupName();
         }
 
         void handleCommand( CPktMgr::HWMsg_t& f_hwMsg ) override
@@ -344,13 +468,9 @@ namespace mt
 
         // A child of the home screen, so that it shows in Kick's window,
         // scaled with the layout. (As a window of its own it was placed at
-        // the screen's origin, and the active window could be none.)
-        if( auto root = ui::getLayoutRoot() )
-            root->addChildComponent( p.get() );
-        else if( auto c = juce::TopLevelWindow::getActiveTopLevelWindow() )
-            c->addChildComponent( p.get() );
-        else
-            p->addToDesktop( compPeer::windowIsTemporary | compPeer::windowHasDropShadow );
+        // the screen's origin, and the active window could be none.) show()
+        // checks this again each time.
+        p->attachToLayout();
         return p.get();
     }
 
