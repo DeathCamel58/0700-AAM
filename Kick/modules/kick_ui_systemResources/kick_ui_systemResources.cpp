@@ -72,7 +72,7 @@ namespace kick_ui
         storage.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
         storage.setValueColour( ui::Theme::textColour( 2 ) );
         storage.setValueJustification( juce::Justification::centredTop );
-        storage.setValueFontHeight( 16 );
+        storage.setValueFontHeight( storageFontHeight );
 
         overlayLabel.setInterceptsMouseClicks( false, false );
         overlayLabel.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
@@ -166,9 +166,10 @@ namespace kick_ui
 
     void KSystemResources::paint( juce::Graphics& g )
     {
+        // A rule across the dialog, broken for the STORAGE heading.
         g.setColour( ui::Theme::backgroundColour( 14 ) );
-        g.drawLine( 20.f, 182.f, 237.f, 182.f );
-        g.drawLine( 367.f, 182.f, 584.f, 182.f );
+        g.drawLine( 20.f, 182.f, (float)storage.getX(), 182.f );
+        g.drawLine( (float)storage.getRight(), 182.f, 584.f, 182.f );
     }
 
     void KSystemResources::resized()
@@ -176,8 +177,11 @@ namespace kick_ui
         cpu.setBounds( 90, 10, 425, 76 );
 
         ram.setBounds( 90, 96, 425, 76 );
-        // The gap between the two lines (paint()): 71 px cut "STORAGE".
-        storage.setBounds( 237, 176, 130, 22 );
+        // As wide as the heading in its font, with a margin: a fixed width
+        // fits the word only in the font it was measured with, and cut it
+        // short ("STORA...") at 71 px.
+        const auto storageWidth = (int)std::ceil( juce::Font( storageFontHeight ).getStringWidthFloat( storage.getText() ) ) + 32;
+        storage.setBounds( juce::Rectangle<int>( storageWidth, 22 ).withCentre( { 302, 187 } ) );
 
         flash.setBounds( 90, 199, 425, 76 );
         sdcard.setBounds( 90, 275, 425, 76 );

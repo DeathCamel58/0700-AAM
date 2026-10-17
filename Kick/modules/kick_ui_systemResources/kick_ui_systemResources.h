@@ -73,7 +73,8 @@ namespace kick_ui
         void visibilityChanged() override;
 
     private:
-        ui::KickLabel storage{ "STORAGE" };
+        static constexpr float storageFontHeight = 16.f;
+        ui::KickLabel          storage{ "STORAGE" };
 
         ui::KickSlider cpu{ "CPU" };
         ui::KickSlider ram{ "RAM" };
