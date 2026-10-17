@@ -9,6 +9,7 @@ header files that the compiler may be using.
 
 #include "hardware/source/kick_Resorces.h"
 #include "kick_ui_systemResources.h"
+#include <project/project.h>
 
 namespace kick_ui
 {
@@ -23,7 +24,7 @@ namespace kick_ui
         setTitle( "SYSTEM RESOURCES" );
 
         mt::utils::addChildComponents( this, cpu, ram, flash, sdcard, usb );
-        mt::utils::addAndMakeVisible( this, storage, purgeAll, purgeUnused, ok );
+        mt::utils::addAndMakeVisible( this, storage, overlayLabel, overlay, purgeAll, purgeUnused, ok );
 
         cpu.setEnabled( false );
         cpu.setRange( 0.0, 100.0 );
@@ -69,6 +70,17 @@ namespace kick_ui
         storage.setValueColour( ui::Theme::textColour( 2 ) );
         storage.setValueJustification( juce::Justification::centredTop );
         storage.setValueFontHeight( 16 );
+
+        overlayLabel.setInterceptsMouseClicks( false, false );
+        overlayLabel.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
+        overlayLabel.setValueColour( ui::Theme::textColour( 2 ) );
+        overlayLabel.setValueJustification( juce::Justification::centredLeft );
+        overlayLabel.setValueFontHeight( 16 );
+        overlay.setValueFontHeight( 18 );
+
+        // The button shows the setting and changes it; the overlay follows
+        // the setting, wherever it is changed.
+        overlay.getToggleStateValue().referTo( mt::getSettings().window.performanceOverlay.getValue() );
 
         purgeAll.setPlacementFlag( juce::Justification::centred );
         purgeUnused.setPlacementFlag( juce::Justification::centred );
@@ -151,9 +163,12 @@ namespace kick_ui
 
         usb.setBounds( 90, 357, 425, 76 );
 
-        purgeAll.setBounds( 20, 433, 140, 40 );
-        purgeUnused.setBounds( 240, 433, 140, 40 );
-        ok.setBounds( 430, 433, 140, 40 );
+        overlayLabel.setBounds( 90, 441, 290, 36 );
+        overlay.setBounds( 395, 441, 120, 36 );
+
+        purgeAll.setBounds( 20, 483, 140, 40 );
+        purgeUnused.setBounds( 240, 483, 140, 40 );
+        ok.setBounds( 430, 483, 140, 40 );
     }
 
     void KSystemResources::visibilityChanged()

@@ -78,6 +78,11 @@ namespace kick_ui
         ui::KickSlider sdcard{ "SDCARD" };
         ui::KickSlider usb{ "USB DRIVE" };
 
+        // Turns the performance overlay on and off (the setting it shows
+        // follows), which stays when this window closes.
+        ui::KickLabel        overlayLabel{ "PERFORMANCE OVERLAY" };
+        ui::KickToggleButton overlay{ "Performance overlay", "On", "Off" };
+
         ui::KickImageButton purgeAll{ "Purge All", "purge" };
         ui::KickImageButton purgeUnused{ "Purge Unused", "purgeused" };
         ui::KickImageButton ok{ "OK", "ok_resource" };

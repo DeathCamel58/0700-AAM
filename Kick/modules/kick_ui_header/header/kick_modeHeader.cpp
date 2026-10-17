@@ -24,9 +24,9 @@
 namespace kick_ui
 {
     inline static constexpr int rx = 198;
-    inline static constexpr int ry = 20;
+    inline static constexpr int ry = 12;
     inline static constexpr int rw = 604;
-    inline static constexpr int rh = 525;
+    inline static constexpr int rh = 575;
 
     KickModeHeader::KickModeHeader( const juce::String& Name, const juce::String& Image )
     {
