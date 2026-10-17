@@ -662,9 +662,16 @@ namespace ui
         if( isDragging ) //Ignore dragging
             return;
 
-        if( isLongPressTriggered )
+        // A long press is told by how long the press lasted, from the
+        // events' own times. The timer only shows the selection while the
+        // tile is held: when the UI is busy it can run before a release
+        // that came well within the threshold is handled, and the tap then
+        // counted as a long press and only selected the tile.
+        if( ( e.eventTime - e.mouseDownTime ).inMilliseconds() >= longPressThreshold )
         {
             DBG( "LongPressed " );
+            if( !isLongPressTriggered )
+                select();
             if( onLongPressed )
                 onLongPressed( index );
         }
