@@ -35,6 +35,16 @@ namespace ui
         ui::themeChanged.connect( [svgSetter]() { svgSetter(); } );
 
         svgSetter();
+
+        // Tooltips in the theme's colors, like the long-press hints
+        // (LongPressHint), rather than LookAndFeel_V4's blue.
+        auto tooltipColours = [this]() {
+            setColour( juce::TooltipWindow::backgroundColourId, ui::Theme::backgroundColour( 2 ) );
+            setColour( juce::TooltipWindow::textColourId, ui::Theme::textColour( 1 ) );
+            setColour( juce::TooltipWindow::outlineColourId, ui::Theme::outlineColour( 1 ) );
+        };
+        ui::themeChanged.connect( tooltipColours );
+        tooltipColours();
     }
 
     void KickLooknFeel::drawLabel( juce::Graphics& g, juce::Label& label )

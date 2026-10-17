@@ -142,6 +142,11 @@ namespace kick_ui
         // Pop-ups, notifications and menus open in here.
         ui::setLayoutRoot( this );
 
+        // Icon buttons name themselves in tooltips: shown here when the
+        // mouse rests on them, and on a touch screen when they are held
+        // (ui::LongPressHint).
+        tooltipWindow_ = std::make_unique<juce::TooltipWindow>( this, 700 );
+
         // Connect sceeen signals.
         // Open screen as passed in Argument.
         signals::sigScreenOpen.connect( [&]( Screen Scrn ) {
@@ -259,6 +264,7 @@ namespace kick_ui
         ui::setLayoutRoot( nullptr );
         removeKeyListener( &contracts::getKeypressDetector() );
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
+        tooltipWindow_.reset();
         removeAllChildren();
         ctrlBar_.reset();
         ledControl_.reset();
