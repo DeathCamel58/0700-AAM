@@ -217,6 +217,10 @@ namespace kick_ui
         {
             for( const auto& it : programs )
                 it->setVisible( false );
+            // Program Edit's own header: the audio program's one (titled
+            // "Grid View") may still be showing from before.
+            audioheader.setVisible( false );
+            header.setVisible( true );
             if( Type == mt::MTProgramType::Audio )
                 infoLabel.setText( "Program Edit is not available for Audio Program", juce::dontSendNotification );
             else
@@ -300,6 +304,13 @@ namespace kick_ui
                 auto& ae    = mt::getAudioInterface();
                 auto  pProg = ae.getProgramDataForTrack( ae.getSelectedSequence(), ae.getSelectedTrack() );
                 hdrComp.programs.setValues( pProg ? pProg->name.get() : ae.getProgramNameByIndex( ae.getSelectedProgram() ), selectedProgram->getType(), juce::sendNotification );
+            }
+            else
+            {
+                // Nothing to edit: Program Edit's own header and the
+                // message, not the audio program's header (titled "Grid
+                // View") and tools, shown above with every other child.
+                mt::utils::makeHidden( audioheader, tracks, audioHdrTools );
             }
         }
     }
