@@ -93,7 +93,7 @@ namespace kick::window
           host( content )
     {
         setTitle( name );
-        host.setOverlay( options.overlay );
+        host.setOverlay( options.overlay, options.overlayMargin );
         setContentNonOwned( &host, false );
 
         if( options.windowMode == WindowMode::windowed )

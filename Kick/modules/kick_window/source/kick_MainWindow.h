@@ -67,6 +67,9 @@ namespace kick::window
             // (ScaledHost::setOverlay()). Not owned; it is taken out of the
             // window when the window is destroyed.
             juce::Component* overlay{ nullptr };
+            // Its distance from the right and the bottom edge, in layout
+            // units.
+            juce::Point<int> overlayMargin{ ScaledHost::overlayMargin, ScaledHost::overlayMargin };
         };
 
         // The content is not owned. The window is shown when this returns.

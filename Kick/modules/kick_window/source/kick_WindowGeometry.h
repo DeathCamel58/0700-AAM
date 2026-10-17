@@ -42,12 +42,12 @@ namespace kick::window
 
     // Where a panel panelSize layout units in size shows in an area that
     // shows the layout: scaled as the layout is, with its bottom-right
-    // corner margin layout units in from the bottom-right corner of the
-    // area (not of the letterboxed layout: of the window, the display in
-    // kiosk mode), on whole pixels. The transform maps the panel's bounds,
-    // at the origin, to that place.
+    // corner margin.x layout units in from the right edge of the area and
+    // margin.y up from its bottom edge (not of the letterboxed layout: of
+    // the window, the display in kiosk mode), on whole pixels. The
+    // transform maps the panel's bounds, at the origin, to that place.
     juce::AffineTransform placeInBottomRight( juce::Rectangle<int> area, juce::Rectangle<int> layout,
-                                              juce::Point<int> panelSize, int margin );
+                                              juce::Point<int> panelSize, juce::Point<int> margin );
 
     // A saved window position and size: "x y width height". The position
     // is the one to ask for (the frame's top-left corner, as

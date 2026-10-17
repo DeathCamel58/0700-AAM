@@ -26,7 +26,7 @@ namespace kick_ui
 {
     namespace
     {
-        const auto backgroundColour = juce::Colours::black.withAlpha( 0.6f );
+        const auto backgroundColour = juce::Colours::black.withAlpha( 0.5f );
         const auto titleColour      = juce::Colours::white.withAlpha( 0.9f );
         const auto detailColour     = juce::Colours::white.withAlpha( 0.65f );
         const auto gridColour       = juce::Colours::white.withAlpha( 0.18f );
@@ -48,6 +48,18 @@ namespace kick_ui
 
         // A frame at 60 Hz.
         constexpr float frameGuideMs = 1000.0f / 60.0f;
+    }
+
+    juce::Point<int> PerformanceOverlay::getMargin()
+    {
+        // The dialogs are centred, their buttons in a 73 unit row inside a
+        // 4 unit edge at the bottom (kick_utils_popup.cpp).
+        constexpr int dialogButtonRowHeight = 73 + 4;
+        const auto    dialogHeight          = juce::jmax( ui::layout::dialog.getHeight(), ui::layout::keyBoardPopup.getHeight() );
+        const auto    buttonRowTop          = ( ui::appHeight + dialogHeight ) / 2 - dialogButtonRowHeight;
+
+        const auto bottom = juce::jmax( ui::appHeight - buttonRowTop, ui::appHeight - ui::layout::statusBar.getY() ) + padding;
+        return { padding, bottom };
     }
 
     PerformanceOverlay::Row::Row( const juce::String& rowTitle, float topValue )

@@ -614,7 +614,7 @@ namespace
     // The panel's corners, where the window shows them.
     juce::Rectangle<float> placedPanel( juce::Rectangle<int> area, juce::Point<int> panel, int margin )
     {
-        const auto transform = kick::window::placeInBottomRight( area, layout, panel, margin );
+        const auto transform = kick::window::placeInBottomRight( area, layout, panel, { margin, margin } );
         return juce::Rectangle<float>( 0.0f, 0.0f, (float)panel.x, (float)panel.y ).transformedBy( transform );
     }
 
@@ -650,7 +650,7 @@ namespace
         for( auto area : { juce::Rectangle<int>( 0, 0, 1280, 800 ), juce::Rectangle<int>( 0, 0, 1366, 768 ),
                            juce::Rectangle<int>( 0, 0, 777, 455 ) } )
         {
-            const auto transform = kick::window::placeInBottomRight( area, layout, panel, 6 );
+            const auto transform = kick::window::placeInBottomRight( area, layout, panel, { 6, 6 } );
             CHECK( juce::exactlyEqual( transform.getTranslationX(), std::round( transform.getTranslationX() ) ) );
             CHECK( juce::exactlyEqual( transform.getTranslationY(), std::round( transform.getTranslationY() ) ) );
             CHECK( area.toFloat().contains( placedPanel( area, panel, 6 ) ) );
@@ -665,7 +665,19 @@ namespace
         CHECK( shown.getX() >= 0.0f && shown.getY() >= 0.0f );
 
         // Nothing to show in: no scale, no singular transform.
-        CHECK( !kick::window::placeInBottomRight( {}, layout, panel, 6 ).isSingularity() );
+        CHECK( !kick::window::placeInBottomRight( {}, layout, panel, { 6, 6 } ).isSingularity() );
+
+        // Further up than in from the side (Kick's performance overlay, 260
+        // by 170, above the dialogs' button row, whose top is at 483, and
+        // the status bar, at 536).
+        const juce::Point<int> overlay( 260, 170 ), above( 6, 123 );
+        auto transform = kick::window::placeInBottomRight( { 0, 0, 1024, 600 }, layout, overlay, above );
+        shown          = juce::Rectangle<float>( 0.0f, 0.0f, 260.0f, 170.0f ).transformedBy( transform );
+        CHECK( shown == juce::Rectangle<float>( 758.0f, 307.0f, 260.0f, 170.0f ) );
+        CHECK( shown.getBottom() < 483.0f );
+        transform = kick::window::placeInBottomRight( { 0, 0, 2048, 1200 }, layout, overlay, above );
+        shown     = juce::Rectangle<float>( 0.0f, 0.0f, 260.0f, 170.0f ).transformedBy( transform );
+        CHECK( shown == juce::Rectangle<float>( 1516.0f, 614.0f, 520.0f, 340.0f ) );
     }
 
     bool nearMs( double a, double b )

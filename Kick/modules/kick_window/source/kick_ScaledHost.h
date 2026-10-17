@@ -45,9 +45,14 @@ namespace kick::window
 
         juce::Rectangle<int> getLayoutBounds() const { return layout; }
 
+        // The overlay's distance from the corner by default, in layout
+        // units.
+        static constexpr int overlayMargin = 6;
+
         // Replaces the overlay; nullptr removes it. Whether it is visible is
-        // up to the overlay.
-        void setOverlay( juce::Component* overlay );
+        // up to the overlay. It shows margin.x layout units in from the
+        // right edge and margin.y up from the bottom edge.
+        void setOverlay( juce::Component* overlay, juce::Point<int> margin = { overlayMargin, overlayMargin } );
 
         FrameTiming& getFrameTiming() { return frameTiming; }
 
@@ -55,9 +60,6 @@ namespace kick::window
         void paintOverChildren( juce::Graphics& g ) override;
         void resized() override;
         void childBoundsChanged( juce::Component* child ) override;
-
-        // The overlay's distance from the corner, in layout units.
-        static constexpr int overlayMargin = 6;
 
     private:
         // Behind the content, painted first in every frame (see paint()).
@@ -77,6 +79,7 @@ namespace kick::window
         juce::Rectangle<int> layout;
 
         juce::Component::SafePointer<juce::Component> overlay;
+        juce::Point<int>                              overlayCornerMargin{ overlayMargin, overlayMargin };
         FrameTiming                                   frameTiming;
         FrameStart                                    frameStart{ frameTiming };
 

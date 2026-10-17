@@ -103,11 +103,11 @@ namespace kick::window
     }
 
     juce::AffineTransform placeInBottomRight( juce::Rectangle<int> area, juce::Rectangle<int> layout,
-                                              juce::Point<int> panelSize, int margin )
+                                              juce::Point<int> panelSize, juce::Point<int> margin )
     {
         const auto scale = computeLetterbox( area, layout ).scale;
-        const auto x     = (float)area.getRight() - std::round( (float)( panelSize.x + margin ) * scale );
-        const auto y     = (float)area.getBottom() - std::round( (float)( panelSize.y + margin ) * scale );
+        const auto x     = (float)area.getRight() - std::round( (float)( panelSize.x + margin.x ) * scale );
+        const auto y     = (float)area.getBottom() - std::round( (float)( panelSize.y + margin.y ) * scale );
         return juce::AffineTransform::scale( scale ).translated( juce::jmax( x, (float)area.getX() ),
                                                                  juce::jmax( y, (float)area.getY() ) );
     }
