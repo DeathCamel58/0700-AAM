@@ -44,7 +44,7 @@ namespace kick_ui
         void visibilityChanged() override;
 
     private:
-        ui::KickImageButton                  magnify{ "Magnify", "Magnify", "Magnify" };
+        ui::KickImageButton                  magnify{ "Magnify", "Search_Browser", "Search_BrowserActive" };
         ui::KickImageButton                  pencil{ "Pencil", "Pencil_Normal", "Pencil_Active" };
         ui::KickImageButton                  erase{ "Erase", "Erase_Normal", "Erase_Active" };
         ui::KickImageButton                  select{ "Select", "Select_Normal", "Select_Active" };

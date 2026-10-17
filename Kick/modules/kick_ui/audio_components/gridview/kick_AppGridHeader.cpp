@@ -106,6 +106,7 @@ namespace kick_ui
         };
 
         ui::themeChanged.connect( [&]() {
+            magnify.setImages( "Search_Browser", "Search_BrowserActive" );
             pencil.setImages( "Pencil_Normal", "Pencil_Active" );
             erase.setImages( "Erase_Normal", "Erase_Active" );
             select.setImages( "Select", "Select_Normal", "Select_Active" );
