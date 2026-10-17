@@ -20,7 +20,8 @@
 // Tests of the system information the preferences and the system resources
 // window show: CPU and memory use parsed from /proc, and the DNS server
 // from systemd-networkd's and systemd-resolved's state files; and how the
-// device information, dates, times and paths are written and listings
+// device information, dates, times, paths and slider values are written
+// and listings
 // ordered (kick_DisplayFormat.h); and the system's
 // time zone (kick_TimeZone.h). The parsers
 // and lookups are fed
@@ -333,6 +334,29 @@ namespace
         CHECK( display::placePath( "/data/kick/projectsX", places ) == "/data/kick/projectsX" );
         CHECK( display::placePath( "/etc", places ) == "/etc" );
     }
+
+    void testNumbers()
+    {
+        namespace display = mt::display;
+
+        // A whole number step: no decimals.
+        CHECK( display::number( 127.0, 0 ) == "127" );
+        CHECK( display::number( 99.6, 0 ) == "100" );
+        CHECK( display::number( -0.4, 0 ) == "0" );
+        // A continuous value (JUCE asks for 7 places): one.
+        CHECK( display::number( 12.345, 7 ) == "12.3" );
+        CHECK( display::number( -100.0, 7 ) == "-100.0" );
+        CHECK( display::number( -0.04, 7 ) == "0.0" );
+        // A finer step keeps its places.
+        CHECK( display::number( 0.25, 2 ) == "0.25" );
+        CHECK( display::number( 0.5, 1 ) == "0.5" );
+
+        CHECK( display::decibels( -100.0 ) == "-100.0dB" );
+        CHECK( display::decibels( -6.54 ) == "-6.5dB" );
+        CHECK( display::decibels( 1.0 ) == "+1.0dB" );
+        CHECK( display::decibels( 0.0 ) == "0.0dB" );
+        CHECK( display::decibels( 0.01 ) == "0.0dB" );
+    }
 }
 
 int main()
@@ -344,6 +368,7 @@ int main()
     testDeviceInfo();
     testTimeZone();
     testListings();
+    testNumbers();
 
     if( failures != 0 )
     {

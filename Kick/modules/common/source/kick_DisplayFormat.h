@@ -139,5 +139,25 @@ namespace mt
                 return bestName;
             return bestName + "/" + file.getRelativePathFrom( bestPlace );
         }
+
+        /** A number with the given decimal places, at most one where the
+            value is continuous (seven or more places, what a slider
+            without a step asks for), and none for a whole number step: so
+            "127", not "127.00". Never "-0". */
+        inline juce::String number( double value, int decimalPlaces )
+        {
+            const int places = decimalPlaces >= 7 ? 1 : juce::jmax( 0, decimalPlaces );
+            auto      text   = places == 0 ? juce::String( juce::roundToInt( value ) ) : juce::String( value, places );
+            if( text.startsWithChar( '-' ) && text.containsOnly( "-0." ) )
+                text = text.substring( 1 );
+            return text;
+        }
+
+        /** A level in decibels, to a tenth: "-6.5dB", "+1.0dB". */
+        inline juce::String decibels( double dB )
+        {
+            const auto text = number( dB, 1 );
+            return ( dB > 0 && !text.containsOnly( "0." ) ? "+" : "" ) + text + "dB";
+        }
     }
 }
