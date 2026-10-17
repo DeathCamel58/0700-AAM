@@ -107,13 +107,23 @@ namespace kick_ui
                 bool isBlack  = mt::Note::colours[semiTone];
                 if( Type::Drum == noteType )
                 {
-                    g.setColour( isBlack ? blackColour : whiteColour );
+                    // Pads are not keys: plain rows, shaded alternately
+                    // like the lanes next to them, with a line between
+                    // the banks of 16 pads (black and white keys made the
+                    // pads look like notes of a scale).
+                    g.setColour( ui::Theme::backgroundColour( ( n % 2 ) ? 1 : 3 ) );
                     g.fillRect( tArea );
 
                     g.setColour( ui::Theme::outlineColour( 5 ) );
                     g.drawRect( tArea.toFloat(), 0.6f );
 
-                    g.setColour( isBlack ? whiteColour : blackColour );
+                    if( n > 0 && 0 == ( n % 16 ) )
+                    {
+                        g.setColour( ui::Theme::outlineColour( 6 ) );
+                        g.fillRect( tArea.withTop( tArea.getBottom() - 1.5f ) );
+                    }
+
+                    g.setColour( ui::Theme::textColour( 1 ) );
                     auto drawArea = tArea.removeFromRight( (float)( tArea.getWidth() * .25f ) );
                     g.drawFittedText( mt::Kick::getPadName( n ), drawArea.toNearestInt(), juce::Justification::centred, 1 );
                 }
