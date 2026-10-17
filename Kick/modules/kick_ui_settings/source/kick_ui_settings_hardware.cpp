@@ -86,8 +86,8 @@ namespace kick_ui
             settings.hardware.aftertouch = ( afterTh );
         };
 
-        enabled.onClick = [this]() {
-            settings.hardware.tempoLEDStatus = ( enabled.getToggleState() );
+        enabled.onSelectionChanged = [this]( int index, const juce::String& ) {
+            settings.hardware.tempoLEDStatus = ( index == 1 );
         };
 
         brightness.onValueChanged = [this]( double value ) {
@@ -163,7 +163,7 @@ namespace kick_ui
         brightness.setValue( value, juce::dontSendNotification );
 
         juce::String test = settings.hardware.numTaps();
-        enabled.setToggleState( settings.hardware.tempoLEDStatus(), juce::dontSendNotification );
+        enabled.setSelected( settings.hardware.tempoLEDStatus() ? 1 : 0, juce::dontSendNotification );
         taps.setSelected( test, juce::dontSendNotification );
 
         juce::String zone = mt::HwPref::getHwPref().getTimeZone();

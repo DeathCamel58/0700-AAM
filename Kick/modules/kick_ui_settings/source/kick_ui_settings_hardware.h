@@ -49,7 +49,7 @@ namespace kick_ui
 
         ui::KickSlider brightness{ "BRIGHTNESS", juce::Slider::LinearBar, juce::Slider::TextBoxBelow };
 
-        ui::KickToggleButton enabled{ "TAP Tempo LED", "ENABLED", "DISABLED" };
+        ui::KickToggleOptions enabled{ "TAP TEMPO LED", { "Off", "On" } };
         ui::KickListBox      taps{ ui::KickListBox::withTitleBar, "NO OF TAPS", { "1", "2", "4" }, 2 };
 
         ui::KickNumberT<int> date_DD{ "Day", 1, 31, 1, 1, true };
