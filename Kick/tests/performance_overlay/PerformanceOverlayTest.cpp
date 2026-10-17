@@ -180,6 +180,45 @@ namespace
         CHECK( perf::xrunsSince( -1, 4 ) == 4 ); // counted from nothing
     }
 
+    void testRecentFrames()
+    {
+        // Five periods of 200 ms: the last second.
+        perf::RecentFrames recent( 5 );
+        CHECK( near( recent.framesPerSecond(), 0.0 ) );
+        CHECK( near( recent.longestPaintMs(), 0.0 ) );
+
+        // The OpenGL renderer in QEMU: a frame of 120 ms every other period.
+        // Each period alone read 0 fps and 0.0 ms whenever the overlay's
+        // texts were painted; over the last second, the frames show.
+        for( int i = 0; i < 10; ++i )
+        {
+            const bool painted = i % 2 == 0;
+            recent.add( 200.0, painted ? 1 : 0, painted ? 120.0 : 0.0, painted ? 130.0 : 14.0 );
+        }
+        CHECK( near( recent.framesPerSecond(), 2.0 ) ); // 2 frames in the last 5 periods
+        CHECK( near( recent.longestPaintMs(), 120.0 ) );
+        CHECK( near( recent.longestTickGapMs(), 130.0 ) );
+        CHECK( perf::formatFramesPerSecond( recent.framesPerSecond() ) == "2.0 fps" );
+
+        // The software renderer at the display's rate: as a single period.
+        for( int i = 0; i < 5; ++i )
+            recent.add( 200.0, 12, 3.0 + i, 17.0 );
+        CHECK( near( recent.framesPerSecond(), 60.0 ) );
+        CHECK( near( recent.longestPaintMs(), 7.0 ) );
+        CHECK( near( recent.longestTickGapMs(), 17.0 ) );
+
+        // Periods of other lengths (a late timer) are weighed by length.
+        recent.clear();
+        recent.add( 100.0, 6, 1.0, 16.0 );
+        recent.add( 300.0, 18, 2.0, 16.0 );
+        CHECK( near( recent.framesPerSecond(), 60.0 ) );
+
+        // Nothing painted: no frames, no division by zero.
+        recent.clear();
+        recent.add( 0.0, 0, 0.0, 0.0 );
+        CHECK( near( recent.framesPerSecond(), 0.0 ) );
+    }
+
     void testFormatting()
     {
         CHECK( perf::formatPercent( 0.0 ) == "0%" );
@@ -204,6 +243,9 @@ namespace
 
         CHECK( perf::formatFramesPerSecond( 0.0 ) == "0 fps" );
         CHECK( perf::formatFramesPerSecond( 59.7 ) == "60 fps" );
+        CHECK( perf::formatFramesPerSecond( 2.5 ) == "2.5 fps" );
+        CHECK( perf::formatFramesPerSecond( 9.96 ) == "10 fps" );
+        CHECK( perf::formatFramesPerSecond( -1.0 ) == "0 fps" );
 
         CHECK( perf::formatSampleRate( 48000.0 ) == "48 kHz" );
         CHECK( perf::formatSampleRate( 44100.0 ) == "44.1 kHz" );
@@ -264,6 +306,7 @@ int main()
     testProcessCpu();
     testThisMachine();
     testXRuns();
+    testRecentFrames();
     testFormatting();
     testSetting();
 

@@ -53,6 +53,52 @@ namespace kick_ui::perf
         return count > 0 ? ( *this )[count - 1] : 0.0f;
     }
 
+    RecentFrames::RecentFrames( int periodsToKeep )
+        : periods( (size_t)juce::jmax( 1, periodsToKeep ) )
+    {
+    }
+
+    void RecentFrames::add( double lengthMs, int frames, double longestPaintMs, double longestTickGapMs )
+    {
+        periods[(size_t)next] = { juce::jmax( 0.0, lengthMs ), juce::jmax( 0, frames ), longestPaintMs, longestTickGapMs };
+        next                  = ( next + 1 ) % (int)periods.size();
+        count                 = juce::jmin( count + 1, (int)periods.size() );
+    }
+
+    void RecentFrames::clear()
+    {
+        next  = 0;
+        count = 0;
+    }
+
+    double RecentFrames::framesPerSecond() const
+    {
+        double lengthMs = 0.0;
+        int    frames   = 0;
+        for( int i = 0; i < count; ++i )
+        {
+            lengthMs += periods[(size_t)i].lengthMs;
+            frames += periods[(size_t)i].frames;
+        }
+        return lengthMs > 0.0 ? frames * 1000.0 / lengthMs : 0.0;
+    }
+
+    double RecentFrames::longestPaintMs() const
+    {
+        double longest = 0.0;
+        for( int i = 0; i < count; ++i )
+            longest = juce::jmax( longest, periods[(size_t)i].longestPaintMs );
+        return longest;
+    }
+
+    double RecentFrames::longestTickGapMs() const
+    {
+        double longest = 0.0;
+        for( int i = 0; i < count; ++i )
+            longest = juce::jmax( longest, periods[(size_t)i].longestTickGapMs );
+        return longest;
+    }
+
     std::optional<CpuTimes> parseProcStat( const std::string& procStat )
     {
         std::istringstream line( procStat.substr( 0, procStat.find( '\n' ) ) );
@@ -160,7 +206,12 @@ namespace kick_ui::perf
 
     juce::String formatFramesPerSecond( double rate )
     {
-        return juce::String( juce::roundToInt( juce::jmax( 0.0, rate ) ) ) + " fps";
+        rate = juce::jmax( 0.0, rate );
+        // Tenths while they matter: a slow renderer's frame every other
+        // period is not "0 fps".
+        if( rate > 0.0 && rate < 9.95 )
+            return juce::String( rate, 1 ) + " fps";
+        return juce::String( juce::roundToInt( rate ) ) + " fps";
     }
 
     juce::String formatSampleRate( double hz )

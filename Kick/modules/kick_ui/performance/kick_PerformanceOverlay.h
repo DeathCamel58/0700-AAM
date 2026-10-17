@@ -103,7 +103,8 @@ namespace kick_ui
         Row memory{ "RAM", 100.0f };
         Row audio{ "AUDIO", 100.0f };
 
-        perf::History xruns{ historySize };
+        perf::History      xruns{ historySize };
+        perf::RecentFrames recentFrames{ samplesPerSecond };
 
         perf::CpuTimes lastCpu;
         juce::uint64   lastProcessTicks{ 0 };

@@ -50,6 +50,40 @@ namespace kick_ui::perf
         int                count{ 0 };
     };
 
+    // The window's frames over the last few periods the overlay sampled
+    // (FrameTiming::Period): what its texts show. A period alone is too
+    // short when frames come slower than the overlay samples (the OpenGL
+    // renderer on a slow GPU, or a software one): most periods then hold
+    // no frame, and the overlay's own repaint, the frame that would show
+    // a period with one, is painted only after the next, empty, period was
+    // sampled, so that the texts always read "0 fps, paint 0.0 ms" while
+    // frames were painted.
+    class RecentFrames
+    {
+    public:
+        explicit RecentFrames( int periods );
+
+        void add( double lengthMs, int frames, double longestPaintMs, double longestTickGapMs );
+        void clear();
+
+        double framesPerSecond() const; // 0 without time
+        double longestPaintMs() const;
+        double longestTickGapMs() const;
+
+    private:
+        struct Period
+        {
+            double lengthMs{ 0.0 };
+            int    frames{ 0 };
+            double longestPaintMs{ 0.0 };
+            double longestTickGapMs{ 0.0 };
+        };
+
+        std::vector<Period> periods;
+        int                 next{ 0 };
+        int                 count{ 0 };
+    };
+
     // The time all CPUs have spent since boot, from the "cpu" line of
     // /proc/stat, in clock ticks.
     struct CpuTimes
@@ -79,6 +113,6 @@ namespace kick_ui::perf
     juce::String formatPercent( double percent );       // "34%"
     juce::String formatMilliseconds( double ms );       // "3.2 ms", "17 ms"
     juce::String formatMegabytes( double mebibytes );   // "812 MB", "1.9 GB"
-    juce::String formatFramesPerSecond( double rate );  // "24 fps"
+    juce::String formatFramesPerSecond( double rate );  // "24 fps", "2.5 fps"
     juce::String formatSampleRate( double hz );         // "48 kHz", "44.1 kHz"
 }

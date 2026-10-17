@@ -151,6 +151,7 @@ namespace kick_ui
                 text.clear();
         }
         xruns.clear();
+        recentFrames.clear();
         xrunsShown    = 0;
         lastXRunCount = -1;
 
@@ -219,12 +220,14 @@ namespace kick_ui
         const auto period = host->getFrameTiming().takePeriod();
         frames.a.push( (float)period.longestPaintMs );
         frames.b.push( (float)period.longestTickGapMs );
+        recentFrames.add( period.lengthMs, period.frames, period.longestPaintMs, period.longestTickGapMs );
 
-        // The slowest frame and the longest wait in the period: what is
-        // felt, where an average hides it.
-        frames.texts[0] = perf::formatFramesPerSecond( period.framesPerSecond() );
-        frames.texts[1] = "paint " + perf::formatMilliseconds( period.longestPaintMs );
-        frames.texts[2] = "gap " + perf::formatMilliseconds( period.longestTickGapMs );
+        // Over the last second (the graphs show each period): the rate, and
+        // the slowest frame and the longest wait, what is felt, where an
+        // average hides it.
+        frames.texts[0] = perf::formatFramesPerSecond( recentFrames.framesPerSecond() );
+        frames.texts[1] = "paint " + perf::formatMilliseconds( recentFrames.longestPaintMs() );
+        frames.texts[2] = "gap " + perf::formatMilliseconds( recentFrames.longestTickGapMs() );
     }
 
     void PerformanceOverlay::sampleCpu()
