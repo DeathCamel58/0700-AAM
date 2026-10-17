@@ -59,17 +59,17 @@ namespace kick_ui
 
         fwUpdate.onClick = [&]() { signals::sigScreenOpen( kick_ui::Screen::SWUpdateView ); };
         fReset.onClick   = [&]() {
-            auto p = new ConfirmationPopup{ " Are You Sure You Want To Do Factory Reset ?", false, false };
+            auto p = new ConfirmationPopup{ "Erase all projects and preferences?", false, false };
             mt::utils::showOptions(
-                "CONFIRMATION!", p, [&, p]( int R ) {
+                "FACTORY RESET", p, [&, p]( int R ) {
                    if( R == UI::APPLY )
                      mt::HwPref::getHwPref().factoryReset();
                    delete p; }, ui::layout::warningPopup, ui::Theme::backgroundColour( 1 ), ui::Theme::titleColour( 1 ), ui::Theme::backgroundColour( 2 ) );
         };
         rDefaults.onClick = [&]() {
-            auto p = new ConfirmationPopup{ "Are You Sure You Want To Restore Defaults ?", false, false };
+            auto p = new ConfirmationPopup{ "Restore the default preferences?", false, false };
             mt::utils::showOptions(
-                "CONFIRMATION!", p, [&, p]( int R ) {
+                "RESTORE DEFAULTS", p, [&, p]( int R ) {
                    if( R == UI::APPLY )
                     mt::getSettings().makeDefaults();
                    delete p; }, ui::layout::warningPopup, ui::Theme::backgroundColour( 1 ), ui::Theme::titleColour( 1 ), ui::Theme::backgroundColour( 2 ) );
@@ -130,7 +130,9 @@ namespace kick_ui
     }
     void ConfirmationPopup::resized()
     {
-        info.setBounds( startX, startY, width, 25 );
+        // At least as wide as the pop-up's content, less a margin: the
+        // message is one line, and shortened with "..." when it does not fit.
+        info.setBounds( juce::Rectangle<int>( startX, startY, width, 25 ).getUnion( { 10, startY, getWidth() - 20, 25 } ) );
         no.setBoundsRelative( 0.05f, 0.86f, 0.4f, 0.106f );
         yes.setBoundsRelative( 0.55f, 0.86f, 0.4f, 0.106f );
     }

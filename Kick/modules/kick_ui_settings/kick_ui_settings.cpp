@@ -67,7 +67,9 @@ namespace kick_ui
     void TextValue::resized()
     {
         auto b = getLocalBounds();
-        title.setBounds( b.removeFromLeft( b.proportionOfWidth( 0.5 ) ) );
+        // The values (a build date with its time) are longer than the
+        // titles: half of the row cut the build date short.
+        title.setBounds( b.removeFromLeft( b.proportionOfWidth( 0.45 ) ) );
         value.setBounds( b );
     }
 
