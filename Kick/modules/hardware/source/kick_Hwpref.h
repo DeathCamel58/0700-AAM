@@ -64,6 +64,7 @@ namespace mt
         std::string IP      = "0.0.0.0";
         std::string subnet  = "0.0.0.0";
         std::string gateway = "0.0.0.0";
+        std::string dns     = "0.0.0.0";
     };
 
     struct MemoryStatus

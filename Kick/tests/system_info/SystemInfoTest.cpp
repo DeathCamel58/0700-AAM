@@ -18,7 +18,9 @@
  */
 
 // Tests of the system information the preferences and the system resources
-// window show: CPU and memory use parsed from /proc. The parsers are fed
+// window show: CPU and memory use parsed from /proc, and the DNS server
+// from systemd-networkd's and systemd-resolved's state files. The parsers
+// and lookups are fed
 // fixture copies of the files, so the results do not depend on this
 // machine. Built with -DKICK_BUILD_TESTS=ON; it needs no arguments, creates
 // no window and changes nothing on the system.
@@ -26,6 +28,7 @@
 #include <juce_core/juce_core.h>
 
 #include "hardware/source/kick_Resorces.cpp"
+#include "hardware/source/kick_NetInfo.h"
 
 #include <cstdio>
 
@@ -135,6 +138,87 @@ namespace
         mt::SystemResource().sizeInfo( empty, info );
         CHECK( !info.status );
     }
+
+    // Writes a fixture file below root, making its directories.
+    void writeFixture( const juce::File& root, const juce::String& path, const juce::String& contents )
+    {
+        const auto file = root.getChildFile( path.substring( 1 ) );
+        file.getParentDirectory().createDirectory();
+        CHECK( file.replaceWithText( contents, false, false, "\n" ) );
+    }
+
+    void testDns()
+    {
+        namespace net = mt::net;
+
+        CHECK( net::ipv4OfServer( "10.0.2.3" ) == "10.0.2.3" );
+        CHECK( net::ipv4OfServer( "1.1.1.1:53" ) == "1.1.1.1" );
+        CHECK( net::ipv4OfServer( "9.9.9.9%2#dns.quad9.net" ) == "9.9.9.9" );
+        CHECK( net::ipv4OfServer( "8.8.8.8#dns.google" ) == "8.8.8.8" );
+        CHECK( net::ipv4OfServer( "fe80::1" ).empty() );
+        CHECK( net::ipv4OfServer( "[2001:db8::1]:53" ).empty() );
+        CHECK( net::ipv4OfServer( "" ).empty() );
+
+        // networkd's link state file (systemd 255).
+        const char* link = "# This is private data. Do not parse.\n"
+                           "ADMIN_STATE=configured\n"
+                           "OPER_STATE=routable\n"
+                           "REQUIRED_FOR_ONLINE=yes\n"
+                           "NETWORK_FILE=/usr/lib/systemd/network/80-wired.network\n"
+                           "DNS=fe80::1%2 10.0.2.3 192.168.1.1:53\n"
+                           "NTP=\n"
+                           "DOMAINS=\n";
+        const auto  linkServers = net::parseNetworkdDns( link );
+        CHECK( linkServers.size() == 2 );
+        CHECK( linkServers.size() == 2 && linkServers[0] == "10.0.2.3" && linkServers[1] == "192.168.1.1" );
+        CHECK( net::parseNetworkdDns( "ADMIN_STATE=configured\nDNS=\n" ).empty() );
+        CHECK( net::parseNetworkdDns( "LLMNR=yes\nDNSSEC=no\n" ).empty() );
+
+        // The stub resolver's /etc/resolv.conf, and resolved's list of the
+        // real servers.
+        const char* stub = "# This is /run/systemd/resolve/stub-resolv.conf managed by man:systemd-resolved(8).\n"
+                           "nameserver 127.0.0.53\n"
+                           "options edns0 trust-ad\n"
+                           "search .\n";
+        CHECK( net::parseResolvConf( stub ).empty() );
+        const char* upstream = "# This is /run/systemd/resolve/resolv.conf managed by man:systemd-resolved(8).\n"
+                               "nameserver 2001:db8::53\n"
+                               "nameserver 10.0.2.3\n"
+                               "nameserver 1.1.1.1\n";
+        const auto  resolved = net::parseResolvConf( upstream );
+        CHECK( resolved.size() == 2 && resolved[0] == "10.0.2.3" );
+        CHECK( net::parseResolvConf( "; comment\n#nameserver 1.2.3.4\nnameserver\n" ).empty() );
+
+        // The lookup order, on a fixture tree: the link's own servers, then
+        // resolved's, then /etc/resolv.conf.
+        const juce::TemporaryFile temporary;
+        const auto                root = temporary.getFile();
+        CHECK( root.createDirectory() );
+        const std::string rootPath = root.getFullPathName().toStdString();
+
+        CHECK( net::dnsServer( "eth0", rootPath ).empty() );
+
+        writeFixture( root, "/etc/resolv.conf", "nameserver 192.168.0.1\n" );
+        CHECK( net::dnsServer( "eth0", rootPath ) == "192.168.0.1" );
+
+        writeFixture( root, "/etc/resolv.conf", stub );
+        CHECK( net::dnsServer( "eth0", rootPath ).empty() );
+
+        writeFixture( root, "/run/systemd/resolve/resolv.conf", upstream );
+        CHECK( net::dnsServer( "eth0", rootPath ) == "10.0.2.3" );
+
+        writeFixture( root, "/sys/class/net/eth0/ifindex", "2\n" );
+        writeFixture( root, "/run/systemd/netif/links/2", "ADMIN_STATE=configured\nDNS=172.16.0.1\n" );
+        CHECK( net::dnsServer( "eth0", rootPath ) == "172.16.0.1" );
+
+        // A link networkd has no servers for falls back to resolved's.
+        writeFixture( root, "/sys/class/net/wlan0/ifindex", "3\n" );
+        writeFixture( root, "/run/systemd/netif/links/3", "ADMIN_STATE=configured\nDNS=\n" );
+        CHECK( net::dnsServer( "wlan0", rootPath ) == "10.0.2.3" );
+        CHECK( net::dnsServer( "", rootPath ) == "10.0.2.3" );
+
+        root.deleteRecursively();
+    }
 }
 
 int main()
@@ -142,6 +226,7 @@ int main()
     testCpu();
     testMemory();
     testStorage();
+    testDns();
 
     if( failures != 0 )
     {

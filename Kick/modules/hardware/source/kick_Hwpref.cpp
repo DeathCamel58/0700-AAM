@@ -737,7 +737,11 @@ namespace mt
         info.subnet        = address.netmask;
         info.status        = net::isUp( interface );
         info.gateway       = getGateway( interface );
-        DBG( "Network " << interface << ": " << info.IP << "/" << info.subnet << " via " << info.gateway << ( info.status ? ", up" : ", down" ) );
+
+        // A DNS server is only of use with an address to reach it from.
+        const std::string dns = address.address != "0.0.0.0" ? net::dnsServer( interface ) : std::string();
+        info.dns              = dns.empty() ? "0.0.0.0" : dns;
+        DBG( "Network " << interface << ": " << info.IP << "/" << info.subnet << " via " << info.gateway << ", DNS " << info.dns << ( info.status ? ", up" : ", down" ) );
     }
 
     int HwPref::getDateTime( dateInfo& date, timeInfo& time )
