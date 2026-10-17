@@ -129,6 +129,8 @@
     #include "modes/filebrowser/kick_fileUtils.h"
     #include "modes/filebrowser/kick_fileBrowser.h"
 
+    #include "performance/kick_PerformanceStats.h"
+    #include "performance/kick_PerformanceOverlay.h"
     #include "dialogs/kick_AppHome.h"
     #include "dialogs/kick_AppWindow.h"
     //new file

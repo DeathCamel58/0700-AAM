@@ -36,6 +36,8 @@ namespace kick_ui
             settings.save();
         };
 
+        options.overlay = KickHome::Instance().getPerformanceOverlay();
+
         return std::make_unique<kick::window::MainWindow>( name, KickHome::Instance(), std::move( options ) );
     }
 }

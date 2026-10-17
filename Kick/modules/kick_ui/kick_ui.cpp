@@ -14,6 +14,8 @@
 #include "dialogs/kick_AppMainMode.cpp"
 #include "dialogs/kick_AppHome.cpp"
 #include "dialogs/kick_AppWindow.cpp"
+#include "performance/kick_PerformanceStats.cpp"
+#include "performance/kick_PerformanceOverlay.cpp"
 #include "dialogs/kick_AppMenuOptions.cpp"
 #include "dialogs/kick_AppAssignSample.cpp"
 #include "dialogs/kick_AppTopbar.cpp"

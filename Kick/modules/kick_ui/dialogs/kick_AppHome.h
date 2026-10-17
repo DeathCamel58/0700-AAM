@@ -26,6 +26,7 @@
 namespace kick_ui
 {
     class KickLEDs;
+    class PerformanceOverlay;
     class AppStatusbar;
     class KickHome : public juce::Component
         , private juce::AsyncUpdater
@@ -43,11 +44,16 @@ namespace kick_ui
 
         void AssignSampleStartUp( void );
 
-        // Destroys the screens, the LED control and the bars. The instance
-        // is a function-local static, destroyed only after JUCE has shut
-        // down, and after the statics that the screens first used (they are
-        // created after it): call this while JUCE is still running, once the
-        // window no longer shows it.
+        // The performance overlay, which the window shows above everything
+        // (createMainWindow()).
+        juce::Component* getPerformanceOverlay();
+
+        // Destroys the screens, the LED control, the bars and the
+        // performance overlay. The instance is a function-local static,
+        // destroyed only after JUCE has shut down, and after the statics
+        // that the screens first used (they are created after it): call
+        // this while JUCE is still running, once the window no longer shows
+        // it.
         void shutdown();
 
     private:
@@ -68,6 +74,7 @@ namespace kick_ui
 
         std::unique_ptr<Component>                 ctrlBar_;
         std::unique_ptr<KickLEDs>                  ledControl_;
+        std::unique_ptr<PerformanceOverlay>        performanceOverlay_;
         juce::Component::SafePointer<AppStatusbar> statusBar_;
         int                                        page{ 0 };
 
