@@ -1394,6 +1394,7 @@ namespace ui
         table->setSelectedRowBackgroundColour( ui::Theme::backgroundColour( 0 ) );
         table->setSelectedRowOutlineColour( ui::Theme::outlineColour( 0 ) );
         table->setAutoScrollToSelection( true );
+        table->setEmptyText( TRANS( "No files to show" ) );
 
         name.setPadding( labelLeftMargin );
         name.setFontHeight( labelFontHeight );
