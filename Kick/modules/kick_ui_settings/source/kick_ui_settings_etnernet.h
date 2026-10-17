@@ -42,8 +42,8 @@ namespace kick_ui
 
     private:
         mt::KickSettings&    settings{ mt::getSettings() };
-        ui::KickToggleButton enabled{ "ETHERNET", "ENABLED", "DISABLED" };
-        ui::KickToggleButton method{ "MODE", "MANUAL", "AUTOMATIC" };
+        ui::KickToggleOptions enabled{ "ETHERNET", { "Off", "On" } };
+        ui::KickToggleOptions method{ "ADDRESSES", { "Automatic", "Manual" } };
         ui::KickIPv4         ipAddr{ "IP ADDRESS", "0:0:0:0" };
         ui::KickIPv4         subnet{ "SUBNET MASK", "255:255:255:0" };
         ui::KickIPv4         gateway{ "GATEWAY", "0:0:0:0" };

@@ -45,11 +45,11 @@ namespace kick_ui
         addComponent( gateway, 3, 0, 2 );
         addComponent( dns, 4, 0, 2 );
 
-        enabled.onClick = [&]() {
+        enabled.onSelectionChanged = [&]( int, const juce::String& ) {
             handleEnabledClick();
         };
 
-        method.onClick = [&]() {
+        method.onSelectionChanged = [&]( int, const juce::String& ) {
             handleMethodClick();
         };
 
@@ -79,7 +79,7 @@ namespace kick_ui
 
     void SettingsEthernet::handleEnabledClick()
     {
-        bool status          = enabled.getToggleState();
+        bool status          = enabled.getSelected() == 1;
         settings.eth.enabled = ( status );
         setComponentsEnabled( status );
 
@@ -88,18 +88,21 @@ namespace kick_ui
 
     void SettingsEthernet::handleMethodClick()
     {
-        bool useDhcp      = method.getToggleState();
-        settings.eth.mode = ( useDhcp ? "MANUAL" : "DHCP" );
+        // "Manual" is the stored "MANUAL" mode: editable addresses, no
+        // DHCP. (The button's states were the other way round from what
+        // they did: "MANUAL" started DHCP.)
+        bool manual       = method.getSelected() == 1;
+        settings.eth.mode = ( manual ? "MANUAL" : "DHCP" );
 
-        if( useDhcp )
-        {
-            setComponentsEnabled( false );
-            mt::HwPref::getHwPref().startDhcp();
-        }
-        else
+        if( manual )
         {
             setComponentsEnabled( true );
             mt::HwPref::getHwPref().stopDhcp();
+        }
+        else
+        {
+            setComponentsEnabled( false );
+            mt::HwPref::getHwPref().startDhcp();
         }
     }
 
@@ -115,7 +118,7 @@ namespace kick_ui
     {
         bool status          = mt::HwPref::getHwPref().isInterfaceUp();
         settings.eth.enabled = ( status );
-        enabled.setToggleState( status, juce::dontSendNotification );
+        enabled.setSelected( status ? 1 : 0, juce::dontSendNotification );
 
         mt::sysEthInfo info;
         mt::HwPref::getHwPref().getIP( mt::net::ethernetInterface(), info );
@@ -135,9 +138,13 @@ namespace kick_ui
     {
         bool status          = mt::HwPref::getHwPref().isInterfaceUp();
         settings.eth.enabled = ( status );
-        enabled.setToggleState( status, juce::dontSendNotification );
+        enabled.setSelected( status ? 1 : 0, juce::dontSendNotification );
 
         juce::String mode = settings.eth.mode();
+        // Show the stored mode (the button always started at its first
+        // state), with the addresses editable only in manual mode.
+        method.setSelected( mode == "DHCP" ? 0 : 1, juce::dontSendNotification );
+        setComponentsEnabled( mode != "DHCP" );
         DBG( "i####################################################3mode -> " << mode );
         if( mode == "DHCP" )
         {
