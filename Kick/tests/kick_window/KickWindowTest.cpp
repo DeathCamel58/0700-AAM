@@ -140,6 +140,35 @@ namespace
         CHECK( options.problems.size() == 1 );
     }
 
+    void testDebugInput()
+    {
+        // Off unless asked for.
+        auto options = resolve( { "{\"a\":1}" } );
+        CHECK( !options.debugInput );
+        CHECK( !options.describe().contains( "input debugging" ) );
+
+        // The switch by itself, or with 1/0; it is not passed on to the
+        // IPC configuration.
+        options = resolve( { "--debug-input", "{\"a\":1}" } );
+        CHECK( options.debugInput );
+        CHECK( options.describe().endsWith( ", input debugging on" ) );
+        CHECK( options.getCommandLine() == "{\"a\":1}" );
+        options = resolve( { "--debug-input=0" }, { { "KICK_DEBUG_INPUT", "1" } } );
+        CHECK( !options.debugInput ); // the option before the environment
+        CHECK( options.problems.isEmpty() );
+
+        // The environment (as KickMain passes it on to its children).
+        options = resolve( {}, { { "KICK_DEBUG_INPUT", "1" } } );
+        CHECK( options.debugInput );
+        options = resolve( {}, { { "KICK_DEBUG_INPUT", "0" } } );
+        CHECK( !options.debugInput );
+
+        // Not understood: off, and a problem to log.
+        options = resolve( { "--debug-input=maybe" } );
+        CHECK( !options.debugInput );
+        CHECK( options.problems.size() == 1 );
+    }
+
     void testPrecedence()
     {
         // The environment overrides the build default.
@@ -795,6 +824,7 @@ int main()
     testDefaults();
     testPrecedence();
     testCursor();
+    testDebugInput();
     testUnknownValues();
     testCommandLine();
     testLetterbox();

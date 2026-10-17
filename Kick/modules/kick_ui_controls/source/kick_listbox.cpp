@@ -264,15 +264,15 @@ namespace ui
         // it would never open again.
         if( isDialogOpen && findParentComponentOfClass<mt::dialogDisplayer>() == nullptr )
         {
-            juce::Logger::writeToLog( "List \"" + getTitle() + "\": was marked open but is in no dialog" );
+            ui::tapLog::writeError( "List \"" + getTitle() + "\": was marked open but is in no dialog" );
             isDialogOpen = false;
         }
 
         if( isDialogOpen )
-            juce::Logger::writeToLog( "List \"" + getTitle() + "\": already open" );
+            ui::tapLog::write( "List \"" + getTitle() + "\": already open" );
         else
         {
-            juce::Logger::writeToLog( "List \"" + getTitle() + "\": opening, " + juce::String( numOptions ) + " choices" );
+            ui::tapLog::write( "List \"" + getTitle() + "\": opening, " + juce::String( numOptions ) + " choices" );
             isDialogOpen = true;
             setHighlight( getSelectedIndex(), true );
             mt::utils::showOptions(
@@ -618,7 +618,7 @@ namespace ui
         // clicks, so the -/+ buttons are found by position.
         if( !isEnabled() || e.getDistanceFromDragStart() > tapSlop || !getLocalBounds().contains( e.getPosition() ) )
         {
-            juce::Logger::writeToLog( "List box \"" + getName() + "\": not a tap (enabled " + juce::String( (int)isEnabled() )
+            ui::tapLog::write( "List box \"" + getName() + "\": not a tap (enabled " + juce::String( (int)isEnabled() )
                                       + ", moved " + juce::String( e.getDistanceFromDragStart() ) + ", at " + e.getPosition().toString() + ")" );
             return;
         }

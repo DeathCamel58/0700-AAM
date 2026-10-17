@@ -58,6 +58,7 @@ public:
         windowOptions = kick::window::StartupOptions::fromProcess( getCommandLineParameterArray() );
         IPCApplication::initialise( windowOptions.getCommandLine() );
         windowOptions.log();
+        ui::tapLog::setEnabled( windowOptions.debugInput );
 
         dclInterface.reset( new contracts::DclIPCInterface( dispatcher(), contracts::ConnectionIdStore::DCL_CONNECTION_ID ) );
         audioEngineInterface.reset( new contracts::AudioEngineIPCInterface( dispatcher(), contracts::ConnectionIdStore::ENGINE_CONNECTION_ID ) );

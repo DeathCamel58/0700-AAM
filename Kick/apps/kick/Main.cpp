@@ -69,6 +69,7 @@ public:
     {
         windowOptions = kick::window::StartupOptions::fromProcess( getCommandLineParameterArray() );
         windowOptions.log();
+        ui::tapLog::setEnabled( windowOptions.debugInput );
 
         // Without a display (no X server, or DISPLAY not set) there is no
         // primary display, and the window code dereferences it. Fail with a

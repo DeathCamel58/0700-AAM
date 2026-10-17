@@ -767,7 +767,7 @@ namespace ui
         // See mt::fsPopup::inputAttemptWhenModal().
         if( !isShowing() )
         {
-            ui::tapLog::write( "Tap: ERROR: the project menu was modal but cannot be seen; closing it" );
+            ui::tapLog::writeError( "Tap: ERROR: the project menu was modal but cannot be seen; closing it" );
             exitModalState( 0 );
             setVisible( false );
             return;

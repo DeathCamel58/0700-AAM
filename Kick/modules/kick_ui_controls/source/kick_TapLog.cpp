@@ -17,6 +17,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include <atomic>
 #include <typeinfo>
 
 #if defined( __GNUC__ )
@@ -105,7 +106,21 @@ namespace ui
             return s;
         }
 
+        namespace
+        {
+            std::atomic<bool> enabled{ false };
+        }
+
+        void setEnabled( bool Enabled ) { enabled = Enabled; }
+        bool isEnabled() { return enabled.load(); }
+
         void write( const juce::String& Line )
+        {
+            if( isEnabled() )
+                juce::Logger::writeToLog( Line );
+        }
+
+        void writeError( const juce::String& Line )
         {
             juce::Logger::writeToLog( Line );
         }

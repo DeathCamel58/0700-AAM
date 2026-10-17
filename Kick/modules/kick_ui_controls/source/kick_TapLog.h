@@ -46,7 +46,18 @@ namespace ui
             return ( Event.eventTime - Event.mouseDownTime ).inMilliseconds();
         }
 
+        // The "Tap:" lines and the pop-ups' and lists' traces are for
+        // finding input problems, so they are only written when input
+        // debugging is on (--debug-input or KICK_DEBUG_INPUT=1); errors
+        // always are.
+        void setEnabled( bool Enabled );
+        bool isEnabled();
+
+        // A trace line: written only when input debugging is on.
         void write( const juce::String& Line );
+
+        // An error or an unexpected state: always written.
+        void writeError( const juce::String& Line );
 
         // Sees every press and release in the program, including the ones
         // a modal component keeps from the component they were meant for
