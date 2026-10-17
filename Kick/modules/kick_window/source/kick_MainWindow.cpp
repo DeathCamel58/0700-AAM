@@ -155,6 +155,7 @@ namespace kick::window
 
         addToDesktop();
         detail::askForPosition( *this );
+        settledBounds = getBounds();
         setVisible( true );
     }
 
@@ -208,6 +209,46 @@ namespace kick::window
                 safeThis->host.repaint();
             }
         } );
+    }
+
+    void MainWindow::resized()
+    {
+        // The scaled host, the content component, follows the window.
+        juce::DocumentWindow::resized();
+
+        if( options.windowMode == WindowMode::windowed && isOnDesktop() )
+            aspectCheck.startTimer( aspectCheckDelayInMS );
+    }
+
+    void MainWindow::keepAspectRatio()
+    {
+        aspectCheck.stopTimer();
+
+        const auto bounds = getBounds();
+        if( isMinimised() || isFullScreen() || fillsADisplay( bounds, getDisplayAreas() ) )
+        {
+            settledBounds = bounds;
+            return;
+        }
+
+        auto*      constrainer = getConstrainer();
+        const auto layout      = host.getLayoutBounds();
+        const auto wanted      = kick::window::keepAspectRatio( bounds, settledBounds, { layout.getWidth(), layout.getHeight() },
+                                                                { constrainer->getMinimumWidth(), constrainer->getMinimumHeight() },
+                                                                { constrainer->getMaximumWidth(), constrainer->getMaximumHeight() } );
+
+        // At the aspect ratio, or the window manager keeps this size (a
+        // tiled or maximised window): the host letterboxes the layout.
+        if( wanted == bounds || ( bounds.getWidth() == correctedFrom.getWidth() && bounds.getHeight() == correctedFrom.getHeight() ) )
+        {
+            settledBounds = bounds;
+            if( wanted == bounds )
+                correctedFrom = {};
+            return;
+        }
+
+        correctedFrom = bounds;
+        setBounds( wanted );
     }
 
     void MainWindow::closeButtonPressed()

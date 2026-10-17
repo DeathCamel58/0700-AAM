@@ -380,6 +380,53 @@ namespace
 
 namespace
 {
+    void testAspectRatio()
+    {
+        using kick::window::keepAspectRatio;
+        const juce::Point<int>     size( 1024, 600 ), minimum( 512, 300 ), maximum( 8192, 4800 );
+        const juce::Rectangle<int> previous( 100, 100, 1024, 600 );
+
+        // At the aspect ratio, or within a pixel of it: unchanged.
+        CHECK( keepAspectRatio( previous, previous, size, minimum, maximum ) == previous );
+        CHECK( keepAspectRatio( { 100, 100, 1280, 750 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1280, 750 ) );
+        CHECK( keepAspectRatio( { 100, 100, 1280, 751 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1280, 751 ) );
+
+        // The bottom edge dragged up (QEMU's test: the layout was cropped):
+        // the height is kept, the width follows.
+        CHECK( keepAspectRatio( { 100, 100, 1024, 445 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 759, 445 ) );
+
+        // The right edge dragged: the width is kept, the height follows.
+        CHECK( keepAspectRatio( { 100, 100, 1200, 600 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1200, 703 ) );
+
+        // A corner dragged: the dimension that changed more is kept.
+        CHECK( keepAspectRatio( { 100, 100, 1100, 800 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1365, 800 ) );
+        CHECK( keepAspectRatio( { 100, 100, 1400, 650 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1400, 820 ) );
+
+        // The top edge dragged down: the bottom edge stays where it is.
+        auto bounds = keepAspectRatio( { 100, 250, 1024, 450 }, previous, size, minimum, maximum );
+        CHECK( bounds.getBottom() == previous.getBottom() && bounds.getHeight() == 450 && bounds.getWidth() == 768 );
+        CHECK( bounds.getX() == 100 );
+
+        // The left edge dragged right: the right edge stays where it is.
+        bounds = keepAspectRatio( { 300, 100, 824, 600 }, previous, size, minimum, maximum );
+        CHECK( bounds.getRight() == previous.getRight() && bounds.getWidth() == 824 && bounds.getHeight() == 483 );
+        CHECK( bounds.getY() == 100 );
+
+        // Within the limits.
+        CHECK( keepAspectRatio( { 100, 100, 1024, 100 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 512, 300 ) );
+        CHECK( keepAspectRatio( { 100, 100, 9000, 600 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 8192, 4800 ) );
+
+        // Whatever the size, the result has the aspect ratio.
+        for( int width = 520; width < 3000; width += 37 )
+        {
+            for( int height = 310; height < 1800; height += 41 )
+            {
+                const auto result = keepAspectRatio( { 0, 0, width, height }, previous, size, minimum, maximum );
+                CHECK( std::abs( result.getHeight() * 1024 - result.getWidth() * 600 ) <= 1536 ); // 1.5 pixels
+            }
+        }
+    }
+
     // The panel's corners, where the window shows them.
     juce::Rectangle<float> placedPanel( juce::Rectangle<int> area, juce::Point<int> panel, int margin )
     {
@@ -557,6 +604,7 @@ int main()
     testInputThroughLetterbox();
     testWindowBoundsText();
     testWindowBounds();
+    testAspectRatio();
     testOverlayPlacement();
     testFrameTiming();
     testFrameTimingThreads();

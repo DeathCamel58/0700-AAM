@@ -140,6 +140,35 @@ namespace kick::window
         return juce::Rectangle<int>( values[0], values[1], values[2], values[3] );
     }
 
+    juce::Rectangle<int> keepAspectRatio( juce::Rectangle<int> bounds,
+                                          juce::Rectangle<int> previous,
+                                          juce::Point<int>     layoutSize,
+                                          juce::Point<int>     minimumSize,
+                                          juce::Point<int>     maximumSize )
+    {
+        if( layoutSize.x <= 0 || layoutSize.y <= 0 || bounds.isEmpty() )
+            return bounds;
+
+        if( std::abs( bounds.getHeight() - heightForWidth( bounds.getWidth(), layoutSize ) ) <= 1 )
+            return bounds;
+
+        // The change of each dimension, in the layout's proportions.
+        const auto widthChange  = (int64_t)std::abs( bounds.getWidth() - previous.getWidth() ) * layoutSize.y;
+        const auto heightChange = (int64_t)std::abs( bounds.getHeight() - previous.getHeight() ) * layoutSize.x;
+
+        auto width = heightChange > widthChange ? juce::roundToInt( (double)bounds.getHeight() * layoutSize.x / layoutSize.y )
+                                                : bounds.getWidth();
+        width = juce::jlimit( juce::jmax( 1, minimumSize.x ), juce::jmax( minimumSize.x, maximumSize.x ), width );
+        const auto height = heightForWidth( width, layoutSize );
+
+        auto result = bounds.withSize( width, height );
+        if( bounds.getRight() == previous.getRight() && bounds.getX() != previous.getX() )
+            result.setX( bounds.getRight() - width );
+        if( bounds.getBottom() == previous.getBottom() && bounds.getY() != previous.getY() )
+            result.setY( bounds.getBottom() - height );
+        return result;
+    }
+
     juce::Rectangle<int> chooseWindowBounds( std::optional<juce::Rectangle<int>> saved,
                                              const juce::Array<juce::Rectangle<int>>& displayAreas,
                                              juce::Rectangle<int>                      preferredArea,

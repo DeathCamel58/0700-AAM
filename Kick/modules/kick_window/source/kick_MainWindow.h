@@ -68,6 +68,7 @@ namespace kick::window
         MainWindow( const juce::String& name, juce::Component& content, Options options );
         ~MainWindow() override;
 
+        void resized() override;
         void closeButtonPressed() override;
         void inputAttemptWhenModal() override;
 
@@ -80,6 +81,11 @@ namespace kick::window
         // The displays' user areas (on Linux, all of each display).
         static juce::Array<juce::Rectangle<int>> getDisplayAreas();
 
+        // Gives a desktop window the layout's aspect ratio again after the
+        // window manager resized it (JUCE only passes the constrainer's
+        // minimum and maximum size on to it on Linux).
+        void keepAspectRatio();
+
         void openKiosk();
         void openWindowed();
         void attachOpenGL();
@@ -88,6 +94,15 @@ namespace kick::window
 
         Options    options;
         ScaledHost host;
+
+        // Once a resize has settled.
+        static constexpr int aspectCheckDelayInMS = 150;
+        juce::TimedCallback  aspectCheck{ [this]() { keepAspectRatio(); } };
+        // The bounds after the last resize that settled, and the size the
+        // window had when it was last given the aspect ratio (the window
+        // manager may give it back: the window is then left letterboxed).
+        juce::Rectangle<int> settledBounds;
+        juce::Rectangle<int> correctedFrom;
 
         std::unique_ptr<OpenGLWatch>         openGLWatch;
         std::unique_ptr<juce::OpenGLContext> openGLContext;

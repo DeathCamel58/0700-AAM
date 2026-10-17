@@ -71,6 +71,19 @@ namespace kick::window
     bool fillsADisplay( juce::Rectangle<int>                      bounds,
                         const juce::Array<juce::Rectangle<int>>& displayAreas );
 
+    // The bounds a desktop window should have after the window manager
+    // resized it from previous to bounds: the layout's aspect ratio, within
+    // the minimum and maximum size. The dimension the user changed more
+    // (relative to the layout's) is kept, and so are the edges the user
+    // did not drag (the bottom and right ones when the top or left one
+    // moved alone). Bounds within a pixel of the aspect ratio are returned
+    // as they are.
+    juce::Rectangle<int> keepAspectRatio( juce::Rectangle<int> bounds,
+                                          juce::Rectangle<int> previous,
+                                          juce::Point<int>     layoutSize,
+                                          juce::Point<int>     minimumSize,
+                                          juce::Point<int>     maximumSize );
+
     // Where a desktop window showing the layout opens. Window managers put
     // the top-left corner of a window's frame where the window asks to be,
     // so the result is that corner, with the client area's size; the frame
