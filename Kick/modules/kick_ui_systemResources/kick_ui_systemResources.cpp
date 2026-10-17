@@ -148,7 +148,7 @@ namespace kick_ui
     {
         g.setColour( ui::Theme::backgroundColour( 14 ) );
         g.drawLine( 20.f, 182.f, 237.f, 182.f );
-        g.drawLine( 367.f, 180.f, 584.f, 182.f );
+        g.drawLine( 367.f, 182.f, 584.f, 182.f );
     }
 
     void KSystemResources::resized()
@@ -156,7 +156,8 @@ namespace kick_ui
         cpu.setBounds( 90, 10, 425, 76 );
 
         ram.setBounds( 90, 96, 425, 76 );
-        storage.setBounds( 267, 176, 71, 22 );
+        // The gap between the two lines (paint()): 71 px cut "STORAGE".
+        storage.setBounds( 237, 176, 130, 22 );
 
         flash.setBounds( 90, 199, 425, 76 );
         sdcard.setBounds( 90, 275, 425, 76 );
