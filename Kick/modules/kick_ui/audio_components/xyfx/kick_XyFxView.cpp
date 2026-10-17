@@ -102,6 +102,8 @@ namespace kick_ui
         mt::utils::addAndMakeVisible( this, setupScreen, latch, setup, xyFx, header, on_off, output, hdrComp );
         mt::utils::addListener( this, latch, setup );
         xyFx.setEnabled( false );
+        // The pad does nothing until the effect is on: say how.
+        xyFx.setDisabledHint( TRANS( "Turn the effect on (top right) to play it here" ) );
 
         hdrComp.setValueBackgroundColor( ui::Theme::backgroundColour( 3 ) );
         header.showOptions( false, true );

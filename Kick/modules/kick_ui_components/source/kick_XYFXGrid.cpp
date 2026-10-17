@@ -14,7 +14,11 @@ namespace ui
         if( isEnabled() )
             paintCells( g );
         else
+        {
             g.fillAll( ui::Theme::XYFXCellColour() );
+            if( disabledHint.isNotEmpty() )
+                mt::utils::renderText( g, disabledHint, getLocalBounds(), ui::Theme::textColour( 3 ), juce::Justification::centred, 20.f );
+        }
     }
 
     void XYFXGrid::paintCells( juce::Graphics& g )
