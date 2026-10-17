@@ -73,19 +73,34 @@ namespace mt
             setAlwaysOnTop( true );
             setVisible( true );
             toFront( true );
-            enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this]( int R ) {
+            const auto shown = ++timesShown;
+            enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this, shown]( int R ) {
                                  if( Callback ) Callback( R );
-                                 reset();
+                                 // Not if it has been reset and shown again in
+                                 // the meantime: that would hide the new one
+                                 // and leave it modal.
+                                 if( shown == timesShown )
+                                     reset();
                              } ),
                              false );
         }
 
         void close( int exitCode = UI::CLOSE )
         {
-            juce::MessageManager::callAsync( [&, exitCode]() {
-                reset();
-                if( isCurrentlyModal() )
+            const auto shown = timesShown;
+            juce::MessageManager::callAsync( [this, exitCode, shown]() {
+                // Already closed, and maybe showing something else now.
+                if( shown != timesShown || !isInUse )
+                    return;
+
+                // Ending the modal state resets the pop-up (show()). Hiding it
+                // first, as this did, cancelled the modal state with 0 and
+                // freed the pop-up before that callback came, whose reset()
+                // could then hide the pop-up's next use.
+                if( isCurrentlyModal( false ) )
                     exitModalState( exitCode );
+                else
+                    reset();
             } );
         }
 
@@ -124,6 +139,8 @@ namespace mt
 
     private:
         juce::Image image;
+        // Counts the times shown, to tell a use's callbacks from the next's.
+        int timesShown{ 0 };
     };
 
     class dialogDisplayer : public ui::KickControlBase<fsPopup>
