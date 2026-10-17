@@ -18,6 +18,8 @@ namespace ui
 
     void LoadProjectAndAnimation::startLoading( juce::File project )
     {
+        ui::tapLog::write( "Tap: start loading " + project.getFullPathName() + " (loader thread running " + juce::String( (int)isThreadRunning() )
+                           + ", animation running " + juce::String( (int)isAnimationRunning() ) + ")" );
         ui::RecentProject::isProjectLoading = true;
         proj                                = project;
         startThread();

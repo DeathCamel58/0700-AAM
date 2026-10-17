@@ -180,6 +180,15 @@ namespace mt
         }
 
     protected:
+        // A press elsewhere while this is modal: JUCE keeps it from what it
+        // was meant for.
+        void inputAttemptWhenModal() override
+        {
+            juce::Logger::writeToLog( "Tap: blocked by " + getPopupName() + " (visible " + juce::String( (int)isVisible() )
+                                      + ", showing " + juce::String( (int)isShowing() ) + ")" );
+            juce::Component::inputAttemptWhenModal();
+        }
+
         virtual void reset()
         {
             setAlwaysOnTop( false );
