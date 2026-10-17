@@ -457,7 +457,10 @@ namespace ui
             // Slider Knob area.
             if( props.isShowingKnob() )
             {
-                mt::utils::fillRoundedRect( g, knobRect.toNearestInt(), juce::Colours::aqua, 5.f );
+                // The theme's accent (it was cyan), outlined so that it
+                // stands out from the fill under it.
+                mt::utils::fillRoundedRect( g, knobRect.toNearestInt(), ui::Theme::foregroundColour( 1 ), 5.f );
+                mt::utils::renderRoundedRect( g, knobRect.toNearestInt(), ui::Theme::backgroundColour( 5 ), 1, 5.f );
             }
         }
     }
