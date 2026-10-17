@@ -118,8 +118,8 @@ namespace kick_ui
 
         xyFx.setXYCoordinates( setupScreen.getXYdata() );
 
-        on_off.onClick = [&]() {
-            xyFx.setEnabled( on_off.getToggleState() );
+        on_off.onSelectionChanged = [&]( int index, const juce::String& ) {
+            xyFx.setEnabled( index == 1 );
             xyFx.repaint();
         };
 
@@ -135,7 +135,6 @@ namespace kick_ui
         ui::themeChanged.connect( [&]() {
             latch.setToggleButtonText( "Latch", "Latch" );
             setup.setToggleButtonText( "Setup", "Setup" );
-            on_off.setToggleButtonText( "Off", "On" );
             header.setIcon( "Icon_XY" );
         } );
     }
