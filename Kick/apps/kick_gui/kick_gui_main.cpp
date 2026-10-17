@@ -82,7 +82,7 @@ public:
         mt::getAudioInterface();
 
         // Initialize User Interface...
-        w = kick_ui::createMainWindow( getApplicationName(), windowOptions, [this]() { quitKick(); } );
+        w = kick_ui::createMainWindow( windowOptions, [this]() { quitKick(); } );
     }
 
     void shutdown() override

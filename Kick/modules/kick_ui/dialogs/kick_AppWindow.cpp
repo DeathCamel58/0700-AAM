@@ -19,8 +19,7 @@
 
 namespace kick_ui
 {
-    std::unique_ptr<kick::window::MainWindow> createMainWindow( const juce::String&                 name,
-                                                                const kick::window::StartupOptions& startupOptions,
+    std::unique_ptr<kick::window::MainWindow> createMainWindow( const kick::window::StartupOptions& startupOptions,
                                                                 std::function<void()>               onCloseRequested )
     {
         kick::window::MainWindow::Options options;
@@ -38,6 +37,6 @@ namespace kick_ui
 
         options.overlay = KickHome::Instance().getPerformanceOverlay();
 
-        return std::make_unique<kick::window::MainWindow>( name, KickHome::Instance(), std::move( options ) );
+        return std::make_unique<kick::window::MainWindow>( mainWindowTitle, KickHome::Instance(), std::move( options ) );
     }
 }

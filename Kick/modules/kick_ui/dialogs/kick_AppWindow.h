@@ -21,10 +21,12 @@
 
 namespace kick_ui
 {
+    // The main window's title, whichever process shows it.
+    inline const juce::String mainWindowTitle{ "Kick" };
+
     // Kick's main window showing the home screen, for KickUserInterface and
     // the standalone Kick. The desktop window's bounds are kept in the
     // settings. Call KickHome::Instance().shutdown() after destroying it.
-    std::unique_ptr<kick::window::MainWindow> createMainWindow( const juce::String&                 name,
-                                                                const kick::window::StartupOptions& startupOptions,
+    std::unique_ptr<kick::window::MainWindow> createMainWindow( const kick::window::StartupOptions& startupOptions,
                                                                 std::function<void()>               onCloseRequested );
 }
