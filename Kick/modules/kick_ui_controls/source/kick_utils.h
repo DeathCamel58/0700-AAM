@@ -25,8 +25,14 @@ namespace mt
 {
     class fsPopup;
 
-    // Thread Pool
-    static juce::ThreadPool threadPool{ 5 };
+    // Thread Pool: one for the process, made on first use, so that its
+    // threads start after the application has blocked its termination
+    // signals rather than during static initialization.
+    inline juce::ThreadPool& getThreadPool()
+    {
+        static juce::ThreadPool threadPool{ 5 };
+        return threadPool;
+    }
 
     namespace utils
     {

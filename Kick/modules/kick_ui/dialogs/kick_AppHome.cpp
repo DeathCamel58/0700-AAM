@@ -207,7 +207,7 @@ namespace kick_ui
         signals::sigScreenOpen( Screen::RecentProject );
 
         // Now, Lazily create and load rest of the screens
-        mt::threadPool.addJob( [&, screenAdder]() {
+        mt::getThreadPool().addJob( [&, screenAdder]() {
             juce::MessageManager::callAsync( [&, screenAdder]() {
                 // Home Screen
                 screenAdder( Screen::HomeListView, std::make_unique<AppMainmode>() );
