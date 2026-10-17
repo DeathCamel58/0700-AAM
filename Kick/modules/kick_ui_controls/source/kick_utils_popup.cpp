@@ -107,6 +107,11 @@ namespace mt
 
         virtual void paint( juce::Graphics& g )
         {
+            // The pop-up is opaque, so JUCE paints nothing under it; but the
+            // snapshot is transparent wherever the layout paints nothing
+            // (around the project name and the header buttons, say), and
+            // there the old, sharp pixels showed through the blur.
+            g.fillAll( juce::Colours::black );
             g.drawImageAt( image, 0, 0 );
         }
 
