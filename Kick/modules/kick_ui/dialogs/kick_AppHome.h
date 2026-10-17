@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <deque>
 #include <stack>
 
 namespace kick_ui
@@ -69,9 +70,16 @@ namespace kick_ui
         inline void          setupLoadScreenVisibility();
         juce::Rectangle<int> getScreenBounds( IScreen* pScreen );
 
+        void addScreen( Screen type, std::unique_ptr<IScreen> screen );
+        void createNextScreenLater();
+        void createPendingScreens();
+        bool hasScreen( Screen screen ) const;
+
     private:
         std::stack<Screen>                         stack;
         std::map<Screen, std::unique_ptr<IScreen>> screens_;
+        // Screens still to be created, in order.
+        std::deque<std::pair<Screen, std::unique_ptr<IScreen> ( * )()>> pendingScreens;
 
         std::unique_ptr<Component>                 ctrlBar_;
         std::unique_ptr<KickLEDs>                  ledControl_;
