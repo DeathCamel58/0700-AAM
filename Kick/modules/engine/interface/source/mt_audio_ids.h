@@ -309,6 +309,8 @@ namespace mt
         DECLARE_ID( wifienabled )
         DECLARE_ID( wifissid )
         DECLARE_ID( wifipasswd )
+        DECLARE_ID( WINDOW )
+        DECLARE_ID( windowbounds )
         DECLARE_ID( Project )
 
         DECLARE_ID( IsPreviewOn )

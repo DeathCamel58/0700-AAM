@@ -49,6 +49,7 @@ namespace mt
             cvclib.setup( getState().getOrCreateChildWithName( IDs::PREFCVCLIB, nullptr ), nullptr );
             metronome.setup( getState().getOrCreateChildWithName( IDs::METRONOME, nullptr ), nullptr );
             wifi.setup( getState().getOrCreateChildWithName( IDs::WIFI, nullptr ), nullptr );
+            window.setup( getState().getOrCreateChildWithName( IDs::WINDOW, nullptr ), nullptr );
         };
 
         auto settingsFile = getAppDirs( MTPrefs ).getChildFile( __settingsFileName );
@@ -388,6 +389,14 @@ namespace mt
     }
 
     bool KickWifi::isValid() { return vTree.hasType( IDs::WIFI ); }
+
+    void KickWindow::setup( juce::ValueTree VT, juce::UndoManager* Undo )
+    {
+        setupBase( VT, Undo );
+        bounds.attachTo( vTree, IDs::windowbounds, Undo, "" );
+    }
+
+    bool KickWindow::isValid() { return vTree.hasType( IDs::WINDOW ); }
 
     /// ///////////////////////////////////
     ///    KickPreview .

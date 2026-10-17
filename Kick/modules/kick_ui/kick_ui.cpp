@@ -13,6 +13,7 @@
 //dialogs
 #include "dialogs/kick_AppMainMode.cpp"
 #include "dialogs/kick_AppHome.cpp"
+#include "dialogs/kick_AppWindow.cpp"
 #include "dialogs/kick_AppMenuOptions.cpp"
 #include "dialogs/kick_AppAssignSample.cpp"
 #include "dialogs/kick_AppTopbar.cpp"

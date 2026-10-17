@@ -190,6 +190,19 @@ namespace mt
     };
 
     /// ///////////////////////////////////
+    ///    KickWindow
+    /// ///////////////////////////////////
+    struct KickWindow : public MTIVTBase
+    {
+        void setup( juce::ValueTree VT, juce::UndoManager* Undo );
+        bool isValid();
+
+        // The desktop window's position and size, "x y width height";
+        // empty: centred on the display.
+        AtomicString bounds;
+    };
+
+    /// ///////////////////////////////////
     ///    KickPreview
     /// ///////////////////////////////////
     struct KickPreview
@@ -238,6 +251,7 @@ namespace mt
         KickCVClib           cvclib;
         KickMetronome        metronome;
         KickWifi             wifi;
+        KickWindow           window;
 
         // Runtime settings, not saved in XML
         KickPreview     preview;

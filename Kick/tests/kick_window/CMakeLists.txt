@@ -1,4 +1,5 @@
-## Unit tests of the window's start-up options (see KickWindowTest.cpp).
+## Unit tests of the window's start-up options and geometry (see
+## KickWindowTest.cpp).
 ## They create no window: no display is needed. -DKICK_TEST_SANITIZER=address
 ## (or undefined) builds them with that sanitizer.
 
@@ -25,7 +26,7 @@ endif()
 
 target_link_libraries(KickWindowTest
     PRIVATE
-        juce::juce_core
+        juce::juce_graphics
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags

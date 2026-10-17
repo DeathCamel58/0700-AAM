@@ -121,7 +121,7 @@ target_link_libraries(${TargetName}
 
     PRIVATE
         kick_ui
-        kick_window_options
+        kick_window
         program_edit_ui
         juce::juce_gui_extra
         ipc

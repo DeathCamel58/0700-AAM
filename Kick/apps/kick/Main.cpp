@@ -27,89 +27,11 @@
 
 #include "contracts/utils/app/termination_signals.h"
 
-#include <kick_window_options/kick_window_options.h>
-
 #include <csignal>
 
 #ifdef PERFETTO
     #include "melatonin_perfetto/melatonin_perfetto.h"
 #endif
-
-#define ENABLE_X11_FULLSCREEN ( 0 )
-
-#if defined( ENABLE_X11_FULLSCREEN ) && ( 0 < ENABLE_X11_FULLSCREEN )
-    #if( JUCE_LINUX || __linux__ )
-namespace xlib
-{
-    extern "C"
-    {
-        #include <X11/Xlib.h>
-        #include <X11/Xatom.h>
-
-        void maximizeWindow( Window win )
-        {
-            auto display = XOpenDisplay( NULL );
-
-            XEvent ev;
-            ev.xclient.window       = win;
-            ev.xclient.type         = ClientMessage;
-            ev.xclient.format       = 32;
-            ev.xclient.message_type = XInternAtom( display, "_NET_WM_STATE", False );
-            ev.xclient.data.l[0]    = 1;
-            ev.xclient.data.l[1]    = XInternAtom( display, "_NET_WM_STATE_MAXIMIZED_HORZ", False );
-            ev.xclient.data.l[2]    = XInternAtom( display, "_NET_WM_STATE_MAXIMIZED_VERT", False );
-            ev.xclient.data.l[3]    = 1;
-
-            XSendEvent( display, DefaultRootWindow( display ), False, SubstructureRedirectMask | SubstructureNotifyMask, &ev );
-            XCloseDisplay( display );
-        }
-
-        void fullscreenWindow( Window win )
-        {
-            auto display = XOpenDisplay( NULL );
-
-        #if 1
-            XEvent ev;
-            ev.xclient.window       = win;
-            ev.xclient.type         = ClientMessage;
-            ev.xclient.format       = 32;
-            ev.xclient.message_type = XInternAtom( display, "_NET_WM_STATE", False );
-            ev.xclient.data.l[0]    = 2; // _NET_WM_STATE_TOGGLE
-            ev.xclient.data.l[1]    = XInternAtom( display, "_NET_WM_STATE_FULLSCREEN", True );
-            ;
-            ev.xclient.data.l[2] = 0; // No second property to toggle
-            ev.xclient.data.l[3] = 1;
-
-            XSendEvent( display, DefaultRootWindow( display ), False, SubstructureRedirectMask | SubstructureNotifyMask, &ev );
-        #else
-            Atom wm_state      = XInternAtom( display, "_NET_WM_STATE", true );
-            Atom wm_fullscreen = XInternAtom( display, "_NET_WM_STATE_FULLSCREEN", true );
-
-            XChangeProperty( display, win, wm_state, XA_ATOM, 32, PropModeReplace, (unsigned char*)&wm_fullscreen, 1 );
-        #endif
-
-            XCloseDisplay( display );
-        }
-    }
-}
-    #endif
-#endif
-
-class TestWindow : public juce::Component
-{
-public:
-    TestWindow()
-    {
-        setSize( ui::layout::getAppWidth(), ui::layout::getAppHeight() );
-    }
-    ~TestWindow() {}
-
-private:
-    void paint( juce::Graphics& g )
-    {
-        g.fillAll( juce::Colours::coral );
-    }
-};
 
 //==============================================================================
 class AudioEngineApplication : public juce::JUCEApplication
@@ -163,11 +85,6 @@ public:
         engineAdapter.reset(new KickAudioEngineAdapter(audioInterface));
         
         adapter.reset( new KickDeviceAdapter() );
-        // This method is where you should put your application's initialisation code ...
-        juce::Desktop::getInstance().getMainMouseSource().enableUnboundedMouseMovement( true, true );
-
-        // Exit kiosk mode ...
-        juce::Desktop::getInstance().setKioskModeComponent( nullptr );
 
         // Initialize Settings ...
         mt::getSettings();
@@ -176,35 +93,7 @@ public:
         mt::getAudioInterface();
 
         // Initialize User Interface...
-        w = std::make_unique<HomeWindow>( getApplicationName() );
-
-        // Title bar ...
-        w->setUsingNativeTitleBar( false );
-        w->setTitleBarHeight( 0 );
-
-#if defined( ENABLE_X11_FULLSCREEN ) && ( 0 < ENABLE_X11_FULLSCREEN )
-    #if( JUCE_LINUX || __linux__ )
-        //xlib::maximizeWindow( (xlib::Window)getPeer()->getNativeHandle() );
-        xlib::fullscreenWindow( (xlib::Window)w->getPeer()->getNativeHandle() );
-    #endif
-#endif
-
-        // Dimension ...
-        juce::Rectangle<int> bounds  = ui::layout::screen;
-        auto&                display = juce::Desktop::getInstance().getDisplays();
-        //bounds = display.findDisplayForRect( w->getBounds() ).totalArea;
-        //bounds = display.getPrimaryDisplay()->totalArea;
-        //bounds = display.logicalToPhysical( ui::layout::screen, nullptr );
-        w->setBounds( bounds );
-
-#if( JUCE_IOS || JUCE_ANDROID || JUCE_LINUX || __linux__ )
-        juce::Desktop::getInstance().setKioskModeComponent( w.get(), false );
-#endif
-        // Position ...
-        w->setTopLeftPosition( 0, 0 );
-
-        // Visibility...
-        w->setVisible( true );
+        w = kick_ui::createMainWindow( getApplicationName(), windowOptions.windowMode, nullptr );
 
 #if PERFETTO
         MelatoninPerfetto::get().beginSession();
@@ -217,7 +106,13 @@ public:
         MelatoninPerfetto::get().endSession();
 #endif
         // Add your application's shutdown code here ...
-        w = nullptr;
+        if( w )
+        {
+            w = nullptr;
+            // The window does not own the home screen, a static that would
+            // otherwise destroy its screens after JUCE has shut down.
+            kick_ui::KickHome::Instance().shutdown();
+        }
         adapter = nullptr;
     }
 
@@ -243,39 +138,9 @@ public:
         // and the commandLine parameter tells you what the other instance's command-line arguments were.
     }
 
-    //==============================================================================
-    // This class implements the desktop window that contains an instance of our MainComponent class.
-    class HomeWindow : public juce::DocumentWindow
-    {
-    public:
-        explicit HomeWindow( const juce::String& name )
-            : juce::DocumentWindow( name, juce::Colours::black, 0 )
-        {
-            setTitle( name );
-            // KickHome is a function-local static: the window must not
-            // delete it.
-            setContentNonOwned( &kick_ui::KickHome::Instance(), true );
-        }
-
-        ~HomeWindow() final = default;
-
-        void closeButtonPressed() override
-        {
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
-        }
-
-        void inputAttemptWhenModal() override
-        {
-            auto numModal = getNumCurrentlyModalComponents();
-            auto index    = juce::jmax( 0, numModal - 1 );
-            if( auto p = getCurrentlyModalComponent( index ) )
-                p->toFront( true );
-        }
-    };
-
 private:
     kick::window::StartupOptions          windowOptions;
-    std::unique_ptr<juce::DocumentWindow> w;
+    std::unique_ptr<kick::window::MainWindow> w;
     std::unique_ptr<KickDeviceAdapter>    adapter;
     std::unique_ptr<KickAudioEngineAdapter>    engineAdapter;
     std::shared_ptr<contracts::AudioInterface> audioInterface;

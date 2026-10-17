@@ -20,10 +20,14 @@
 // Tests of how a Kick process chooses its window mode and renderer
 // (kick_StartupOptions.h): command-line options, environment, build default
 // and their order, unknown values, and removing the options from the
-// command line so that the IPC configuration still parses. Built with
-// -DKICK_BUILD_TESTS=ON; it needs no arguments and creates no window.
+// command line so that the IPC configuration still parses. And of the
+// window's geometry (kick_WindowGeometry.h): the letterboxed scale of the
+// layout and how input maps back through it, and the saved window bounds.
+// Built with -DKICK_BUILD_TESTS=ON; it needs no arguments and creates no
+// window (no juce::Desktop, no display).
 
 #include "kick_window_options/source/kick_StartupOptions.cpp"
+#include "kick_window/source/kick_WindowGeometry.cpp"
 
 #include <cstdio>
 #include <map>
@@ -43,6 +47,7 @@ namespace
         }                                                                       \
     } while( false )
 
+    using kick::window::Letterbox;
     using kick::window::Renderer;
     using kick::window::StartupOptions;
     using kick::window::WindowMode;
@@ -167,6 +172,153 @@ namespace
         CHECK( options.getCommandLine() == "--verbose --window-modes=x \"a b\"" );
         CHECK( options.problems.isEmpty() );
     }
+
+    bool near( float a, float b )
+    {
+        return std::abs( a - b ) < 1.0e-3f;
+    }
+
+    bool near( juce::Point<float> a, juce::Point<float> b )
+    {
+        return near( a.x, b.x ) && near( a.y, b.y );
+    }
+
+    const juce::Rectangle<int> layout( 0, 0, 1024, 600 );
+
+    void testLetterbox()
+    {
+        // The layout's own size: unchanged (today's kiosk window).
+        auto box = kick::window::computeLetterbox( { 0, 0, 1024, 600 }, layout );
+        CHECK( juce::exactlyEqual( box.scale, 1.0f ) );
+        CHECK( box.transform.isIdentity() );
+        CHECK( box.contentArea == layout.toFloat() );
+
+        // Twice the size: scaled by two, no bars.
+        box = kick::window::computeLetterbox( { 0, 0, 2048, 1200 }, layout );
+        CHECK( near( box.scale, 2.0f ) );
+        CHECK( near( box.offset, { 0.0f, 0.0f } ) );
+        CHECK( box.contentArea == juce::Rectangle<float>( 0, 0, 2048, 1200 ) );
+
+        // 16:9 (wider than 1024:600): bars at the sides, centred, whole
+        // pixels.
+        box = kick::window::computeLetterbox( { 0, 0, 1920, 1080 }, layout );
+        CHECK( near( box.scale, 1.8f ) );
+        CHECK( near( box.offset, { 38.0f, 0.0f } ) ); // (1920 - 1843.2) / 2 = 38.4
+        CHECK( near( box.contentArea.getWidth(), 1843.2f ) );
+        CHECK( near( box.contentArea.getHeight(), 1080.0f ) );
+
+        // 4:3 (taller): bars at the top and bottom.
+        box = kick::window::computeLetterbox( { 0, 0, 800, 600 }, layout );
+        CHECK( near( box.scale, 800.0f / 1024.0f ) );
+        CHECK( near( box.offset, { 0.0f, 66.0f } ) ); // (600 - 468.75) / 2 = 65.6
+        CHECK( box.contentArea.getBottom() <= 600.0f );
+
+        // An offset area.
+        box = kick::window::computeLetterbox( { 100, 50, 1024, 600 }, layout );
+        CHECK( juce::exactlyEqual( box.scale, 1.0f ) );
+        CHECK( near( box.offset, { 100.0f, 50.0f } ) );
+
+        // Nothing to show in: no transform.
+        box = kick::window::computeLetterbox( {}, layout );
+        CHECK( box.transform.isIdentity() );
+    }
+
+    void testInputThroughLetterbox()
+    {
+        // JUCE maps a position in the window back into the layout with the
+        // inverse transform: the corners and centre of the layout's area
+        // must land on the layout's corners and centre.
+        for( auto area : { juce::Rectangle<int>( 0, 0, 1920, 1080 ), juce::Rectangle<int>( 0, 0, 800, 600 ),
+                           juce::Rectangle<int>( 0, 0, 1280, 800 ), juce::Rectangle<int>( 0, 0, 512, 300 ) } )
+        {
+            auto box     = kick::window::computeLetterbox( area, layout );
+            auto inverse = box.transform.inverted();
+
+            auto topLeft     = box.contentArea.getTopLeft().transformedBy( inverse );
+            auto bottomRight = box.contentArea.getBottomRight().transformedBy( inverse );
+            auto centre      = box.contentArea.getCentre().transformedBy( inverse );
+            CHECK( near( topLeft, { 0.0f, 0.0f } ) );
+            CHECK( near( bottomRight, { 1024.0f, 600.0f } ) );
+            CHECK( near( centre, { 512.0f, 300.0f } ) );
+
+            // A pad at (100, 200) in the layout is drawn at, and hit at,
+            // the same transformed position.
+            auto shown = juce::Point<float>( 100.0f, 200.0f ).transformedBy( box.transform );
+            CHECK( near( shown.transformedBy( inverse ), { 100.0f, 200.0f } ) );
+
+            // The bars are outside the layout.
+            if( box.offset.x > 1.0f )
+                CHECK( juce::Point<float>( box.offset.x / 2.0f, 10.0f ).transformedBy( inverse ).x < 0.0f );
+            if( box.offset.y > 1.0f )
+                CHECK( juce::Point<float>( 10.0f, box.offset.y / 2.0f ).transformedBy( inverse ).y < 0.0f );
+        }
+    }
+
+    void testWindowBoundsText()
+    {
+        CHECK( kick::window::formatWindowBounds( { 10, -20, 1024, 600 } ) == "10 -20 1024 600" );
+        auto bounds = kick::window::parseWindowBounds( "10 -20 1024 600" );
+        CHECK( bounds.has_value() && *bounds == juce::Rectangle<int>( 10, -20, 1024, 600 ) );
+        CHECK( kick::window::parseWindowBounds( "  1  2  3  4 " ).has_value() );
+
+        CHECK( !kick::window::parseWindowBounds( "" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3 4 5" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "a b c d" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3.5 4" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 0 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 -1024 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 99999999999 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "- 2 3 4" ).has_value() );
+    }
+
+    void testWindowBounds()
+    {
+        const juce::Point<int>                  size( 1024, 600 ), minimum( 512, 300 );
+        const juce::Rectangle<int>              primary( 0, 0, 1920, 1050 ), secondary( 1920, 0, 1280, 1024 );
+        const juce::Array<juce::Rectangle<int>> displays{ primary, secondary };
+
+        // Nothing saved: the layout's size, centred on the display.
+        auto bounds = kick::window::chooseWindowBounds( std::nullopt, displays, primary, size, minimum );
+        CHECK( bounds.getWidth() == 1024 && bounds.getHeight() == 600 );
+        CHECK( bounds.getCentre() == primary.getCentre() );
+
+        // On the second display.
+        bounds = kick::window::chooseWindowBounds( std::nullopt, displays, secondary, size, minimum );
+        CHECK( secondary.contains( bounds ) );
+
+        // A display smaller than the layout: 90% of it, same aspect ratio.
+        const juce::Rectangle<int> small( 0, 0, 800, 480 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { small }, small, size, minimum );
+        CHECK( small.contains( bounds ) );
+        CHECK( bounds.getWidth() == 720 );
+        CHECK( bounds.getHeight() == 422 ); // 720 * 600 / 1024 = 421.9
+
+        // Never below the minimum.
+        const juce::Rectangle<int> tiny( 0, 0, 320, 240 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { tiny }, tiny, size, minimum );
+        CHECK( bounds.getWidth() == 512 && bounds.getHeight() == 300 );
+
+        // Saved bounds on a display are used, with the aspect ratio kept.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 1000 ), displays, primary, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1536, 900 ) );
+
+        // Mostly off screen, but a corner still reachable: kept.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 1800, 900, 1024, 600 ), { primary }, primary, size, minimum );
+        CHECK( bounds.getPosition() == juce::Point<int>( 1800, 900 ) );
+
+        // On a display that is gone: centred on the current one instead.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 3500, 100, 1024, 600 ), { primary }, primary, size, minimum );
+        CHECK( bounds.getCentre() == primary.getCentre() );
+
+        // Too small to be valid: the default.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 10, 10, 100, 60 ), displays, primary, size, minimum );
+        CHECK( bounds.getWidth() == 1024 );
+
+        // No display known: the layout's size at the origin.
+        bounds = kick::window::chooseWindowBounds( std::nullopt, {}, {}, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 0, 0, 1024, 600 ) );
+    }
 }
 
 int main()
@@ -176,6 +328,10 @@ int main()
     testPrecedence();
     testUnknownValues();
     testCommandLine();
+    testLetterbox();
+    testInputThroughLetterbox();
+    testWindowBoundsText();
+    testWindowBounds();
 
     if( failures != 0 )
     {
@@ -183,6 +339,6 @@ int main()
         return 1;
     }
 
-    std::printf( "All window option tests passed\n" );
+    std::printf( "All window tests passed\n" );
     return 0;
 }
