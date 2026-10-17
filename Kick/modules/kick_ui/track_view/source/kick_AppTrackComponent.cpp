@@ -262,8 +262,10 @@ void AppTrackDisplay::resized()
     midiPort.setBoundsRelative( .232f, .0892f, .113f, .6071f );
     inputmidi.setBoundsRelative( .364f, .0892f, .1f, .6071f );
     length.setBoundsRelative( .483f, .0892f, .1f, .6071f );
-    level.setBoundsRelative( .602f, .0892f, .062f, .8214f );
-    transpose.setBoundsRelative( .681f, .0892f, .062f, .8214f );
+    // Wide enough for the titles at their size: narrower, "TRANSPOSE" was
+    // squeezed into a condensed look.
+    level.setBoundsRelative( .594f, .0892f, .062f, .8214f );
+    transpose.setBoundsRelative( .662f, .0892f, .09f, .8214f );
     arm.setBoundsRelative( .761f, .0892f, .06f, .3932f );
     solo.setBoundsRelative( .826f, .0892f, .06f, .3932f );
     monitor.setBoundsRelative( .762f, .5178f, .06f, .3932f );

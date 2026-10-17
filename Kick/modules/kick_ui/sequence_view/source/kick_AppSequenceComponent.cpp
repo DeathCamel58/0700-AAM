@@ -24,7 +24,7 @@ AppSequenceDisplay::AppSequenceDisplay( int Index )
     mt::utils::addAndMakeVisible( this, name, bpm, bars, start, end, transpose, loop, seqGlobal );
 
     mt::utils::setTitleProportion( .35f, start, end, bars, bpm, seqGlobal );
-    mt::utils::setTitleFontHeight( 16, start, end, bars, bpm, seqGlobal );
+    mt::utils::setTitleFontHeight( 16, start, end, bars, bpm, seqGlobal, transpose );
     mt::utils::setValueFontHeight( 16, transpose );
     mt::utils::setTitleJustification( juce::Justification::centredTop, bpm, seqGlobal, bars, start, end, transpose );
     mt::utils::setValueJustification( juce::Justification::centred, bpm, seqGlobal, bars, start, end, transpose );
@@ -119,8 +119,9 @@ void AppSequenceDisplay::resized()
     bars.setBoundsRelative( .444f, .0892f, .1f, .6071f );
     start.setBoundsRelative( .557f, .0892f, .1f, .6071f );
     end.setBoundsRelative( .670f, .0892f, .1f, .6071f );
-    loop.setBoundsRelative( .783f, .3035f, .08f, .3928f );
-    transpose.setBoundsRelative( .874f, .0892f, .062f, .8214f );
+    loop.setBoundsRelative( .776f, .3035f, .08f, .3928f );
+    // Wide enough for "TRANSPOSE" at the size of the other titles.
+    transpose.setBoundsRelative( .862f, .0892f, .09f, .8214f );
 }
 
 void AppSequenceDisplay::linkRotated( int ID, int Value )
