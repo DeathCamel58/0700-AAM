@@ -242,10 +242,9 @@ namespace ui
 
     void KickTableView::mouseDown( const juce::MouseEvent& event )
     {
-        auto viewPos  = canvas.getScreenPosition();
-        auto clickPos = event.getScreenPosition();
-
-        auto Y   = clickPos.getY() - viewPos.getY();
+        // In the canvas's coordinates: screen coordinates are scaled when
+        // the window is.
+        auto Y   = event.getEventRelativeTo( &canvas ).getPosition().getY();
         auto row = canvas.getRowFromY( Y );
         if( enableRowSelectionFlag )
             selectRow( row < getNumRows() ? row : getSelectedRow() );
@@ -255,7 +254,8 @@ namespace ui
     {
         int              rowHeight      = canvas.rowHeight;
         int              rowWidth       = canvas.rowWidth;
-        auto             viewPos        = canvas.getScreenPosition();
+        // The rows' heights are given in layout coordinates.
+        auto             viewPos        = getLayoutPosition( canvas );
         auto             startingHeight = height;
         auto             startingWidth  = width;
         std::vector<int> rows;
@@ -287,10 +287,7 @@ namespace ui
 
     void KickTableView::mouseDoubleClick( const juce::MouseEvent& event )
     {
-        auto viewPos  = canvas.getScreenPosition();
-        auto clickPos = event.getScreenPosition();
-
-        auto Y   = clickPos.getY() - viewPos.getY();
+        auto Y   = event.getEventRelativeTo( &canvas ).getPosition().getY();
         auto row = canvas.getRowFromY( Y );
         if( rowComponents.size() > 0 )
             if( onRowDoubleClicked && juce::isPositiveAndBelow( row, rowComponents.size() ) )

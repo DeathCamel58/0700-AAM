@@ -1075,7 +1075,7 @@ namespace ui
 
     void FileBrowser::mouseDown( const juce::MouseEvent& e )
     {
-        juce::Point<int>     clickPosition         = e.getMouseDownScreenPosition();
+        juce::Point<int>     clickPosition         = ui::screenToLayout( e.getMouseDownScreenPosition() );
         juce::Rectangle<int> parentBounds          = bottom.getBounds();
         juce::Point<int>     bottomClickPosition   = clickPosition - parentBounds.getPosition();
         juce::Rectangle<int> volumeBtnBounds       = bottom.volumeBtn.getBounds();

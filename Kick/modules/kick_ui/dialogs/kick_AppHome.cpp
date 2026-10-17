@@ -139,6 +139,9 @@ namespace kick_ui
         // Setup default look and feel.
         setLookAndFeel( ui::KickLooknFeel::getLnf() );
 
+        // Pop-ups, notifications and menus open in here.
+        ui::setLayoutRoot( this );
+
         // Connect sceeen signals.
         // Open screen as passed in Argument.
         signals::sigScreenOpen.connect( [&]( Screen Scrn ) {
@@ -251,6 +254,7 @@ namespace kick_ui
     void KickHome::shutdown()
     {
         cancelPendingUpdate();
+        ui::setLayoutRoot( nullptr );
         removeKeyListener( &contracts::getKeypressDetector() );
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
         removeAllChildren();
