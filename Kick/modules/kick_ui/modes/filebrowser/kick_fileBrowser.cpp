@@ -1029,7 +1029,7 @@ namespace ui
             top.renameBtn.setToggleState( false, juce::dontSendNotification );
             selectBtnOnClick();
             bottom.allButton.setToggleState( true, juce::dontSendNotification );
-            statusBar.setBoxInfo( "Box Info" );
+            statusBar.setBoxInfo( {} );
         }
     }
 
@@ -1217,7 +1217,7 @@ namespace ui
                 {
                     if( asset.hasFileExtension( sampleFileList ) )
                     {
-                        statusBar.setBoxInfo( asset.getFileNameWithoutExtension() + " has Loaded" );
+                        statusBar.setBoxInfo( asset.getFileNameWithoutExtension() + " loaded" );
                         break;
                     }
                 }
