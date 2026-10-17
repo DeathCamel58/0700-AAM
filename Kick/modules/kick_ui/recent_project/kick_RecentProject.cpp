@@ -577,8 +577,8 @@ namespace ui
             if( files.isEmpty() )
             {
                 label.setText( path.getFileNameWithoutExtension(), juce::dontSendNotification );
-                timeStamp.setText( path.getLastModificationTime().toString( false, true, false, false ), juce::dontSendNotification );
-                date.setText( path.getLastModificationTime().toString( true, false, false, false ), juce::dontSendNotification );
+                timeStamp.setText( mt::display::time( path.getLastModificationTime() ), juce::dontSendNotification );
+                date.setText( mt::display::date( path.getLastModificationTime() ), juce::dontSendNotification );
 
                 // Component visibility
                 mt::utils::makeVisible( date, timeStamp, icon );

@@ -65,15 +65,6 @@ namespace ui
             return isUSBEject;
         }
 
-        juce::String getFilePath( juce::String originalFullPath, juce::String replacementPath )
-        {
-            juce::String searchLabel = getDefaultPath().getFullPathName();
-            int          pos         = originalFullPath.indexOf( searchLabel );
-            if( pos != -1 )
-                originalFullPath = originalFullPath.replaceSection( pos, searchLabel.length(), replacementPath );
-            return originalFullPath;
-        }
-
         bool hasSampleAssignedToPad( int LastPressedPad )
         {
             auto&                       ae = mt::getAudioInterface();

@@ -20,7 +20,8 @@
 // Tests of the system information the preferences and the system resources
 // window show: CPU and memory use parsed from /proc, and the DNS server
 // from systemd-networkd's and systemd-resolved's state files; and how the
-// device information is written (kick_DisplayFormat.h); and the system's
+// device information, dates, times and paths are written and listings
+// ordered (kick_DisplayFormat.h); and the system's
 // time zone (kick_TimeZone.h). The parsers
 // and lookups are fed
 // fixture copies of the files, so the results do not depend on this
@@ -287,6 +288,51 @@ namespace
 
         std::printf( "Time zone here: %s\n", tz::systemZone().c_str() );
     }
+
+    void testListings()
+    {
+        namespace display = mt::display;
+
+        const juce::Time when( 2018, 2, 9, 6, 46, 30 ); // months count from 0
+        CHECK( display::date( when ) == "9 Mar 2018" );
+        CHECK( display::time( when ) == "06:46" );
+        CHECK( display::time( juce::Time( 2018, 2, 9, 18, 5, 0 ) ) == "18:05" );
+
+        // Created out of order, as a file system may list them.
+        const juce::TemporaryFile temporary;
+        const auto                root = temporary.getFile();
+        CHECK( root.createDirectory() );
+        for( auto name : { "Demo 03", "Demo 10", "Demo 01", "demo 02", "Demo 05", "Demo 04" } )
+            CHECK( root.getChildFile( name ).createDirectory() );
+        for( auto name : { "b.wav", "A.wav", "a10.wav", "a9.wav" } )
+            CHECK( root.getChildFile( name ).create() );
+
+        auto files = root.findChildFiles( juce::File::findFilesAndDirectories, false );
+        display::sortForListing( files );
+        juce::StringArray names;
+        for( const auto& file : files )
+            names.add( file.getFileName() );
+        CHECK( names.joinIntoString( "|" ) == "Demo 01|demo 02|Demo 03|Demo 04|Demo 05|Demo 10|A.wav|a9.wav|a10.wav|b.wav" );
+
+        root.deleteRecursively();
+
+        // Paths under the Location list's names.
+        const std::vector<std::pair<juce::String, juce::String>> places{
+            { "/data/kick/projects", "Internal" },
+            { "/data/kick/sounds", "Factory Sample Library" },
+            { "/usr/share/kick/demos", "Demos" },
+            { "", "External (SD Card)" },
+            { "/mnt/usb-disk", "External (USB)" },
+            { "/mnt/usb-disk/inner", "Inner" },
+        };
+        CHECK( display::placePath( "/usr/share/kick/demos", places ) == "Demos" );
+        CHECK( display::placePath( "/usr/share/kick/demos/Demo 01", places ) == "Demos/Demo 01" );
+        CHECK( display::placePath( "/data/kick/projects/west/Samples", places ) == "Internal/west/Samples" );
+        CHECK( display::placePath( "/mnt/usb-disk/loops", places ) == "External (USB)/loops" );
+        CHECK( display::placePath( "/mnt/usb-disk/inner/x", places ) == "Inner/x" );
+        CHECK( display::placePath( "/data/kick/projectsX", places ) == "/data/kick/projectsX" );
+        CHECK( display::placePath( "/etc", places ) == "/etc" );
+    }
 }
 
 int main()
@@ -297,6 +343,7 @@ int main()
     testDns();
     testDeviceInfo();
     testTimeZone();
+    testListings();
 
     if( failures != 0 )
     {

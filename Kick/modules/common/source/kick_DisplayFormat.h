@@ -79,5 +79,65 @@ namespace mt
             const auto trimmed = text.trim();
             return trimmed.isEmpty() ? unavailable() : trimmed;
         }
+
+        /** A date, as "9 Mar 2018". */
+        inline juce::String date( const juce::Time& time )
+        {
+            return time.toString( true, false, false, true );
+        }
+
+        /** A time of day, on the 24-hour clock the device's clock settings
+            use, as "06:46". */
+        inline juce::String time( const juce::Time& time )
+        {
+            return time.formatted( "%H:%M" );
+        }
+
+        /** Whether a file goes before another in a listing: folders first,
+            then by name in natural order, so "Demo 2" comes before
+            "Demo 10", without regard to case. */
+        inline bool listedBefore( const juce::File& a, const juce::File& b )
+        {
+            const bool aFolder = a.isDirectory(), bFolder = b.isDirectory();
+            if( aFolder != bFolder )
+                return aFolder;
+
+            const auto byName = a.getFileName().compareNatural( b.getFileName(), false );
+            return byName != 0 ? byName < 0 : a.getFullPathName() < b.getFullPathName();
+        }
+
+        /** Sorts files the way listings show them (see listedBefore()). */
+        inline void sortForListing( juce::Array<juce::File>& files )
+        {
+            std::stable_sort( files.begin(), files.end(), listedBefore );
+        }
+
+        /** A path as the user knows it: under the name of the place it is
+            in ("Demos/Demo 01" for .../demos/Demo 01), the place being the
+            one of places (pairs of path and name) whose path it is in,
+            the deepest if several; the path as it is if none. */
+        inline juce::String placePath( const juce::String& path, const std::vector<std::pair<juce::String, juce::String>>& places )
+        {
+            const juce::File file( path );
+            juce::File       bestPlace;
+            juce::String     bestName;
+            for( const auto& [where, name] : places )
+            {
+                if( where.isEmpty() )
+                    continue;
+                const juce::File place( where );
+                if( ( file == place || file.isAChildOf( place ) ) && ( bestName.isEmpty() || place.isAChildOf( bestPlace ) ) )
+                {
+                    bestPlace = place;
+                    bestName  = name;
+                }
+            }
+
+            if( bestName.isEmpty() )
+                return path;
+            if( file == bestPlace )
+                return bestName;
+            return bestName + "/" + file.getRelativePathFrom( bestPlace );
+        }
     }
 }
