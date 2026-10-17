@@ -678,14 +678,16 @@ namespace ui
         // tile is held: when the UI is busy it can run before a release
         // that came well within the threshold is handled, and the tap then
         // counted as a long press and only selected the tile.
-        if( duration >= longPressThreshold )
+        // A demo or a template has nothing to offer on a long press, so
+        // there a long press opens it as a tap does: a tap whose release
+        // is stamped late (by a busy display server, say) still opens it.
+        if( duration >= longPressThreshold && onLongPressed )
         {
-            logRelease( onLongPressed ? "long press" : "long press, which does nothing here" );
+            logRelease( "long press" );
             DBG( "LongPressed " );
             if( !isLongPressTriggered )
                 select();
-            if( onLongPressed )
-                onLongPressed( index );
+            onLongPressed( index );
         }
         else if( e.getNumberOfClicks() == 1 ) // The second tap of a double tap is not another tap.
         {
