@@ -85,12 +85,15 @@ namespace ui
             stopTimer();
     }
 
-    bool LongPressHint::mouseUp()
+    bool LongPressHint::mouseUp( const juce::MouseEvent& Event )
     {
         stopTimer();
-        auto wasShown = isShowing();
+        // Held as long as the events' own times say: when the UI is busy the
+        // timer can show the bubble before a quick release is handled, and
+        // that tap is still a tap.
+        auto wasHeld = isShowing() && ( Event.eventTime - Event.mouseDownTime ).inMilliseconds() >= holdTimeMs;
         hide();
-        return wasShown;
+        return wasHeld;
     }
 
     void LongPressHint::timerCallback()

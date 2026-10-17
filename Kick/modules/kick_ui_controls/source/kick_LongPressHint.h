@@ -27,8 +27,8 @@ namespace ui
     // than moveTolerance pixels, and goes away on release.
     //
     // The component forwards its mouse events. mouseUp() tells whether the
-    // bubble was shown during the press: the press was then a request for
-    // the hint, and the release should not also click.
+    // bubble was shown during a press held for holdTimeMs: the press was
+    // then a request for the hint, and the release should not also click.
     class LongPressHint : private juce::Timer
     {
     public:
@@ -42,8 +42,9 @@ namespace ui
         void mouseDown( juce::Component& Target, const juce::MouseEvent& Event );
         // Stops waiting if the press moved too far.
         void mouseDrag( const juce::MouseEvent& Event );
-        // Stops waiting, hides the bubble; true if it was shown.
-        bool mouseUp();
+        // Stops waiting, hides the bubble; true if it was shown and the
+        // press lasted holdTimeMs.
+        bool mouseUp( const juce::MouseEvent& Event );
 
         bool isShowing() const noexcept { return bubble != nullptr; }
 
