@@ -258,7 +258,8 @@ void AppTrackDisplay::resized()
 {
     selector.setBoundsRelative( 0.001f, .509f, .042f, .464f );
     name.setBoundsRelative( .065f, .3035f, .16f, .3932f );
-    midiPort.setBoundsRelative( .245f, .0892f, .1f, .6071f );
+    // Starts further left for "I/P MIDI PORT", which was cut short.
+    midiPort.setBoundsRelative( .232f, .0892f, .113f, .6071f );
     inputmidi.setBoundsRelative( .364f, .0892f, .1f, .6071f );
     length.setBoundsRelative( .483f, .0892f, .1f, .6071f );
     level.setBoundsRelative( .602f, .0892f, .062f, .8214f );
