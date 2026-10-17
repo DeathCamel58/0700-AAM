@@ -60,6 +60,9 @@ namespace kick_ui
         }
 
         password.setEditable( false, true );
+        // A box like the other fields: on the page's black it was invisible.
+        password.setValueBackgroundColour( ui::Theme::backgroundColour( 3 ) );
+        password.setValueJustification( juce::Justification::centred );
         enabled.setSelected( settings.wifi.enabled() ? 1 : 0, juce::dontSendNotification );
         enabled.onSelectionChanged = [&]( int index, const juce::String& ) {
             settings.wifi.enabled = ( index == 1 );
