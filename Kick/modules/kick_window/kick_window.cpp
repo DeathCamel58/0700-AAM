@@ -21,8 +21,13 @@
     #error "Incorrect use of JUCE cpp file"
 #endif
 
-#include "kick_window.h"
+// JUCE's X11 declarations, for the OpenGL check (kick_OpenGLSupport.cpp).
+#define JUCE_GUI_BASICS_INCLUDE_XHEADERS 1
 
+#include "kick_window.h"
+#include "source/kick_OpenGLSupport.h"
+
+#include "source/kick_OpenGLSupport.cpp"
 #include "source/kick_WindowGeometry.cpp"
 #include "source/kick_ScaledHost.cpp"
 #include "source/kick_MainWindow.cpp"

@@ -93,7 +93,7 @@ public:
         mt::getAudioInterface();
 
         // Initialize User Interface...
-        w = kick_ui::createMainWindow( getApplicationName(), windowOptions.windowMode, nullptr );
+        w = kick_ui::createMainWindow( getApplicationName(), windowOptions, nullptr );
 
 #if PERFETTO
         MelatoninPerfetto::get().beginSession();

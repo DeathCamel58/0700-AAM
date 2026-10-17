@@ -27,6 +27,64 @@ namespace kick::window
         }
     }
 
+    // Tells the window whether JUCE's OpenGL context came up: JUCE calls
+    // newOpenGLContextCreated() on its render thread once it has, and
+    // nothing when it cannot create it (the window stays black).
+    class MainWindow::OpenGLWatch : public juce::OpenGLRenderer
+        , private juce::Timer
+    {
+    public:
+        explicit OpenGLWatch( MainWindow& windowToWatch )
+            : window( windowToWatch )
+        {
+        }
+
+        ~OpenGLWatch() override { stopTimer(); }
+
+        void start() { startTimer( checkIntervalInMS ); }
+
+        void newOpenGLContextCreated() override
+        {
+            const auto* version  = juce::gl::glGetString( juce::gl::GL_VERSION );
+            const auto* renderer = juce::gl::glGetString( juce::gl::GL_RENDERER );
+            const juce::ScopedLock lock( descriptionLock );
+            description = juce::String( version != nullptr ? (const char*)version : "unknown version" ) + ", "
+                          + juce::String( renderer != nullptr ? (const char*)renderer : "unknown renderer" );
+            created = true;
+        }
+
+        void renderOpenGL() override {}
+        void openGLContextClosing() override {}
+
+    private:
+        void timerCallback() override
+        {
+            if( created )
+            {
+                stopTimer();
+                const juce::ScopedLock lock( descriptionLock );
+                juce::Logger::writeToLog( "Display: OpenGL context created (" + description + ")" );
+                return;
+            }
+
+            // Only while the window is on screen does JUCE try.
+            if( window.isShowing() && ( waitedInMS += checkIntervalInMS ) >= timeoutInMS )
+            {
+                stopTimer();
+                window.fallBackToSoftware( "no OpenGL context within " + juce::String( timeoutInMS / 1000 ) + " s" );
+            }
+        }
+
+        static constexpr int checkIntervalInMS = 250;
+        static constexpr int timeoutInMS       = 10000;
+
+        MainWindow&           window;
+        std::atomic<bool>     created{ false };
+        juce::CriticalSection descriptionLock;
+        juce::String          description;
+        int                   waitedInMS{ 0 };
+    };
+
     MainWindow::MainWindow( const juce::String& name, juce::Component& content, Options windowOptions )
         // Not on the desktop yet: the peer is created once the window is
         // set up, with the right style and bounds.
@@ -41,10 +99,16 @@ namespace kick::window
             openWindowed();
         else
             openKiosk();
+
+        if( options.renderer == Renderer::openGL )
+            attachOpenGL();
     }
 
     MainWindow::~MainWindow()
     {
+        // While the components it paints still exist.
+        detachOpenGL();
+
         if( options.windowMode == WindowMode::windowed && options.saveBounds && !isMinimised() && !isFullScreen() )
             options.saveBounds( formatWindowBounds( getBounds() ) );
 
@@ -94,6 +158,50 @@ namespace kick::window
 
         addToDesktop();
         setVisible( true );
+    }
+
+    void MainWindow::attachOpenGL()
+    {
+        if( const auto problem = detail::findOpenGLProblem(); problem.isNotEmpty() )
+        {
+            juce::Logger::writeToLog( "Display: OpenGL is not available (" + problem + "); using the software renderer" );
+            return;
+        }
+
+        openGLWatch   = std::make_unique<OpenGLWatch>( *this );
+        openGLContext = std::make_unique<juce::OpenGLContext>();
+        openGLContext->setRenderer( openGLWatch.get() );
+        openGLContext->setComponentPaintingEnabled( true );
+        // Repaint when the components do, as the software renderer does.
+        // (JUCE swaps at the display's refresh: swap interval 1.)
+        openGLContext->setContinuousRepainting( false );
+        openGLContext->attachTo( host );
+        openGLWatch->start();
+
+        juce::Logger::writeToLog( "Display: rendering with OpenGL" );
+    }
+
+    void MainWindow::detachOpenGL()
+    {
+        if( openGLContext != nullptr )
+            openGLContext->detach();
+        openGLContext.reset();
+        openGLWatch.reset();
+    }
+
+    void MainWindow::fallBackToSoftware( const juce::String& reason )
+    {
+        juce::Logger::writeToLog( "Display: OpenGL failed (" + reason + "); using the software renderer" );
+
+        // Called from the watch's timer: it must not be deleted while its
+        // callback runs.
+        juce::MessageManager::callAsync( [safeThis = juce::Component::SafePointer<MainWindow>( this )]() {
+            if( safeThis != nullptr )
+            {
+                safeThis->detachOpenGL();
+                safeThis->host.repaint();
+            }
+        } );
     }
 
     void MainWindow::closeButtonPressed()

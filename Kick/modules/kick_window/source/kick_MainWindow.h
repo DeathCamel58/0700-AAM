@@ -35,12 +35,19 @@ namespace kick::window
     // (minimise and close), resizable at the layout's aspect ratio between
     // half and eight times its size, opened where it was closed, or centred
     // on the display under the mouse.
+    //
+    // With the OpenGL renderer, JUCE paints the components with OpenGL
+    // (an OpenGLContext attached to the scaled host, swapping at the
+    // display's refresh, repainting only what changed, as the software
+    // renderer does). When OpenGL is not available, or no context comes up,
+    // the window falls back to the software renderer.
     class MainWindow : public juce::DocumentWindow
     {
     public:
         struct Options
         {
             WindowMode windowMode{ WindowMode::kiosk };
+            Renderer   renderer{ Renderer::software };
 
             // The saved bounds (formatWindowBounds()), read when the
             // windowed window opens and written when it is destroyed.
@@ -59,12 +66,23 @@ namespace kick::window
         void closeButtonPressed() override;
         void inputAttemptWhenModal() override;
 
+        // The renderer in use (software after a fallback).
+        Renderer getRenderer() const { return openGLContext != nullptr ? Renderer::openGL : Renderer::software; }
+
     private:
+        class OpenGLWatch;
+
         void openKiosk();
         void openWindowed();
+        void attachOpenGL();
+        void detachOpenGL();
+        void fallBackToSoftware( const juce::String& reason );
 
         Options    options;
         ScaledHost host;
+
+        std::unique_ptr<OpenGLWatch>         openGLWatch;
+        std::unique_ptr<juce::OpenGLContext> openGLContext;
 
         JUCE_DECLARE_NON_COPYABLE( MainWindow )
     };

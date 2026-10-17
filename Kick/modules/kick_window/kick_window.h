@@ -28,7 +28,7 @@
   website:
   license:            AGPLv3
 
-  dependencies:       kick_window_options, juce_gui_basics
+  dependencies:       kick_window_options, juce_gui_basics, juce_opengl
 
  END_JUCE_MODULE_DECLARATION
 *******************************************************************************/
@@ -39,6 +39,7 @@
 
     #include <kick_window_options/kick_window_options.h>
     #include <juce_gui_basics/juce_gui_basics.h>
+    #include <juce_opengl/juce_opengl.h>
 
     #include "source/kick_WindowGeometry.h"
     #include "source/kick_ScaledHost.h"

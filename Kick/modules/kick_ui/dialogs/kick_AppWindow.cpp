@@ -19,12 +19,13 @@
 
 namespace kick_ui
 {
-    std::unique_ptr<kick::window::MainWindow> createMainWindow( const juce::String&     name,
-                                                                kick::window::WindowMode windowMode,
-                                                                std::function<void()>   onCloseRequested )
+    std::unique_ptr<kick::window::MainWindow> createMainWindow( const juce::String&                 name,
+                                                                const kick::window::StartupOptions& startupOptions,
+                                                                std::function<void()>               onCloseRequested )
     {
         kick::window::MainWindow::Options options;
-        options.windowMode       = windowMode;
+        options.windowMode       = startupOptions.windowMode;
+        options.renderer         = startupOptions.renderer;
         options.onCloseRequested = std::move( onCloseRequested );
         options.loadBounds       = []() { return mt::getSettings().window.bounds.get(); };
         options.saveBounds       = []( const juce::String& bounds ) {
