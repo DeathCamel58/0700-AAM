@@ -17,8 +17,7 @@ namespace kick_ui
         {
             auto             Start      = ae.toBnB( aeSelected, (unsigned int)data.start );
             auto             resizeText = juce::String::formatted( "%d :: %d:%d:%d = %d", data.number.get() + 1, Start.bar + 1, Start.beat + 1, Start.tick, data.length.get() );
-            juce::Point<int> dragPoint( event.x, event.y );
-            gridComp.infoBar.displayTip( dragPoint, resizeText );
+            gridComp.infoBar.displayTip( event.getScreenPosition(), resizeText );
         }
     }
 
