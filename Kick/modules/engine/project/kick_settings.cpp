@@ -271,7 +271,9 @@ namespace mt
         setupBase( VT, Undo );
 
         enabled.attachTo( vTree, IDs::status, Undo, true );
-        mode.attachTo( vTree, IDs::mode, Undo, "MANUAL" );
+        // The system's network manager configures Ethernet with DHCP (see
+        // HwPref::startDhcp()), so that is what a fresh device shows.
+        mode.attachTo( vTree, IDs::mode, Undo, "DHCP" );
         ipAddress.attachTo( vTree, IDs::ipAdd, Undo, "192.168.0.1" );
         subnetMask.attachTo( vTree, IDs::subnetMask, Undo, "255.255.255.0" );
         gateway.attachTo( vTree, IDs::gateway, Undo, "192.168.0.1" );
