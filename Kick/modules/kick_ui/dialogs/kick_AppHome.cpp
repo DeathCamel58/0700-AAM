@@ -198,6 +198,8 @@ namespace kick_ui
         addKeyListener( &contracts::getKeypressDetector() );
         // LED control
         ledControl_ = std::make_unique<KickLEDs>();
+        // Not a child: the window shows it above this and its pop-ups.
+        performanceOverlay_ = std::make_unique<PerformanceOverlay>();
 
         // Setup size and other application options.
         setInterceptsMouseClicks( false, true );
@@ -260,7 +262,13 @@ namespace kick_ui
         removeAllChildren();
         ctrlBar_.reset();
         ledControl_.reset();
+        performanceOverlay_.reset();
         screens_.clear();
+    }
+
+    juce::Component* KickHome::getPerformanceOverlay()
+    {
+        return performanceOverlay_.get();
     }
 
     IScreen* KickHome::getScreen( Screen screen )

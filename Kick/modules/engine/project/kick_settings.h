@@ -200,6 +200,10 @@ namespace mt
         // The desktop window's position and size, "x y width height";
         // empty: centred on the display.
         AtomicString bounds;
+
+        // Whether the performance overlay is shown (the system resources
+        // window turns it on and off); off by default.
+        Atomic<bool> performanceOverlay;
     };
 
     /// ///////////////////////////////////

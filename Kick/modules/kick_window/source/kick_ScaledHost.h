@@ -28,6 +28,15 @@ namespace kick::window
     //
     // The component is not owned; it is taken out of this host and its
     // transform reset when the host is destroyed.
+    //
+    // It can show an overlay above the content: a component sized in
+    // layout units, scaled as the layout is, in the host's bottom-right
+    // corner (placeInBottomRight()), above everything the content shows,
+    // its pop-ups included (they are the content's children). It is not
+    // owned either.
+    //
+    // The host times the frames it paints (FrameTiming), while that is
+    // enabled.
     class ScaledHost : public juce::Component
     {
     public:
@@ -36,12 +45,40 @@ namespace kick::window
 
         juce::Rectangle<int> getLayoutBounds() const { return layout; }
 
+        // Replaces the overlay; nullptr removes it. Whether it is visible is
+        // up to the overlay.
+        void setOverlay( juce::Component* overlay );
+
+        FrameTiming& getFrameTiming() { return frameTiming; }
+
         void paint( juce::Graphics& g ) override;
+        void paintOverChildren( juce::Graphics& g ) override;
         void resized() override;
+        void childBoundsChanged( juce::Component* child ) override;
+
+        // The overlay's distance from the corner, in layout units.
+        static constexpr int overlayMargin = 6;
 
     private:
+        // Behind the content, painted first in every frame (see paint()).
+        class FrameStart : public juce::Component
+        {
+        public:
+            explicit FrameStart( FrameTiming& timing );
+            void paint( juce::Graphics& ) override;
+
+        private:
+            FrameTiming& frameTiming;
+        };
+
+        void placeOverlay();
+
         juce::Component&     content;
         juce::Rectangle<int> layout;
+
+        juce::Component::SafePointer<juce::Component> overlay;
+        FrameTiming                                   frameTiming;
+        FrameStart                                    frameStart{ frameTiming };
 
         JUCE_DECLARE_NON_COPYABLE( ScaledHost )
     };

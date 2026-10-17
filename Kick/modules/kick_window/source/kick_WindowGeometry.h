@@ -40,6 +40,15 @@ namespace kick::window
     // is 1, so that an area of the layout's size shows it unchanged.
     Letterbox computeLetterbox( juce::Rectangle<int> area, juce::Rectangle<int> layout );
 
+    // Where a panel panelSize layout units in size shows in an area that
+    // shows the layout: scaled as the layout is, with its bottom-right
+    // corner margin layout units in from the bottom-right corner of the
+    // area (not of the letterboxed layout: of the window, the display in
+    // kiosk mode), on whole pixels. The transform maps the panel's bounds,
+    // at the origin, to that place.
+    juce::AffineTransform placeInBottomRight( juce::Rectangle<int> area, juce::Rectangle<int> layout,
+                                              juce::Point<int> panelSize, int margin );
+
     // A saved window position and size: "x y width height".
     juce::String                        formatWindowBounds( juce::Rectangle<int> bounds );
     std::optional<juce::Rectangle<int>> parseWindowBounds( const juce::String& text );

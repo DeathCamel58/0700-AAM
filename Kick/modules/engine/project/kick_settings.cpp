@@ -394,6 +394,7 @@ namespace mt
     {
         setupBase( VT, Undo );
         bounds.attachTo( vTree, IDs::windowbounds, Undo, "" );
+        performanceOverlay.attachTo( vTree, IDs::windowperfoverlay, Undo, false );
     }
 
     bool KickWindow::isValid() { return vTree.hasType( IDs::WINDOW ); }

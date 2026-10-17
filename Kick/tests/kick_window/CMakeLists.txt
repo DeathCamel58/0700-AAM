@@ -1,4 +1,4 @@
-## Unit tests of the window's start-up options and geometry (see
+## Unit tests of the window's start-up options, geometry and frame timing (see
 ## KickWindowTest.cpp).
 ## They create no window: no display is needed. -DKICK_TEST_SANITIZER=address
 ## (or undefined) builds them with that sanitizer.

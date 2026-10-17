@@ -57,6 +57,11 @@ namespace kick::window
             // The close button (or the window manager closing the window).
             // Without one: JUCEApplication::systemRequestedQuit().
             std::function<void()> onCloseRequested;
+
+            // Shown above the content, in the window's bottom-right corner
+            // (ScaledHost::setOverlay()). Not owned; it is taken out of the
+            // window when the window is destroyed.
+            juce::Component* overlay{ nullptr };
         };
 
         // The content is not owned. The window is shown when this returns.
