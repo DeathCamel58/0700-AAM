@@ -18,8 +18,8 @@
  */
 
 // Tests the computer keyboard's front-panel emulation
-// (contracts::keyPressedDetector): which events it sends as keys go down
-// and up, and what it leaves to a text editor that has the focus. The key
+// (contracts::keyPressedDetector): which events it sends as keys and Shift
+// go down and up, and what it leaves to a text editor that has the focus. The key
 // states are made up, so it reads no real keyboard. Built with
 // -DKICK_BUILD_TESTS=ON; it needs no arguments, and opens no window.
 
@@ -117,6 +117,31 @@ int main()
     check( sentOnly( DCC::EN_PAD6, DCC::BTN_PRESSED ), "the next press of that key is a pad again" );
     down.erase( 'S' );
     scan();
+
+    // Shift is sent as it goes down and up, once each.
+    auto& detector = contracts::getKeypressDetector();
+    sent.clear();
+    detector.setShiftDown( false, false );
+    check( sent.empty(), "Shift starts released" );
+    detector.setShiftDown( true, false );
+    check( sentOnly( DCC::EN_SHIFT, DCC::BTN_PRESSED ), "Shift down presses SHIFT" );
+    sent.clear();
+    detector.setShiftDown( true, false );
+    check( sent.empty(), "Shift held is sent once" );
+    detector.setShiftDown( false, false );
+    check( sentOnly( DCC::EN_SHIFT, DCC::BTN_RELEASED ), "Shift up releases SHIFT" );
+
+    // Shift for capitals in a text editor is the editor's; a Shift pressed
+    // before is still released there.
+    sent.clear();
+    detector.setShiftDown( true, true );
+    check( sent.empty(), "Shift typed into a text editor presses nothing" );
+    detector.setShiftDown( false, true );
+    check( sent.empty(), "nor does its release" );
+    detector.setShiftDown( true, false );
+    sent.clear();
+    detector.setShiftDown( false, true );
+    check( sentOnly( DCC::EN_SHIFT, DCC::BTN_RELEASED ), "a Shift held before typing is released" );
 
     check( !contracts::keyPressedDetector::isTextInput( nullptr ), "no focus is no text input" );
 

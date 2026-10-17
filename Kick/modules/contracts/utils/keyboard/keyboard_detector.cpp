@@ -181,7 +181,31 @@ namespace contracts
         target = Target;
 
         if( target != nullptr )
+        {
             target->addKeyListener( this );
+            startTimer( shiftPollMs );
+        }
+        else
+        {
+            stopTimer();
+        }
+    }
+
+    void keyPressedDetector::timerCallback()
+    {
+        setShiftDown( juce::ModifierKeys::currentModifiers.isShiftDown(), isTextInput( juce::Component::getCurrentlyFocusedComponent() ) );
+    }
+
+    void keyPressedDetector::setShiftDown( bool ShiftDown, bool TextInputHasFocus )
+    {
+        if( shiftBtnState == ShiftDown || ( ShiftDown && TextInputHasFocus ) )
+            return;
+
+        shiftBtnState = ShiftDown;
+        CPktMgr::HWMsg_t hwMsg;
+        hwMsg.data.push_back( (juce::int8)contracts::DeviceControlContracts::EN_SHIFT );
+        hwMsg.data.push_back( ShiftDown ? (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED : (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED ); // Pressed while Shift is down, as the front panel sends it
+        contracts::KeyboardSignals::KeyboardEventTriggered( hwMsg );
     }
 
     void keyPressedDetector::scanKeys( const std::function<bool( int )>& IsKeyDown, bool TextInputHasFocus )
@@ -207,15 +231,7 @@ namespace contracts
     {
         const auto textInputHasFocus = isTextInput( juce::Component::getCurrentlyFocusedComponent() );
 
-        auto mod = juce::ModifierKeys::getCurrentModifiers();
-        if( shiftBtnState != mod.isShiftDown() )
-        {
-            shiftBtnState = mod.isShiftDown();
-            CPktMgr::HWMsg_t hwMsg;
-            hwMsg.data.push_back( (juce::int8)contracts::DeviceControlContracts::EN_SHIFT );
-            hwMsg.data.push_back( shiftBtnState ? (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED : (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED ); // Pressed while Shift is down, as the front panel sends it
-            contracts::KeyboardSignals::KeyboardEventTriggered( hwMsg );
-        }
+        setShiftDown( juce::ModifierKeys::getCurrentModifiers().isShiftDown(), textInputHasFocus );
         scanKeys( []( int keyCode ) { return juce::KeyPress::isKeyCurrentlyDown( keyCode ); }, textInputHasFocus );
         return !textInputHasFocus;
     }
