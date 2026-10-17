@@ -147,9 +147,10 @@ namespace kick_ui
         // (ui::LongPressHint).
         tooltipWindow_ = std::make_unique<juce::TooltipWindow>( this, 700 );
 
-        // Every press and release goes to the log ("Tap: "), to tell where
-        // a tap that seemed to do nothing went.
-        tapLog_ = std::make_unique<ui::tapLog::Listener>();
+        // With input debugging on, every press and release goes to the log
+        // ("Tap: "), to tell where a tap that seemed to do nothing went.
+        if( ui::tapLog::isEnabled() )
+            tapLog_ = std::make_unique<ui::tapLog::Listener>();
 
         // Connect sceeen signals.
         // Open screen as passed in Argument.

@@ -123,7 +123,7 @@ namespace kick::window
     {
         return "window mode " + toString( windowMode ) + " (from " + windowModeSource + "), renderer "
                + toString( renderer ) + " (from " + rendererSource + "), mouse pointer "
-               + ( showCursor ? "shown" : "hidden" );
+               + ( showCursor ? "shown" : "hidden" ) + ( debugInput ? ", input debugging on" : "" );
     }
 
     void StartupOptions::log() const
@@ -137,6 +137,8 @@ namespace kick::window
     {
         ::setenv( windowModeVariable, toString( windowMode ).toRawUTF8(), 1 );
         ::setenv( rendererVariable, toString( renderer ).toRawUTF8(), 1 );
+        if( debugInput )
+            ::setenv( debugInputVariable, "1", 1 );
     }
 
     StartupOptions StartupOptions::resolve( const juce::StringArray& arguments,
@@ -148,11 +150,18 @@ namespace kick::window
 
         // Only the "--name=value" form: a separate value could not be told
         // apart from the IPC configuration that follows.
-        std::optional<juce::String> windowModeValue, rendererValue;
+        std::optional<juce::String> windowModeValue, rendererValue, debugInputValue;
         for( const auto& argument : arguments )
         {
             const auto name = argument.upToFirstOccurrenceOf( "=", false, false );
             const bool hasValue = argument.containsChar( '=' );
+
+            // A switch: on by itself, or "=1"/"=0".
+            if( name == debugInputOption )
+            {
+                debugInputValue = hasValue ? argument.fromFirstOccurrenceOf( "=", false, false ) : juce::String( "1" );
+                continue;
+            }
 
             if( name == windowModeOption || name == rendererOption )
             {
@@ -188,6 +197,18 @@ namespace kick::window
                 options.showCursor = true;
             else if( text != "0" && text != "false" && text != "no" && text != "off" && text.isNotEmpty() )
                 options.problems.add( "Ignoring " + juce::String( showCursorVariable ) + "=" + *value + ": use 1 or 0" );
+        }
+
+        // The option, else the environment.
+        const auto debugInput = debugInputValue ? debugInputValue
+                                                : ( environment ? environment( debugInputVariable ) : std::nullopt );
+        if( debugInput )
+        {
+            const auto text = normalised( *debugInput );
+            if( text == "1" || text == "true" || text == "yes" || text == "on" )
+                options.debugInput = true;
+            else if( text != "0" && text != "false" && text != "no" && text != "off" && text.isNotEmpty() )
+                options.problems.add( "Ignoring input debugging value " + *debugInput + ": use 1 or 0" );
         }
 
         return options;

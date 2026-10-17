@@ -94,7 +94,7 @@ namespace mt
                 return;
 
             if( isOnDesktop() || getParentComponent() != nullptr )
-                juce::Logger::writeToLog( "Pop-up: moving " + getPopupName() + " into the layout from "
+                ui::tapLog::writeError( "Pop-up: moving " + getPopupName() + " into the layout from "
                                           + ( isOnDesktop() ? juce::String( "a window of its own" ) : popupLog::describe( getParentComponent() ) ) );
             if( isOnDesktop() )
                 removeFromDesktop();
@@ -123,13 +123,13 @@ namespace mt
             setVisible( true );
             toFront( true );
 
-            juce::Logger::writeToLog( "Pop-up: showing " + getPopupName() + " " + describeState() );
+            ui::tapLog::write( "Pop-up: showing " + getPopupName() + " " + describeState() );
 
             // Modal, it takes all the input; unseen, nothing on the screen
             // says so or can close it, and Kick seems to ignore every tap.
             if( !isShowing() || getLocalBounds().isEmpty() )
             {
-                juce::Logger::writeToLog( "Pop-up: ERROR: " + getPopupName() + " cannot be seen (showing "
+                ui::tapLog::writeError( "Pop-up: ERROR: " + getPopupName() + " cannot be seen (showing "
                                           + juce::String( (int)isShowing() ) + ", bounds " + getBounds().toString() + "); not opening it" );
                 reset();
                 if( Callback )
@@ -139,7 +139,7 @@ namespace mt
 
             const auto shown = ++timesShown;
             enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this, shown]( int R ) {
-                                 juce::Logger::writeToLog( "Pop-up: " + getPopupName() + " closed (" + juce::String( R ) + ")" );
+                                 ui::tapLog::write( "Pop-up: " + getPopupName() + " closed (" + juce::String( R ) + ")" );
                                  if( Callback ) Callback( R );
                                  // Not if it has been reset and shown again in
                                  // the meantime: that would hide the new one
@@ -149,7 +149,7 @@ namespace mt
                              } ),
                              false );
 
-            juce::Logger::writeToLog( "Pop-up: " + getPopupName() + ( isCurrentlyModal() ? " is modal" : " is NOT the front modal" )
+            ui::tapLog::write( "Pop-up: " + getPopupName() + ( isCurrentlyModal() ? " is modal" : " is NOT the front modal" )
                                       + " (" + juce::String( getNumCurrentlyModalComponents() ) + " modal), focus on "
                                       + popupLog::describe( getCurrentlyFocusedComponent() ) );
         }
@@ -184,7 +184,7 @@ namespace mt
         // was meant for.
         void inputAttemptWhenModal() override
         {
-            juce::Logger::writeToLog( "Tap: blocked by " + getPopupName() + " (visible " + juce::String( (int)isVisible() )
+            ui::tapLog::write( "Tap: blocked by " + getPopupName() + " (visible " + juce::String( (int)isVisible() )
                                       + ", showing " + juce::String( (int)isShowing() ) + ")" );
 
             // Modal and out of sight, nothing on the screen says so or can
@@ -194,7 +194,7 @@ namespace mt
             // showing when it became modal.)
             if( !isShowing() )
             {
-                juce::Logger::writeToLog( "Pop-up: ERROR: " + getPopupName() + " was modal but cannot be seen; cancelling it" );
+                ui::tapLog::writeError( "Pop-up: ERROR: " + getPopupName() + " was modal but cannot be seen; cancelling it" );
                 exitModalState( UI::CANCEL );
                 return;
             }

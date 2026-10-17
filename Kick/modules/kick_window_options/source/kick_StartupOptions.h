@@ -63,6 +63,8 @@ namespace kick::window
         static constexpr const char* windowModeVariable = "KICK_WINDOW_MODE";
         static constexpr const char* rendererVariable   = "KICK_RENDERER";
         static constexpr const char* showCursorVariable = "KICK_SHOW_CURSOR";
+        static constexpr const char* debugInputOption   = "--debug-input";
+        static constexpr const char* debugInputVariable = "KICK_DEBUG_INPUT";
 
         WindowMode windowMode{ WindowMode::kiosk };
         Renderer   renderer{ Renderer::software };
@@ -71,6 +73,11 @@ namespace kick::window
         // windowed mode; in kiosk mode (a touch screen) only when
         // KICK_SHOW_CURSOR is 1 (or true, yes, on).
         bool showCursor{ false };
+
+        // Whether every tap and the pop-ups' and lists' decisions go to the
+        // log, for finding input problems: --debug-input (or
+        // --debug-input=1), or KICK_DEBUG_INPUT=1. Off by default.
+        bool debugInput{ false };
 
         // Where each choice came from, for the log.
         juce::String windowModeSource;

@@ -26,7 +26,7 @@ namespace ui
         // while it is written here.
         if( isThreadRunning() )
         {
-            ui::tapLog::write( "Tap: a project is still loading; not loading " + project.getFullPathName() );
+            ui::tapLog::writeError( "Tap: a project is still loading; not loading " + project.getFullPathName() );
             return;
         }
 
