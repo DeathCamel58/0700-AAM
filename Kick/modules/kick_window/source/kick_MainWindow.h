@@ -77,6 +77,9 @@ namespace kick::window
     private:
         class OpenGLWatch;
 
+        // The displays' user areas (on Linux, all of each display).
+        static juce::Array<juce::Rectangle<int>> getDisplayAreas();
+
         void openKiosk();
         void openWindowed();
         void attachOpenGL();

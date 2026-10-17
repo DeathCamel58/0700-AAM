@@ -32,6 +32,49 @@ namespace kick::window
         // How much of the window must be on a display for it to be found
         // and moved again.
         constexpr int minimumVisible = 64;
+
+        // Where a window's frame may be on a display.
+        juce::Rectangle<int> usableArea( juce::Rectangle<int> display )
+        {
+            return display.withTrimmedTop( juce::jmin( displayTopReserve, display.getHeight() / 4 ) );
+        }
+
+        // A window with its frame, from where it asks to be (the frame's
+        // top-left corner) and its client area's size.
+        juce::Rectangle<int> withFrame( juce::Rectangle<int> bounds )
+        {
+            return bounds.withSize( bounds.getWidth() + assumedWindowFrame.getLeftAndRight(),
+                                    bounds.getHeight() + assumedWindowFrame.getTopAndBottom() );
+        }
+
+        // The widest client area with the layout's aspect ratio whose frame
+        // fits in the area.
+        int widthThatFits( juce::Rectangle<int> area, juce::Point<int> layoutSize )
+        {
+            const auto width  = area.getWidth() - assumedWindowFrame.getLeftAndRight();
+            const auto height = area.getHeight() - assumedWindowFrame.getTopAndBottom();
+            return juce::jmin( width, (int)( (double)height * layoutSize.x / layoutSize.y ) );
+        }
+
+        // Moves the window so that its frame is inside the area (its
+        // top-left corner, if it is larger).
+        juce::Rectangle<int> moveInside( juce::Rectangle<int> bounds, juce::Rectangle<int> area )
+        {
+            const auto outer = withFrame( bounds );
+            const auto x     = juce::jmax( area.getX(), juce::jmin( outer.getX(), area.getRight() - outer.getWidth() ) );
+            const auto y     = juce::jmax( area.getY(), juce::jmin( outer.getY(), area.getBottom() - outer.getHeight() ) );
+            return bounds.withPosition( x, y );
+        }
+    }
+
+    bool fillsADisplay( juce::Rectangle<int> bounds, const juce::Array<juce::Rectangle<int>>& displayAreas )
+    {
+        for( const auto& area : displayAreas )
+        {
+            if( !area.isEmpty() && bounds.contains( area ) )
+                return true;
+        }
+        return false;
     }
 
     Letterbox computeLetterbox( juce::Rectangle<int> area, juce::Rectangle<int> layout )
@@ -106,28 +149,46 @@ namespace kick::window
         if( layoutSize.x <= 0 || layoutSize.y <= 0 )
             return {};
 
-        if( saved.has_value() && saved->getWidth() >= minimumSize.x )
+        if( saved.has_value() && saved->getWidth() >= minimumSize.x && !fillsADisplay( *saved, displayAreas ) )
         {
             const auto bounds = saved->withHeight( heightForWidth( saved->getWidth(), layoutSize ) );
+
+            // The display most of it is on.
+            juce::Rectangle<int> display, visible;
             for( const auto& area : displayAreas )
             {
-                const auto visible = bounds.getIntersection( area );
-                if( visible.getWidth() >= minimumVisible && visible.getHeight() >= minimumVisible )
-                    return bounds;
+                const auto onArea = withFrame( bounds ).getIntersection( area );
+                if( (int64_t)onArea.getWidth() * onArea.getHeight() > (int64_t)visible.getWidth() * visible.getHeight() )
+                {
+                    display = area;
+                    visible = onArea;
+                }
+            }
+
+            if( visible.getWidth() >= minimumVisible && visible.getHeight() >= minimumVisible )
+            {
+                const auto usable = usableArea( display );
+                const auto width  = juce::jmax( minimumSize.x, juce::jmin( bounds.getWidth(), widthThatFits( usable, layoutSize ) ) );
+                return moveInside( bounds.withSize( width, heightForWidth( width, layoutSize ) ), usable );
             }
         }
 
-        // The layout's size, or what fits in 90% of the display.
+        // The layout's size, or 90% of what fits on the display.
         auto width = layoutSize.x;
         if( !preferredArea.isEmpty() )
         {
-            width = juce::jmin( width,
-                                preferredArea.getWidth() * 9 / 10,
-                                (int)( (double)preferredArea.getHeight() * 0.9 * layoutSize.x / layoutSize.y ) );
+            const auto fits = widthThatFits( usableArea( preferredArea ), layoutSize );
+            if( fits < width )
+                width = fits * 9 / 10;
         }
         width = juce::jmax( width, minimumSize.x );
 
         const auto size = juce::Rectangle<int>( width, heightForWidth( width, layoutSize ) );
-        return preferredArea.isEmpty() ? size : size.withCentre( preferredArea.getCentre() );
+        if( preferredArea.isEmpty() )
+            return size;
+
+        // Centred with its frame, and on the display if it is too large.
+        const auto usable = usableArea( preferredArea );
+        return moveInside( size.withPosition( withFrame( size ).withCentre( usable.getCentre() ).getPosition() ), usable );
     }
 }

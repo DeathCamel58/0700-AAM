@@ -275,44 +275,98 @@ namespace
         CHECK( !kick::window::parseWindowBounds( "- 2 3 4" ).has_value() );
     }
 
+    // The window with the frame it is placed with (chooseWindowBounds()
+    // gives the frame's top-left corner and the client area's size).
+    juce::Rectangle<int> withAssumedFrame( juce::Rectangle<int> bounds )
+    {
+        const auto& frame = kick::window::assumedWindowFrame;
+        return bounds.withSize( bounds.getWidth() + frame.getLeftAndRight(), bounds.getHeight() + frame.getTopAndBottom() );
+    }
+
+    // Where a window's frame must be on a display: on it, below the panel.
+    bool reachable( juce::Rectangle<int> bounds, juce::Rectangle<int> display )
+    {
+        return display.withTrimmedTop( kick::window::displayTopReserve ).contains( withAssumedFrame( bounds ) );
+    }
+
     void testWindowBounds()
     {
         const juce::Point<int>                  size( 1024, 600 ), minimum( 512, 300 );
         const juce::Rectangle<int>              primary( 0, 0, 1920, 1050 ), secondary( 1920, 0, 1280, 1024 );
         const juce::Array<juce::Rectangle<int>> displays{ primary, secondary };
 
-        // Nothing saved: the layout's size, centred on the display.
+        // Nothing saved: the layout's size, centred on the display with its
+        // frame, below the panel.
         auto bounds = kick::window::chooseWindowBounds( std::nullopt, displays, primary, size, minimum );
         CHECK( bounds.getWidth() == 1024 && bounds.getHeight() == 600 );
-        CHECK( bounds.getCentre() == primary.getCentre() );
+        CHECK( reachable( bounds, primary ) );
+        CHECK( std::abs( withAssumedFrame( bounds ).getCentreX() - primary.getCentreX() ) <= 1 );
 
         // On the second display.
         bounds = kick::window::chooseWindowBounds( std::nullopt, displays, secondary, size, minimum );
-        CHECK( secondary.contains( bounds ) );
+        CHECK( reachable( bounds, secondary ) );
 
-        // A display smaller than the layout: 90% of it, same aspect ratio.
+        // The QEMU display (1280x800, Weston's panel at the top): the layout's
+        // size, the title bar below the panel and the frame on the display.
+        const juce::Rectangle<int> qemu( 0, 0, 1280, 800 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        CHECK( reachable( bounds, qemu ) );
+
+        // The device's display: smaller than the layout with a frame, so 90%
+        // of what fits, at the same aspect ratio.
+        const juce::Rectangle<int> device( 0, 0, 1024, 600 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { device }, device, size, minimum );
+        CHECK( reachable( bounds, device ) );
+        CHECK( bounds.getWidth() == 804 ); // 90% of (600 - 32 - 44) * 1024 / 600 = 894
+        CHECK( bounds.getHeight() == 471 );
+
+        // A display smaller than the layout: 90% of what fits.
         const juce::Rectangle<int> small( 0, 0, 800, 480 );
         bounds = kick::window::chooseWindowBounds( std::nullopt, { small }, small, size, minimum );
-        CHECK( small.contains( bounds ) );
-        CHECK( bounds.getWidth() == 720 );
-        CHECK( bounds.getHeight() == 422 ); // 720 * 600 / 1024 = 421.9
+        CHECK( reachable( bounds, small ) );
+        CHECK( bounds.getWidth() == 620 ); // 90% of (480 - 32 - 44) * 1024 / 600 = 689
+        CHECK( bounds.getHeight() == 363 );
 
-        // Never below the minimum.
+        // Never below the minimum, on the display's top-left corner if it
+        // does not fit.
         const juce::Rectangle<int> tiny( 0, 0, 320, 240 );
         bounds = kick::window::chooseWindowBounds( std::nullopt, { tiny }, tiny, size, minimum );
-        CHECK( bounds.getWidth() == 512 && bounds.getHeight() == 300 );
+        CHECK( bounds == juce::Rectangle<int>( 0, 32, 512, 300 ) );
 
         // Saved bounds on a display are used, with the aspect ratio kept.
-        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 1000 ), displays, primary, size, minimum );
-        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1536, 900 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1024, 640 ), displays, primary, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1024, 600 ) );
 
-        // Mostly off screen, but a corner still reachable: kept.
+        // Larger than the display they are on: as large as fits, on it.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 900 ), displays, primary, size, minimum );
+        CHECK( reachable( bounds, secondary ) );
+        CHECK( bounds.getWidth() == 1272 ); // 1280 - 8
+        CHECK( bounds.getHeight() == 745 );
+
+        // Partly off the display or under the panel: moved onto it.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 1800, 900, 1024, 600 ), { primary }, primary, size, minimum );
-        CHECK( bounds.getPosition() == juce::Point<int>( 1800, 900 ) );
+        CHECK( bounds.getWidth() == 1024 && reachable( bounds, primary ) );
+        CHECK( bounds.getPosition() == juce::Point<int>( 1920 - 1032, 1050 - 644 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( -160, 0, 1024, 600 ), { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 0, 32, 1024, 600 ) );
+
+        // The bounds of a window the shell made full screen (Weston's kiosk
+        // shell): not the window's own, so the default instead, as for
+        // bounds that cover the display under the panel.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 0, 0, 1280, 800 ), { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 0, 0, 1280, 750 ), { qemu }, qemu, size, minimum );
+        CHECK( reachable( bounds, qemu ) );
+        CHECK( kick::window::fillsADisplay( { 0, 0, 1280, 800 }, { qemu } ) );
+        CHECK( kick::window::fillsADisplay( { -4, -40, 1300, 900 }, { qemu } ) );
+        CHECK( !kick::window::fillsADisplay( { 0, 0, 1280, 750 }, { qemu } ) );
+        CHECK( !kick::window::fillsADisplay( { 0, 0, 1280, 800 }, {} ) );
 
         // On a display that is gone: centred on the current one instead.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 3500, 100, 1024, 600 ), { primary }, primary, size, minimum );
-        CHECK( bounds.getCentre() == primary.getCentre() );
+        CHECK( std::abs( withAssumedFrame( bounds ).getCentreX() - primary.getCentreX() ) <= 1 );
+        CHECK( reachable( bounds, primary ) );
 
         // Too small to be valid: the default.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 10, 10, 100, 60 ), displays, primary, size, minimum );

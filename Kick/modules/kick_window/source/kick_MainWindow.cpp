@@ -110,7 +110,8 @@ namespace kick::window
         // While the components it paints still exist.
         detachOpenGL();
 
-        if( options.windowMode == WindowMode::windowed && options.saveBounds && !isMinimised() && !isFullScreen() )
+        if( options.windowMode == WindowMode::windowed && options.saveBounds && !isMinimised() && !isFullScreen()
+            && !fillsADisplay( getBounds(), getDisplayAreas() ) )
             options.saveBounds( formatWindowBounds( getBounds() ) );
 
         clearContentComponent();
@@ -142,23 +143,27 @@ namespace kick::window
         setResizeLimits( minimum.x, minimum.y, layout.getWidth() * 8, layout.getHeight() * 8 );
         getConstrainer()->setFixedAspectRatio( (double)layout.getWidth() / (double)layout.getHeight() );
 
-        const auto&                       displays = juce::Desktop::getInstance().getDisplays();
-        juce::Array<juce::Rectangle<int>> displayAreas;
-        for( const auto& display : displays.displays )
-            displayAreas.add( display.userArea );
-
         juce::Rectangle<int> preferredArea;
-        if( auto* display = displays.getDisplayForPoint( juce::Desktop::getMousePosition() ) )
+        if( auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForPoint( juce::Desktop::getMousePosition() ) )
             preferredArea = display->userArea;
 
         std::optional<juce::Rectangle<int>> saved;
         if( options.loadBounds )
             saved = parseWindowBounds( options.loadBounds() );
 
-        setBounds( chooseWindowBounds( saved, displayAreas, preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
+        setBounds( chooseWindowBounds( saved, getDisplayAreas(), preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
 
         addToDesktop();
+        detail::askForPosition( *this );
         setVisible( true );
+    }
+
+    juce::Array<juce::Rectangle<int>> MainWindow::getDisplayAreas()
+    {
+        juce::Array<juce::Rectangle<int>> areas;
+        for( const auto& display : juce::Desktop::getInstance().getDisplays().displays )
+            areas.add( display.userArea );
+        return areas;
     }
 
     void MainWindow::attachOpenGL()

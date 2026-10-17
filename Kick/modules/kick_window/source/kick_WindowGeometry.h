@@ -53,10 +53,34 @@ namespace kick::window
     juce::String                        formatWindowBounds( juce::Rectangle<int> bounds );
     std::optional<juce::Rectangle<int>> parseWindowBounds( const juce::String& text );
 
-    // Where a desktop window showing the layout opens: at its saved bounds
-    // (with the layout's aspect ratio) when they are large enough and on a
-    // display; otherwise at the layout's size, smaller if the display is,
-    // centred in preferredArea (the display under the mouse).
+    // The room the window manager's frame takes around a desktop window's
+    // client area (the title bar at the top). The real frame is only known
+    // once the window is shown, so windows are placed as if they had this
+    // one.
+    inline const juce::BorderSize<int> assumedWindowFrame{ 40, 4, 4, 4 };
+
+    // Kept free at the top of a display for a panel, such as the one of
+    // Weston's desktop shell: on Linux JUCE's user area of a display is all
+    // of it, and Weston publishes no work area, so a window at the top of
+    // the display would have its title bar under the panel, out of reach.
+    constexpr int displayTopReserve = 32;
+
+    // Whether a desktop window's client area covers a whole display: the
+    // shell made it full screen (Weston's kiosk shell does that to every
+    // window). Such bounds are not the window's own and are not kept.
+    bool fillsADisplay( juce::Rectangle<int>                      bounds,
+                        const juce::Array<juce::Rectangle<int>>& displayAreas );
+
+    // Where a desktop window showing the layout opens. Window managers put
+    // the top-left corner of a window's frame where the window asks to be,
+    // so the result is that corner, with the client area's size; the frame
+    // (assumedWindowFrame) is kept inside the display, below
+    // displayTopReserve, so that the title bar can be reached.
+    // At the saved bounds (with the layout's aspect ratio) when they are
+    // large enough and on a display, made smaller if they do not fit on it
+    // and moved onto it; otherwise at the layout's size, or 90% of what
+    // fits if the display is smaller, centred in preferredArea (the display
+    // under the mouse).
     juce::Rectangle<int> chooseWindowBounds( std::optional<juce::Rectangle<int>> saved,
                                              const juce::Array<juce::Rectangle<int>>& displayAreas,
                                              juce::Rectangle<int>                      preferredArea,
