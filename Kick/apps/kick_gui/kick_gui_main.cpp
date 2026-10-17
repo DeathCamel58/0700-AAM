@@ -35,6 +35,8 @@
 #include "contracts/main/system_ipc_helpers.h"
 #include "contracts/main/system_signals.h"
 
+#include <kick_window_options/kick_window_options.h>
+
 //#define ENABLE_X11_FULLSCREEN (0)
 //
 //#if defined( ENABLE_X11_FULLSCREEN ) && ( 0 < ENABLE_X11_FULLSCREEN )
@@ -128,9 +130,12 @@ public:
     }
 
     //==============================================================================
-    void initialise( const juce::String& commandLine ) override
+    void initialise( const juce::String& ) override
     {
-        IPCApplication::initialise( commandLine );
+        // The window options are not part of the IPC configuration.
+        windowOptions = kick::window::StartupOptions::fromProcess( getCommandLineParameterArray() );
+        IPCApplication::initialise( windowOptions.getCommandLine() );
+        windowOptions.log();
 
         dclInterface.reset( new contracts::DclIPCInterface( dispatcher(), contracts::ConnectionIdStore::DCL_CONNECTION_ID ) );
         audioEngineInterface.reset( new contracts::AudioEngineIPCInterface( dispatcher(), contracts::ConnectionIdStore::ENGINE_CONNECTION_ID ) );
@@ -270,6 +275,7 @@ public:
     };
 
 private:
+   kick::window::StartupOptions                windowOptions;
    std::unique_ptr<juce::DocumentWindow>       w{ nullptr };
    std::unique_ptr<contracts::DclIPCInterface> dclInterface{ nullptr }; // create this to enable handling sendCommandToDcl signal.
    std::unique_ptr<contracts::AudioEngineIPCInterface> audioEngineInterface{ nullptr };

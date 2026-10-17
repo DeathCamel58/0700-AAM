@@ -15,6 +15,7 @@ juce_add_modules(
     program_edit_ui
     kick_ui_settings
     kick_leds
+    kick_window_options
 	ipc
 	contracts
 )

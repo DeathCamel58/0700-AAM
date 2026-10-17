@@ -27,6 +27,8 @@
 
 #include "contracts/utils/app/termination_signals.h"
 
+#include <kick_window_options/kick_window_options.h>
+
 #include <csignal>
 
 #ifdef PERFETTO
@@ -143,6 +145,9 @@ public:
     //==============================================================================
     void initialise( const juce::String& /*commandLine*/ ) override
     {
+        windowOptions = kick::window::StartupOptions::fromProcess( getCommandLineParameterArray() );
+        windowOptions.log();
+
         // Without a display (no X server, or DISPLAY not set) there is no
         // primary display, and the window code dereferences it. Fail with a
         // clear message instead.
@@ -269,6 +274,7 @@ public:
     };
 
 private:
+    kick::window::StartupOptions          windowOptions;
     std::unique_ptr<juce::DocumentWindow> w;
     std::unique_ptr<KickDeviceAdapter>    adapter;
     std::unique_ptr<KickAudioEngineAdapter>    engineAdapter;

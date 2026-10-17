@@ -123,6 +123,7 @@ target_link_libraries(${TargetName}
         juce::juce_gui_basics
 		ipc
 		contracts
+		kick_window_options
 		PktMgr
 		signal
 )

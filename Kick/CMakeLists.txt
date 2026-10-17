@@ -176,6 +176,25 @@ add_compile_definitions(
 set(KICK_WPA_CTRL_DIR "/var/run/wpa_supplicant" CACHE PATH "wpa_supplicant control interface directory")
 add_compile_definitions(KICK_WPA_CTRL_DIR="${KICK_WPA_CTRL_DIR}")
 
+## How the user interface starts (kick_StartupOptions.h): a kiosk window
+## covering the display or a desktop window, painted by JUCE's software
+## renderer or with OpenGL. KICK_WINDOW_MODE, KICK_RENDERER and the
+## --window-mode=, --renderer= options override them at run time.
+set(KICK_DEFAULT_WINDOW_MODE "kiosk"    CACHE STRING "Default window mode: kiosk or windowed")
+set(KICK_DEFAULT_RENDERER    "software" CACHE STRING "Default renderer: software or opengl")
+set_property(CACHE KICK_DEFAULT_WINDOW_MODE PROPERTY STRINGS kiosk windowed)
+set_property(CACHE KICK_DEFAULT_RENDERER    PROPERTY STRINGS software opengl)
+if(NOT KICK_DEFAULT_WINDOW_MODE MATCHES "^(kiosk|windowed)$")
+    message(FATAL_ERROR "KICK_DEFAULT_WINDOW_MODE must be kiosk or windowed, not \"${KICK_DEFAULT_WINDOW_MODE}\"")
+endif()
+if(NOT KICK_DEFAULT_RENDERER MATCHES "^(software|opengl)$")
+    message(FATAL_ERROR "KICK_DEFAULT_RENDERER must be software or opengl, not \"${KICK_DEFAULT_RENDERER}\"")
+endif()
+add_compile_definitions(
+    KICK_DEFAULT_WINDOW_MODE="${KICK_DEFAULT_WINDOW_MODE}"
+    KICK_DEFAULT_RENDERER="${KICK_DEFAULT_RENDERER}"
+)
+
 ## CMake package management...
 ## Fetch 3rd Party dependencies from their respective git repositories...
 include(3rdParty.cmake)
