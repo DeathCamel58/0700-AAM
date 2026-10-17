@@ -50,6 +50,10 @@ namespace contracts
     {
     public:
         static bool isShiftPressed();
+        // Hands a front-panel event (from KickDeviceControl, or the keyboard
+        // emulating the panel) to DclSignals::hardwareInputTriggered, after
+        // noting the Shift button's state for isShiftPressed().
+        static void dispatchHardwareInput( CPktMgr::HWMsg_t& hwMsg );
         static void setHalfLevel( bool state );
         static bool isHalfLevel();
         static bool isButtonMessage( const CPktMgr::HWMsg_t& hwMsg );

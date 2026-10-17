@@ -25,6 +25,7 @@
 #include "ipc/utils/mt_ipc_json.h"
 #include "ipc/utils/mt_ipc_message_constructor.h"
 #include "dcl_contracts.h"
+#include "dcl_signals.h"
 
 namespace contracts
 {
@@ -32,6 +33,13 @@ namespace contracts
     std::atomic<bool> halfLevelState{ false };
 
     bool DclContractsHelper::isShiftPressed() { return shiftBtnState.load(); }
+    void DclContractsHelper::dispatchHardwareInput( CPktMgr::HWMsg_t& hwMsg )
+    {
+        if( isButtonMessage( hwMsg ) && hwMsg.data.size() >= 2 && getButtonCode( hwMsg ) == DeviceControlContracts::EN_SHIFT )
+            shiftBtnState.store( getButtonState( hwMsg ) == DeviceControlContracts::BTN_PRESSED );
+
+        DclSignals::hardwareInputTriggered( hwMsg );
+    }
     void DclContractsHelper::setHalfLevel( bool state ) { halfLevelState.store( state ); }
     bool DclContractsHelper::isHalfLevel() { return halfLevelState.load(); }
     bool DclContractsHelper::isButtonMessage( const CPktMgr::HWMsg_t& hwMsg ) { return ( hwMsg.pktType == CPktMgr::enumPacketType::EN_PKT_TYPE_BUTTON ) && ( hwMsg.pktCmd == contracts::DeviceControlContracts::BtnCmd::EN_BTN_STATUS ); }
