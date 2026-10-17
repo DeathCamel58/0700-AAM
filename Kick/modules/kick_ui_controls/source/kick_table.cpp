@@ -393,6 +393,16 @@ namespace ui
         }
         endLabelInfo.setVisible( bEndLabelEnabled );
         canvas.setSize( canvas.rowWidth, canvas.getRowY( num ) );
+
+        // The empty-state text depends on the number of rows.
+        if( emptyText.isNotEmpty() )
+            repaint();
+    }
+
+    void KickTableView::setEmptyText( const juce::String& Text )
+    {
+        emptyText = Text;
+        repaint();
     }
 
     void KickTableView::visibilityChanged()
@@ -621,6 +631,10 @@ namespace ui
     void KickTableView::paint( juce::Graphics& g )
     {
         g.fillAll( canvas.backgroundColor );
+
+        // Behind the (then empty) viewport.
+        if( emptyText.isNotEmpty() && canvas.numRows == 0 )
+            mt::utils::renderText( g, emptyText, viewPort.getBounds().reduced( 20 ), ui::Theme::textColour( 3 ), juce::Justification::centred, 20.f );
     }
 
     void KickTableView::KickComponent::paint( juce::Graphics& g )

@@ -138,6 +138,10 @@ namespace kick_ui
         mt::utils::addAndMakeVisible( this, tBar );
         mt::utils::addChildComponents( this, pSeq.get(), pTrack.get(), pProg.get(), seqoptions, trackoptions, prgOptions );
 
+        pSeq->setEmptyText( TRANS( "No sequences yet. Tap + to add one." ) );
+        pTrack->setEmptyText( TRANS( "No tracks yet. Tap + to add one." ) );
+        pProg->setEmptyText( TRANS( "No programs yet. Tap + to add one." ) );
+
         mt::utils::setValueColour( ui::Theme::textColour( 1 ), tabButtons[0], tabButtons[1], tabButtons[2] );
         mt::utils::setValueFontHeight( 18, tabButtons[0], tabButtons[1], tabButtons[2] );
 
