@@ -197,7 +197,8 @@ namespace mt
         void setup( juce::ValueTree VT, juce::UndoManager* Undo );
         bool isValid();
 
-        // The desktop window's position and size, "x y width height";
+        // The desktop window's position (its frame's top-left corner) and
+        // size (its client area's), "x y width height";
         // empty: centred on the display.
         AtomicString bounds;
 

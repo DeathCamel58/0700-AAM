@@ -101,6 +101,8 @@ namespace kick::window
         else
             openKiosk();
 
+        detail::setDefaultCursor( options.showCursor, options.windowMode == WindowMode::kiosk );
+
         if( options.renderer == Renderer::openGL )
             attachOpenGL();
     }
@@ -110,8 +112,15 @@ namespace kick::window
         // While the components it paints still exist.
         detachOpenGL();
 
-        if( options.windowMode == WindowMode::windowed && options.saveBounds && !isMinimised() && !isFullScreen() )
-            options.saveBounds( formatWindowBounds( getBounds() ) );
+        // Whatever has not been saved yet: the process is quitting (the
+        // window was closed, or SIGTERM, or KickMain's exit message).
+        if( options.windowMode == WindowMode::windowed )
+        {
+            boundsSaveTimer.stopTimer();
+            noteBounds();
+            if( const auto bounds = boundsSaving.flush() )
+                saveBounds( *bounds );
+        }
 
         clearContentComponent();
     }
@@ -142,23 +151,32 @@ namespace kick::window
         setResizeLimits( minimum.x, minimum.y, layout.getWidth() * 8, layout.getHeight() * 8 );
         getConstrainer()->setFixedAspectRatio( (double)layout.getWidth() / (double)layout.getHeight() );
 
-        const auto&                       displays = juce::Desktop::getInstance().getDisplays();
-        juce::Array<juce::Rectangle<int>> displayAreas;
-        for( const auto& display : displays.displays )
-            displayAreas.add( display.userArea );
-
         juce::Rectangle<int> preferredArea;
-        if( auto* display = displays.getDisplayForPoint( juce::Desktop::getMousePosition() ) )
+        if( auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForPoint( juce::Desktop::getMousePosition() ) )
             preferredArea = display->userArea;
 
         std::optional<juce::Rectangle<int>> saved;
         if( options.loadBounds )
-            saved = parseWindowBounds( options.loadBounds() );
+        {
+            const auto text = options.loadBounds();
+            boundsSaving.setSaved( text );
+            saved = parseWindowBounds( text );
+        }
 
-        setBounds( chooseWindowBounds( saved, displayAreas, preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
+        setBounds( chooseWindowBounds( saved, getDisplayAreas(), preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
 
         addToDesktop();
+        detail::askForPosition( *this );
+        settledBounds = getBounds();
         setVisible( true );
+    }
+
+    juce::Array<juce::Rectangle<int>> MainWindow::getDisplayAreas()
+    {
+        juce::Array<juce::Rectangle<int>> areas;
+        for( const auto& display : juce::Desktop::getInstance().getDisplays().displays )
+            areas.add( display.userArea );
+        return areas;
     }
 
     void MainWindow::attachOpenGL()
@@ -203,6 +221,89 @@ namespace kick::window
                 safeThis->host.repaint();
             }
         } );
+    }
+
+    void MainWindow::moved()
+    {
+        juce::DocumentWindow::moved();
+        noteBounds();
+    }
+
+    void MainWindow::resized()
+    {
+        // The scaled host, the content component, follows the window.
+        juce::DocumentWindow::resized();
+
+        if( options.windowMode == WindowMode::windowed && isOnDesktop() )
+            aspectCheck.startTimer( aspectCheckDelayInMS );
+        noteBounds();
+    }
+
+    void MainWindow::noteBounds()
+    {
+        auto* peer = getPeer();
+        if( options.windowMode != WindowMode::windowed || !options.saveBounds || peer == nullptr )
+            return;
+
+        // Not bounds the window keeps when it is shown again.
+        if( isMinimised() || isFullScreen() || fillsADisplay( getBounds(), getDisplayAreas() ) )
+            return;
+
+        // The window manager's frame is known once the window is shown.
+        boundsSaving.changed( formatWindowBounds( windowBoundsToSave( getBounds(), peer->getFrameSize() ) ),
+                              juce::Time::getMillisecondCounter() );
+        if( boundsSaving.isWaiting() )
+            boundsSaveTimer.startTimer( boundsSaveDelayInMS );
+        else
+            boundsSaveTimer.stopTimer();
+    }
+
+    void MainWindow::saveBoundsWhenDue()
+    {
+        boundsSaveTimer.stopTimer();
+
+        const auto now = juce::Time::getMillisecondCounter();
+        if( const auto bounds = boundsSaving.takeDue( now ) )
+            saveBounds( *bounds );
+        else if( boundsSaving.isWaiting() )
+            boundsSaveTimer.startTimer( juce::jmax( 1, boundsSaving.getTimeUntilDue( now ) ) );
+    }
+
+    void MainWindow::saveBounds( const juce::String& bounds )
+    {
+        juce::Logger::writeToLog( "Window: saving its bounds (" + bounds + ")" );
+        options.saveBounds( bounds );
+    }
+
+    void MainWindow::keepAspectRatio()
+    {
+        aspectCheck.stopTimer();
+
+        const auto bounds = getBounds();
+        if( isMinimised() || isFullScreen() || fillsADisplay( bounds, getDisplayAreas() ) )
+        {
+            settledBounds = bounds;
+            return;
+        }
+
+        auto*      constrainer = getConstrainer();
+        const auto layout      = host.getLayoutBounds();
+        const auto wanted      = kick::window::keepAspectRatio( bounds, settledBounds, { layout.getWidth(), layout.getHeight() },
+                                                                { constrainer->getMinimumWidth(), constrainer->getMinimumHeight() },
+                                                                { constrainer->getMaximumWidth(), constrainer->getMaximumHeight() } );
+
+        // At the aspect ratio, or the window manager keeps this size (a
+        // tiled or maximised window): the host letterboxes the layout.
+        if( wanted == bounds || ( bounds.getWidth() == correctedFrom.getWidth() && bounds.getHeight() == correctedFrom.getHeight() ) )
+        {
+            settledBounds = bounds;
+            if( wanted == bounds )
+                correctedFrom = {};
+            return;
+        }
+
+        correctedFrom = bounds;
+        setBounds( wanted );
     }
 
     void MainWindow::closeButtonPressed()

@@ -49,8 +49,13 @@ namespace kick::window
             WindowMode windowMode{ WindowMode::kiosk };
             Renderer   renderer{ Renderer::software };
 
+            // Whether the mouse pointer shows where Kick does not ask for a
+            // particular one (StartupOptions::showCursor).
+            bool showCursor{ true };
+
             // The saved bounds (formatWindowBounds()), read when the
-            // windowed window opens and written when it is destroyed.
+            // windowed window opens, and written a second after it is moved
+            // or resized and when it is destroyed.
             std::function<juce::String()>             loadBounds;
             std::function<void( const juce::String& )> saveBounds;
 
@@ -68,6 +73,8 @@ namespace kick::window
         MainWindow( const juce::String& name, juce::Component& content, Options options );
         ~MainWindow() override;
 
+        void moved() override;
+        void resized() override;
         void closeButtonPressed() override;
         void inputAttemptWhenModal() override;
 
@@ -77,6 +84,19 @@ namespace kick::window
     private:
         class OpenGLWatch;
 
+        // The displays' user areas (on Linux, all of each display).
+        static juce::Array<juce::Rectangle<int>> getDisplayAreas();
+
+        // Gives a desktop window the layout's aspect ratio again after the
+        // window manager resized it (JUCE only passes the constrainer's
+        // minimum and maximum size on to it on Linux).
+        void keepAspectRatio();
+
+        // Notes the desktop window's bounds, to save them once they settle.
+        void noteBounds();
+        void saveBoundsWhenDue();
+        void saveBounds( const juce::String& bounds );
+
         void openKiosk();
         void openWindowed();
         void attachOpenGL();
@@ -85,6 +105,19 @@ namespace kick::window
 
         Options    options;
         ScaledHost host;
+
+        // Once a resize has settled.
+        static constexpr int aspectCheckDelayInMS = 150;
+        juce::TimedCallback  aspectCheck{ [this]() { keepAspectRatio(); } };
+        // The bounds after the last resize that settled, and the size the
+        // window had when it was last given the aspect ratio (the window
+        // manager may give it back: the window is then left letterboxed).
+        juce::Rectangle<int> settledBounds;
+        juce::Rectangle<int> correctedFrom;
+
+        static constexpr int boundsSaveDelayInMS = 1000;
+        BoundsSaving         boundsSaving{ boundsSaveDelayInMS };
+        juce::TimedCallback  boundsSaveTimer{ [this]() { saveBoundsWhenDue(); } };
 
         std::unique_ptr<OpenGLWatch>         openGLWatch;
         std::unique_ptr<juce::OpenGLContext> openGLContext;

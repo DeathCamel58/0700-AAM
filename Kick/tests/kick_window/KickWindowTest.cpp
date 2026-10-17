@@ -107,6 +107,38 @@ namespace
         CHECK( options.problems.size() == 1 );
     }
 
+    void testCursor()
+    {
+        // Windowed: the pointer shows, whatever the variable says.
+        auto options = resolve( {}, { { "KICK_WINDOW_MODE", "windowed" } } );
+        CHECK( options.showCursor );
+        options = resolve( {}, { { "KICK_WINDOW_MODE", "windowed" }, { "KICK_SHOW_CURSOR", "0" } } );
+        CHECK( options.showCursor );
+
+        // Kiosk (a touch screen): hidden, unless KICK_SHOW_CURSOR says so.
+        options = resolve( {} );
+        CHECK( !options.showCursor );
+        CHECK( options.describe().endsWith( "mouse pointer hidden" ) );
+        for( const auto* value : { "1", "true", "YES", " on " } )
+        {
+            options = resolve( {}, { { "KICK_SHOW_CURSOR", value } } );
+            CHECK( options.showCursor );
+            CHECK( options.problems.isEmpty() );
+            CHECK( options.describe().endsWith( "mouse pointer shown" ) );
+        }
+        for( const auto* value : { "0", "false", "no", "off", "" } )
+        {
+            options = resolve( {}, { { "KICK_SHOW_CURSOR", value } } );
+            CHECK( !options.showCursor );
+            CHECK( options.problems.isEmpty() );
+        }
+
+        // Not understood: hidden, and a problem to log.
+        options = resolve( {}, { { "KICK_SHOW_CURSOR", "sometimes" } } );
+        CHECK( !options.showCursor );
+        CHECK( options.problems.size() == 1 );
+    }
+
     void testPrecedence()
     {
         // The environment overrides the build default.
@@ -275,44 +307,98 @@ namespace
         CHECK( !kick::window::parseWindowBounds( "- 2 3 4" ).has_value() );
     }
 
+    // The window with the frame it is placed with (chooseWindowBounds()
+    // gives the frame's top-left corner and the client area's size).
+    juce::Rectangle<int> withAssumedFrame( juce::Rectangle<int> bounds )
+    {
+        const auto& frame = kick::window::assumedWindowFrame;
+        return bounds.withSize( bounds.getWidth() + frame.getLeftAndRight(), bounds.getHeight() + frame.getTopAndBottom() );
+    }
+
+    // Where a window's frame must be on a display: on it, below the panel.
+    bool reachable( juce::Rectangle<int> bounds, juce::Rectangle<int> display )
+    {
+        return display.withTrimmedTop( kick::window::displayTopReserve ).contains( withAssumedFrame( bounds ) );
+    }
+
     void testWindowBounds()
     {
         const juce::Point<int>                  size( 1024, 600 ), minimum( 512, 300 );
         const juce::Rectangle<int>              primary( 0, 0, 1920, 1050 ), secondary( 1920, 0, 1280, 1024 );
         const juce::Array<juce::Rectangle<int>> displays{ primary, secondary };
 
-        // Nothing saved: the layout's size, centred on the display.
+        // Nothing saved: the layout's size, centred on the display with its
+        // frame, below the panel.
         auto bounds = kick::window::chooseWindowBounds( std::nullopt, displays, primary, size, minimum );
         CHECK( bounds.getWidth() == 1024 && bounds.getHeight() == 600 );
-        CHECK( bounds.getCentre() == primary.getCentre() );
+        CHECK( reachable( bounds, primary ) );
+        CHECK( std::abs( withAssumedFrame( bounds ).getCentreX() - primary.getCentreX() ) <= 1 );
 
         // On the second display.
         bounds = kick::window::chooseWindowBounds( std::nullopt, displays, secondary, size, minimum );
-        CHECK( secondary.contains( bounds ) );
+        CHECK( reachable( bounds, secondary ) );
 
-        // A display smaller than the layout: 90% of it, same aspect ratio.
+        // The QEMU display (1280x800, Weston's panel at the top): the layout's
+        // size, the title bar below the panel and the frame on the display.
+        const juce::Rectangle<int> qemu( 0, 0, 1280, 800 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        CHECK( reachable( bounds, qemu ) );
+
+        // The device's display: smaller than the layout with a frame, so 90%
+        // of what fits, at the same aspect ratio.
+        const juce::Rectangle<int> device( 0, 0, 1024, 600 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { device }, device, size, minimum );
+        CHECK( reachable( bounds, device ) );
+        CHECK( bounds.getWidth() == 804 ); // 90% of (600 - 32 - 44) * 1024 / 600 = 894
+        CHECK( bounds.getHeight() == 471 );
+
+        // A display smaller than the layout: 90% of what fits.
         const juce::Rectangle<int> small( 0, 0, 800, 480 );
         bounds = kick::window::chooseWindowBounds( std::nullopt, { small }, small, size, minimum );
-        CHECK( small.contains( bounds ) );
-        CHECK( bounds.getWidth() == 720 );
-        CHECK( bounds.getHeight() == 422 ); // 720 * 600 / 1024 = 421.9
+        CHECK( reachable( bounds, small ) );
+        CHECK( bounds.getWidth() == 620 ); // 90% of (480 - 32 - 44) * 1024 / 600 = 689
+        CHECK( bounds.getHeight() == 363 );
 
-        // Never below the minimum.
+        // Never below the minimum, on the display's top-left corner if it
+        // does not fit.
         const juce::Rectangle<int> tiny( 0, 0, 320, 240 );
         bounds = kick::window::chooseWindowBounds( std::nullopt, { tiny }, tiny, size, minimum );
-        CHECK( bounds.getWidth() == 512 && bounds.getHeight() == 300 );
+        CHECK( bounds == juce::Rectangle<int>( 0, 32, 512, 300 ) );
 
         // Saved bounds on a display are used, with the aspect ratio kept.
-        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 1000 ), displays, primary, size, minimum );
-        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1536, 900 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1024, 640 ), displays, primary, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1024, 600 ) );
 
-        // Mostly off screen, but a corner still reachable: kept.
+        // Larger than the display they are on: as large as fits, on it.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 900 ), displays, primary, size, minimum );
+        CHECK( reachable( bounds, secondary ) );
+        CHECK( bounds.getWidth() == 1272 ); // 1280 - 8
+        CHECK( bounds.getHeight() == 745 );
+
+        // Partly off the display or under the panel: moved onto it.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 1800, 900, 1024, 600 ), { primary }, primary, size, minimum );
-        CHECK( bounds.getPosition() == juce::Point<int>( 1800, 900 ) );
+        CHECK( bounds.getWidth() == 1024 && reachable( bounds, primary ) );
+        CHECK( bounds.getPosition() == juce::Point<int>( 1920 - 1032, 1050 - 644 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( -160, 0, 1024, 600 ), { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 0, 32, 1024, 600 ) );
+
+        // The bounds of a window the shell made full screen (Weston's kiosk
+        // shell): not the window's own, so the default instead, as for
+        // bounds that cover the display under the panel.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 0, 0, 1280, 800 ), { qemu }, qemu, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 0, 0, 1280, 750 ), { qemu }, qemu, size, minimum );
+        CHECK( reachable( bounds, qemu ) );
+        CHECK( kick::window::fillsADisplay( { 0, 0, 1280, 800 }, { qemu } ) );
+        CHECK( kick::window::fillsADisplay( { -4, -40, 1300, 900 }, { qemu } ) );
+        CHECK( !kick::window::fillsADisplay( { 0, 0, 1280, 750 }, { qemu } ) );
+        CHECK( !kick::window::fillsADisplay( { 0, 0, 1280, 800 }, {} ) );
 
         // On a display that is gone: centred on the current one instead.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 3500, 100, 1024, 600 ), { primary }, primary, size, minimum );
-        CHECK( bounds.getCentre() == primary.getCentre() );
+        CHECK( std::abs( withAssumedFrame( bounds ).getCentreX() - primary.getCentreX() ) <= 1 );
+        CHECK( reachable( bounds, primary ) );
 
         // Too small to be valid: the default.
         bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 10, 10, 100, 60 ), displays, primary, size, minimum );
@@ -326,6 +412,117 @@ namespace
 
 namespace
 {
+    void testBoundsSaving()
+    {
+        using kick::window::BoundsSaving;
+
+        // The frame's top-left corner, with the client area's size.
+        CHECK( kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, { 40, 4, 4, 4 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        CHECK( kick::window::windowBoundsToSave( { 10, 20, 1024, 600 }, {} ) == juce::Rectangle<int>( 10, 20, 1024, 600 ) );
+        // Restored there, the window manager puts the frame back where it was.
+        const auto restored = kick::window::parseWindowBounds( kick::window::formatWindowBounds(
+            kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, kick::window::assumedWindowFrame ) ) );
+        const juce::Rectangle<int> qemu( 0, 0, 1280, 800 );
+        CHECK( restored.has_value()
+               && kick::window::chooseWindowBounds( restored, { qemu }, qemu, { 1024, 600 }, { 512, 300 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+
+        // A move: saved once it has settled, not before.
+        BoundsSaving saving( 1000 );
+        saving.setSaved( "124 94 1024 600" );
+        CHECK( !saving.isWaiting() );
+        saving.changed( "200 94 1024 600", 5000 );
+        CHECK( saving.isWaiting() );
+        CHECK( saving.getTimeUntilDue( 5000 ) == 1000 );
+        CHECK( !saving.takeDue( 5999 ).has_value() );
+        CHECK( saving.getTimeUntilDue( 5400 ) == 600 );
+
+        // More moves restart the wait; only the last bounds are saved.
+        saving.changed( "300 94 1024 600", 5900 );
+        CHECK( !saving.takeDue( 6000 ).has_value() );
+        auto due = saving.takeDue( 6900 );
+        CHECK( due.has_value() && *due == "300 94 1024 600" );
+        CHECK( !saving.isWaiting() );
+        CHECK( !saving.takeDue( 9000 ).has_value() );
+        CHECK( !saving.flush().has_value() );
+
+        // Back to the bounds saved: nothing to save.
+        saving.changed( "310 94 1024 600", 10000 );
+        saving.changed( "300 94 1024 600", 10100 );
+        CHECK( !saving.isWaiting() );
+        CHECK( !saving.takeDue( 20000 ).has_value() );
+
+        // Quitting before the wait is over: flushed.
+        saving.changed( "400 94 1024 600", 30000 );
+        due = saving.flush();
+        CHECK( due.has_value() && *due == "400 94 1024 600" );
+        CHECK( !saving.flush().has_value() );
+
+        // Nothing saved before: the first bounds are saved.
+        BoundsSaving first( 1000 );
+        first.changed( "124 94 1024 600", 0 );
+        CHECK( first.isWaiting() );
+        CHECK( first.takeDue( 1000 ).has_value() );
+
+        // The millisecond counter wraps.
+        BoundsSaving wrapping( 1000 );
+        wrapping.changed( "1 2 1024 600", 0xffffff00u );
+        CHECK( !wrapping.takeDue( 0xffffff00u + 999u ).has_value() );
+        CHECK( wrapping.getTimeUntilDue( 0x100u ) == 488 );
+        CHECK( wrapping.takeDue( 0xffffff00u + 1000u ).has_value() );
+
+        // No delay: due at once.
+        BoundsSaving immediate( 0 );
+        immediate.changed( "1 2 1024 600", 7 );
+        CHECK( immediate.takeDue( 7 ).has_value() );
+    }
+
+    void testAspectRatio()
+    {
+        using kick::window::keepAspectRatio;
+        const juce::Point<int>     size( 1024, 600 ), minimum( 512, 300 ), maximum( 8192, 4800 );
+        const juce::Rectangle<int> previous( 100, 100, 1024, 600 );
+
+        // At the aspect ratio, or within a pixel of it: unchanged.
+        CHECK( keepAspectRatio( previous, previous, size, minimum, maximum ) == previous );
+        CHECK( keepAspectRatio( { 100, 100, 1280, 750 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1280, 750 ) );
+        CHECK( keepAspectRatio( { 100, 100, 1280, 751 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1280, 751 ) );
+
+        // The bottom edge dragged up (QEMU's test: the layout was cropped):
+        // the height is kept, the width follows.
+        CHECK( keepAspectRatio( { 100, 100, 1024, 445 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 759, 445 ) );
+
+        // The right edge dragged: the width is kept, the height follows.
+        CHECK( keepAspectRatio( { 100, 100, 1200, 600 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1200, 703 ) );
+
+        // A corner dragged: the dimension that changed more is kept.
+        CHECK( keepAspectRatio( { 100, 100, 1100, 800 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1365, 800 ) );
+        CHECK( keepAspectRatio( { 100, 100, 1400, 650 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 1400, 820 ) );
+
+        // The top edge dragged down: the bottom edge stays where it is.
+        auto bounds = keepAspectRatio( { 100, 250, 1024, 450 }, previous, size, minimum, maximum );
+        CHECK( bounds.getBottom() == previous.getBottom() && bounds.getHeight() == 450 && bounds.getWidth() == 768 );
+        CHECK( bounds.getX() == 100 );
+
+        // The left edge dragged right: the right edge stays where it is.
+        bounds = keepAspectRatio( { 300, 100, 824, 600 }, previous, size, minimum, maximum );
+        CHECK( bounds.getRight() == previous.getRight() && bounds.getWidth() == 824 && bounds.getHeight() == 483 );
+        CHECK( bounds.getY() == 100 );
+
+        // Within the limits.
+        CHECK( keepAspectRatio( { 100, 100, 1024, 100 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 512, 300 ) );
+        CHECK( keepAspectRatio( { 100, 100, 9000, 600 }, previous, size, minimum, maximum ) == juce::Rectangle<int>( 100, 100, 8192, 4800 ) );
+
+        // Whatever the size, the result has the aspect ratio.
+        for( int width = 520; width < 3000; width += 37 )
+        {
+            for( int height = 310; height < 1800; height += 41 )
+            {
+                const auto result = keepAspectRatio( { 0, 0, width, height }, previous, size, minimum, maximum );
+                CHECK( std::abs( result.getHeight() * 1024 - result.getWidth() * 600 ) <= 1536 ); // 1.5 pixels
+            }
+        }
+    }
+
     // The panel's corners, where the window shows them.
     juce::Rectangle<float> placedPanel( juce::Rectangle<int> area, juce::Point<int> panel, int margin )
     {
@@ -497,12 +694,15 @@ int main()
     testParsing();
     testDefaults();
     testPrecedence();
+    testCursor();
     testUnknownValues();
     testCommandLine();
     testLetterbox();
     testInputThroughLetterbox();
     testWindowBoundsText();
     testWindowBounds();
+    testAspectRatio();
+    testBoundsSaving();
     testOverlayPlacement();
     testFrameTiming();
     testFrameTimingThreads();

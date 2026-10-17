@@ -62,9 +62,15 @@ namespace kick::window
         static constexpr const char* rendererOption     = "--renderer";
         static constexpr const char* windowModeVariable = "KICK_WINDOW_MODE";
         static constexpr const char* rendererVariable   = "KICK_RENDERER";
+        static constexpr const char* showCursorVariable = "KICK_SHOW_CURSOR";
 
         WindowMode windowMode{ WindowMode::kiosk };
         Renderer   renderer{ Renderer::software };
+
+        // Whether the mouse pointer shows over the window: always in
+        // windowed mode; in kiosk mode (a touch screen) only when
+        // KICK_SHOW_CURSOR is 1 (or true, yes, on).
+        bool showCursor{ false };
 
         // Where each choice came from, for the log.
         juce::String windowModeSource;
@@ -80,7 +86,8 @@ namespace kick::window
         // JUCEApplicationBase::getCommandLineParameters() quotes them.
         juce::String getCommandLine() const;
 
-        // "window mode windowed (from --window-mode), renderer software (...)"
+        // "window mode windowed (from --window-mode), renderer software
+        // (...), mouse pointer shown"
         juce::String describe() const;
 
         // Writes every problem and the choice to the current logger.
