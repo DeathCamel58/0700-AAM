@@ -30,6 +30,16 @@
 
 namespace kick_ui
 {
+    namespace
+    {
+        template<typename ScreenType>
+        std::unique_ptr<IScreen> makeScreen()
+        {
+            const ui::stallLog::Phase phase( "creating screen", typeid( ScreenType ).name() );
+            return std::make_unique<ScreenType>();
+        }
+    }
+
     sigslot::signal<Screen> signals::sigScreenClose = {};
     sigslot::signal<Screen> signals::sigScreenOpen  = {};
     sigslot::signal<Screen> signals::onScreenLoaded = {};
@@ -187,21 +197,11 @@ namespace kick_ui
             this->handleCommand( f_HwMsg );
         } );
 
-        // Function to add screens.
-        auto screenAdder = [&]( Screen Type, std::unique_ptr<IScreen> Screen ) {
-            if( auto p = dynamic_cast<juce::Component*>( Screen.get() ) )
-            {
-                p->setVisible( false );
-                addChildComponent( p );
-                screens_[Type] = std::move( Screen );
-            }
-        };
-
         // Global components
         ctrlBar_ = std::make_unique<AppTopbar>();
         mt::utils::addChildComponents( this, ctrlBar_.get(), statusBar_ );
         // First launch screen.
-        screenAdder( Screen::RecentProject, std::make_unique<ui::RecentProject>() );
+        addScreen( Screen::RecentProject, std::make_unique<ui::RecentProject>() );
 
         // Start listining to inputs now...
         setWantsKeyboardFocus( true );
@@ -221,41 +221,86 @@ namespace kick_ui
         //signals::sigScreenOpen( Screen::Temp );
         signals::sigScreenOpen( Screen::RecentProject );
 
-        // Now, Lazily create and load rest of the screens
-        mt::getThreadPool().addJob( [&, screenAdder]() {
-            juce::MessageManager::callAsync( [&, screenAdder]() {
-                // Home Screen
-                screenAdder( Screen::HomeListView, std::make_unique<AppMainmode>() );
-                screenAdder( Screen::HomeGridView, std::make_unique<AppGrid>() );
-                screenAdder( Screen::HomeSequencerView, std::make_unique<StepSequencer>() );
-                screenAdder( Screen::HomeXYView, std::make_unique<XyFxView>() );
-                screenAdder( Screen::HomePreferencesView, std::make_unique<Settings>() );
-                screenAdder( Screen::HomeOptions, std::make_unique<AppMenuOptions>() );
-                screenAdder( Screen::MenuSampleEdit, std::make_unique<SampleEditor>() );
-                screenAdder( Screen::MenuProgramEdit, std::make_unique<ProgramEdit>() );
-                screenAdder( Screen::MenuSampler, std::make_unique<Sampler>() );
-                screenAdder( Screen::MenuLooper, std::make_unique<Looper>() );
-                screenAdder( Screen::MenuPadMute, std::make_unique<KickPadMute>() );
-                screenAdder( Screen::MenuTrackMute, std::make_unique<KickTrackMute>() );
-                screenAdder( Screen::MenuPadMixer, std::make_unique<PadMixer>() );
-                screenAdder( Screen::MenuChannelMixer, std::make_unique<ChannelMixer>() );
-                screenAdder( Screen::MenuKnobEdit, std::make_unique<KnobEdit>() );
-                screenAdder( Screen::MenuListEdit, std::make_unique<ListEditMode>() );
-                screenAdder( Screen::MenuPadPerform, std::make_unique<PadPerform>() );
-                screenAdder( Screen::MenuMidiControl, std::make_unique<MidiControl>() );
-                screenAdder( Screen::MenuFileBrowser, std::make_unique<ui::FileBrowser>() );
-                screenAdder( Screen::MenuNextSequence, std::make_unique<KickNextSequenceMode>() );
-                screenAdder( Screen::MenuSong, std::make_unique<KickSongMode>() );
-                screenAdder( Screen::MenuColorEdit, std::make_unique<KickPadColorMode>() );
-                screenAdder( Screen::MenuAssignSample, std::make_unique<AppAssignSample>() );
-                screenAdder( Screen::SWUpdateView, std::make_unique<SWUpdateView>() );
-                screenAdder( Screen::SWUpdateWindow, std::make_unique<SWUpdateScreen>() );
-                screenAdder( Screen::ProcessEdit, std::make_unique<SampleProcess>() );
-                screenAdder( Screen::CVClib, std::make_unique<CVClib>() );
-                screenAdder( Screen::Inserts, std::make_unique<Inserts>() );
-                //screenAdder( Screen::Temp, std::make_unique<TempScreen>() );
-            } );
+        // The rest of the screens are created later, one per message, so
+        // that the window is drawn and input, IPC messages and timers are
+        // handled in between: built in one go they kept the message thread
+        // busy for many seconds on a slow system (14 s under emulation),
+        // long enough for KickMain to take this process for hung. Whatever
+        // needs a screen first creates the ones still to come.
+        pendingScreens = {
+            // Home Screen
+            { Screen::HomeListView, makeScreen<AppMainmode> },
+            { Screen::HomeGridView, makeScreen<AppGrid> },
+            { Screen::HomeSequencerView, makeScreen<StepSequencer> },
+            { Screen::HomeXYView, makeScreen<XyFxView> },
+            { Screen::HomePreferencesView, makeScreen<Settings> },
+            { Screen::HomeOptions, makeScreen<AppMenuOptions> },
+            { Screen::MenuSampleEdit, makeScreen<SampleEditor> },
+            { Screen::MenuProgramEdit, makeScreen<ProgramEdit> },
+            { Screen::MenuSampler, makeScreen<Sampler> },
+            { Screen::MenuLooper, makeScreen<Looper> },
+            { Screen::MenuPadMute, makeScreen<KickPadMute> },
+            { Screen::MenuTrackMute, makeScreen<KickTrackMute> },
+            { Screen::MenuPadMixer, makeScreen<PadMixer> },
+            { Screen::MenuChannelMixer, makeScreen<ChannelMixer> },
+            { Screen::MenuKnobEdit, makeScreen<KnobEdit> },
+            { Screen::MenuListEdit, makeScreen<ListEditMode> },
+            { Screen::MenuPadPerform, makeScreen<PadPerform> },
+            { Screen::MenuMidiControl, makeScreen<MidiControl> },
+            { Screen::MenuFileBrowser, makeScreen<ui::FileBrowser> },
+            { Screen::MenuNextSequence, makeScreen<KickNextSequenceMode> },
+            { Screen::MenuSong, makeScreen<KickSongMode> },
+            { Screen::MenuColorEdit, makeScreen<KickPadColorMode> },
+            { Screen::MenuAssignSample, makeScreen<AppAssignSample> },
+            { Screen::SWUpdateView, makeScreen<SWUpdateView> },
+            { Screen::SWUpdateWindow, makeScreen<SWUpdateScreen> },
+            { Screen::ProcessEdit, makeScreen<SampleProcess> },
+            { Screen::CVClib, makeScreen<CVClib> },
+            { Screen::Inserts, makeScreen<Inserts> },
+            //{ Screen::Temp, makeScreen<TempScreen> },
+        };
+        createNextScreenLater();
+    }
+
+    void KickHome::addScreen( Screen type, std::unique_ptr<IScreen> screen )
+    {
+        if( auto p = dynamic_cast<juce::Component*>( screen.get() ) )
+        {
+            p->setVisible( false );
+            addChildComponent( p );
+            screens_[type] = std::move( screen );
+        }
+    }
+
+    void KickHome::createNextScreenLater()
+    {
+        juce::MessageManager::callAsync( [safeThis = juce::Component::SafePointer<KickHome>( this )]() {
+            if( safeThis == nullptr || safeThis->isShutDown || safeThis->pendingScreens.empty() )
+                return;
+
+            auto next = std::move( safeThis->pendingScreens.front() );
+            safeThis->pendingScreens.pop_front();
+            safeThis->addScreen( next.first, next.second() );
+
+            if( !safeThis->pendingScreens.empty() )
+                safeThis->createNextScreenLater();
         } );
+    }
+
+    bool KickHome::hasScreen( Screen screen ) const
+    {
+        const auto it = screens_.find( screen );
+        return it != screens_.end() && it->second != nullptr;
+    }
+
+    void KickHome::createPendingScreens()
+    {
+        while( !isShutDown && !pendingScreens.empty() )
+        {
+            auto next = std::move( pendingScreens.front() );
+            pendingScreens.pop_front();
+            addScreen( next.first, next.second() );
+        }
     }
 
     KickHome::~KickHome()
@@ -272,6 +317,7 @@ namespace kick_ui
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
         tooltipWindow_.reset();
         tapLog_.reset();
+        pendingScreens.clear();
         removeAllChildren();
         ctrlBar_.reset();
         ledControl_.reset();
@@ -296,12 +342,16 @@ namespace kick_ui
 
     IScreen* KickHome::getScreen( Screen screen )
     {
+        if( !hasScreen( screen ) )
+            createPendingScreens();
         return screens_[screen].get();
     }
 
     void KickHome::load( Screen screen )
     {
         ui::clearFocusComponent();
+        if( !hasScreen( screen ) )
+            createPendingScreens();
 
         // Emit signal...
         signals::onScreenClosed( currentScreen );
@@ -316,6 +366,8 @@ namespace kick_ui
     {
         if( auto p = screens_[currentScreen].get() )
         {
+            const ui::stallLog::Phase phase( "showing screen", typeid( *p ).name() );
+
             // Turn off all screens.
             for( const auto& it : screens_ )
             {
@@ -375,7 +427,7 @@ namespace kick_ui
 
     void KickHome::AssignSampleStartUp()
     {
-        dynamic_cast<AppAssignSample*>( screens_[Screen::MenuAssignSample].get() )->startup();
+        dynamic_cast<AppAssignSample*>( getScreen( Screen::MenuAssignSample ) )->startup();
     }
 
     void KickHome::handleCommand( CPktMgr::HWMsg_t& f_HwMsg )
@@ -472,7 +524,7 @@ namespace kick_ui
                             break;
 
                         case contracts::DeviceControlContracts::EN_LINK:
-                            dynamic_cast<KnobEdit*>( screens_[Screen::MenuKnobEdit].get() )->knobLongPress();
+                            dynamic_cast<KnobEdit*>( getScreen( Screen::MenuKnobEdit ) )->knobLongPress();
                             break;
                         case contracts::DeviceControlContracts::EN_SAVE:
                             ae.saveProject();

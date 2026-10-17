@@ -76,7 +76,13 @@ namespace ui
             // When the last press was handled, by the message thread's clock.
             double downHandledMs{ 0.0 };
 
-            juce::String describeEvent( const juce::MouseEvent& Event ) const;
+            // The smallest difference seen between when an event was
+            // handled and its time, taken as no wait (see lagOf()).
+            juce::int64 promptDifferenceMs{ 0 };
+            bool        havePromptDifference{ false };
+
+            juce::int64  lagOf( const juce::MouseEvent& Event );
+            juce::String describeEvent( const juce::MouseEvent& Event );
 
             JUCE_DECLARE_NON_COPYABLE( Listener )
         };

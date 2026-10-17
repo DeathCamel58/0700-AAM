@@ -96,6 +96,8 @@ public:
         // Initialize User Interface...
         w = kick_ui::createMainWindow( windowOptions, nullptr );
 
+        stallDetector = std::make_unique<ui::stallLog::Detector>();
+
 #if PERFETTO
         MelatoninPerfetto::get().beginSession();
 #endif
@@ -107,6 +109,7 @@ public:
         MelatoninPerfetto::get().endSession();
 #endif
         // Add your application's shutdown code here ...
+        stallDetector = nullptr;
         if( w )
         {
             w = nullptr;
@@ -142,6 +145,7 @@ public:
 private:
     kick::window::StartupOptions          windowOptions;
     std::unique_ptr<kick::window::MainWindow> w;
+    std::unique_ptr<ui::stallLog::Detector>   stallDetector;
     std::unique_ptr<KickDeviceAdapter>    adapter;
     std::unique_ptr<KickAudioEngineAdapter>    engineAdapter;
     std::shared_ptr<contracts::AudioInterface> audioInterface;

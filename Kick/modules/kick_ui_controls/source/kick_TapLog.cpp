@@ -135,7 +135,26 @@ namespace ui
             juce::Desktop::getInstance().removeGlobalMouseListener( this );
         }
 
-        juce::String Listener::describeEvent( const juce::MouseEvent& Event ) const
+        // How long the event waited to be handled. JUCE dates an X event by
+        // the X server's clock plus an offset it takes when it handles the
+        // first one: if that event waited, the offset includes the wait,
+        // every later event looks that much younger, and one handled
+        // promptly looks handled before it happened. So the difference
+        // between now and the event's time is taken relative to the
+        // smallest one seen, which is the closest to no wait (the first
+        // event's lag is therefore 0).
+        juce::int64 Listener::lagOf( const juce::MouseEvent& Event )
+        {
+            const auto difference = ( juce::Time::getCurrentTime() - Event.eventTime ).inMilliseconds();
+            if( !havePromptDifference || difference < promptDifferenceMs )
+            {
+                promptDifferenceMs   = difference;
+                havePromptDifference = true;
+            }
+            return difference - promptDifferenceMs;
+        }
+
+        juce::String Listener::describeEvent( const juce::MouseEvent& Event )
         {
             auto* target = Event.eventComponent;
 
@@ -162,9 +181,7 @@ namespace ui
               << ", blocked " << flag( blocked )
               << ", " << modalState()
               << ", focus " << describe( juce::Component::getCurrentlyFocusedComponent() )
-              // How long the event waited to be handled, by its own time: a
-              // large or a negative figure says the times are off.
-              << ", lag " << ( juce::Time::getCurrentTime() - Event.eventTime ).inMilliseconds() << " ms";
+              << ", lag " << lagOf( Event ) << " ms";
             return s;
         }
 

@@ -68,8 +68,12 @@ public:
         IPCApplication::initialise( windowOptions.getCommandLine() );
         windowOptions.log();
 
-        // A process that exits, or is restarted, leaves a heartbeat behind
-        // that its successor must not be judged by.
+        startupLimit = readStartupLimit();
+
+        // Every process gets a startup window from its start, and one that
+        // exits, or is restarted, leaves a heartbeat behind that its
+        // successor must not be judged by. The processes have been started,
+        // but the process manager tells of it through the message loop.
         if( auto ss = subsystem() )
         {
             std::weak_ptr<kick::main::KickHeartBeatData> weakData = heartBeatData;
@@ -79,7 +83,7 @@ public:
             } );
         }
 
-        monitor.reset( new kick::main::KickHearBeatMonitor( heartBeatData, std::bind( &KickMain ::onHeartBeatNotReceived, this, std::placeholders::_1 ),
+        monitor.reset( new kick::main::KickHearBeatMonitor( heartBeatData, startupLimit, std::bind( &KickMain ::onHeartBeatNotReceived, this, std::placeholders::_1 ),
                                                             std::bind( &KickMain::onHeartBeatsVerified, this, std::placeholders::_1 ) ) );
         monitor->startMonitoring();
     }
@@ -126,9 +130,28 @@ public:
         handlers.push_back( std::shared_ptr<ipc::MTIIPCMessageHandler>( new kick::main::KickExitMessageHandler() ) );
     }
 private:
+    // HEART_BEAT_STARTUP_LIMIT_IN_MS, or KICK_STARTUP_LIMIT seconds.
+    static juce::int64 readStartupLimit()
+    {
+        const auto value = juce::SystemStats::getEnvironmentVariable( "KICK_STARTUP_LIMIT", {} ).trim();
+        if( value.isEmpty() )
+            return HEART_BEAT_STARTUP_LIMIT_IN_MS;
+
+        const int seconds = value.getIntValue();
+        if( !value.containsOnly( "0123456789" ) || seconds < 10 || seconds > 600 )
+        {
+            juce::Logger::writeToLog( "KICK_STARTUP_LIMIT=" + value + " is not a number of seconds from 10 to 600; using "
+                                      + juce::String( HEART_BEAT_STARTUP_LIMIT_IN_MS / 1000 ) + " s" );
+            return HEART_BEAT_STARTUP_LIMIT_IN_MS;
+        }
+
+        juce::Logger::writeToLog( "Startup limit " + juce::String( seconds ) + " s (from KICK_STARTUP_LIMIT)" );
+        return seconds * 1000;
+    }
+
     // Runs on the message thread, called by the monitor for a host that has
-    // not sent a heartbeat for HEART_BEAT_RESTART_TIMEOUT_IN_MS, or within
-    // HEART_BEAT_STARTUP_GRACE_IN_MS of a restart.
+    // not sent a heartbeat for HEART_BEAT_RESTART_TIMEOUT_IN_MS and started
+    // more than startupLimit ago.
     // Restarts that process only; the others keep running and reconnect to
     // it. (Stopping and starting the whole subsystem destroyed its data in
     // stop(), and start() then dereferenced it.)
@@ -143,14 +166,14 @@ private:
 
         // The host may have recovered since the check.
         if( heartBeatData->beginRestartIfSilent( hostId, kick::main::KickHeartBeatData::now(),
-                                                 HEART_BEAT_RESTART_TIMEOUT_IN_MS, HEART_BEAT_STARTUP_GRACE_IN_MS ) )
+                                                 HEART_BEAT_RESTART_TIMEOUT_IN_MS, startupLimit ) )
             ss->restartHost( hostId );
     }
 
     // Runs on the message thread after every check, so WATCHDOG=1 is only
     // sent while KickMain's message loop runs and every child's heartbeat
     // (sent from the child's message loop) is recent enough, or the child
-    // is being restarted and still within its startup grace period. Until
+    // is still within its startup window. Until
     // it is told READY=1, the service manager only enforces its start
     // timeout; after that, missing WATCHDOG=1 notifications let it restart
     // KickMain when restarting the process in onHeartBeatNotReceived() does
@@ -165,7 +188,7 @@ private:
                 reportedReady = true;
                 serviceNotifier.notify( "READY=1" );
             }
-            reportStatus( result.startingHostIds.isEmpty() ? "Running" : "Restarting " + hostNames( result.startingHostIds ) );
+            reportStatus( result.startingHostIds.isEmpty() ? "Running" : "Starting " + hostNames( result.startingHostIds ) );
             serviceNotifier.notify( "WATCHDOG=1" );
             return;
         }
@@ -194,6 +217,7 @@ private:
 private:
     std::shared_ptr<kick::main::KickHeartBeatData> heartBeatData;
     std::unique_ptr<kick::main::KickHearBeatMonitor> monitor;
+    juce::int64                                      startupLimit{ HEART_BEAT_STARTUP_LIMIT_IN_MS };
 
     // Used on the message thread only.
     kick::main::KickServiceNotifier  serviceNotifier;
