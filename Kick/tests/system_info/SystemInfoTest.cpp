@@ -20,7 +20,8 @@
 // Tests of the system information the preferences and the system resources
 // window show: CPU and memory use parsed from /proc, and the DNS server
 // from systemd-networkd's and systemd-resolved's state files; and how the
-// device information is written (kick_DisplayFormat.h). The parsers
+// device information is written (kick_DisplayFormat.h); and the system's
+// time zone (kick_TimeZone.h). The parsers
 // and lookups are fed
 // fixture copies of the files, so the results do not depend on this
 // machine. Built with -DKICK_BUILD_TESTS=ON; it needs no arguments, creates
@@ -31,6 +32,7 @@
 #include "hardware/source/kick_Resorces.cpp"
 #include "hardware/source/kick_NetInfo.h"
 #include "common/source/kick_DisplayFormat.h"
+#include "hardware/source/kick_TimeZone.h"
 
 #include <cstdio>
 
@@ -240,6 +242,51 @@ namespace
         CHECK( display::version( "" ) == display::unavailable() );
         CHECK( display::version( "1.4" ) == "1.4" );
     }
+
+    void testTimeZone()
+    {
+        namespace tz = mt::tz;
+
+        CHECK( juce::String( tz::defaultZone ) == "UTC" );
+        CHECK( tz::canonical( "Universal" ) == "UTC" );
+        CHECK( tz::canonical( "Etc/UTC" ) == "UTC" );
+        CHECK( tz::canonical( "Etc/GMT" ) == "UTC" );
+        CHECK( tz::canonical( "Europe/Berlin" ) == "Europe/Berlin" );
+        CHECK( tz::canonical( "Etc/GMT+5" ) == "Etc/GMT+5" );
+
+        CHECK( tz::zoneOfLink( "/usr/share/zoneinfo/Europe/Berlin" ) == "Europe/Berlin" );
+        CHECK( tz::zoneOfLink( "../usr/share/zoneinfo/America/Argentina/Buenos_Aires" ) == "America/Argentina/Buenos_Aires" );
+        CHECK( tz::zoneOfLink( "/usr/share/zoneinfo/posix/Asia/Tokyo" ) == "Asia/Tokyo" );
+        CHECK( tz::zoneOfLink( "/usr/share/zoneinfo/Universal" ) == "UTC" );
+        CHECK( tz::zoneOfLink( "/somewhere/else" ).empty() );
+
+        // On a fixture tree: no /etc/localtime is UTC; a link names its
+        // zone; a copied zone file is told by /etc/timezone, or not at all.
+        const juce::TemporaryFile temporary;
+        const auto                root = temporary.getFile();
+        CHECK( root.getChildFile( "etc" ).createDirectory() );
+        const std::string rootPath  = root.getFullPathName().toStdString();
+        const std::string localtime = rootPath + "/etc/localtime";
+
+        CHECK( tz::systemZone( rootPath ) == "UTC" );
+
+        CHECK( symlink( "/usr/share/zoneinfo/America/New_York", localtime.c_str() ) == 0 );
+        CHECK( tz::systemZone( rootPath ) == "America/New_York" );
+
+        CHECK( unlink( localtime.c_str() ) == 0 );
+        CHECK( symlink( "../usr/share/zoneinfo/Etc/UTC", localtime.c_str() ) == 0 );
+        CHECK( tz::systemZone( rootPath ) == "UTC" );
+
+        CHECK( unlink( localtime.c_str() ) == 0 );
+        writeFixture( root, "/etc/localtime", "TZif2" );
+        CHECK( tz::systemZone( rootPath ).empty() );
+        writeFixture( root, "/etc/timezone", "Australia/Sydney\n" );
+        CHECK( tz::systemZone( rootPath ) == "Australia/Sydney" );
+
+        root.deleteRecursively();
+
+        std::printf( "Time zone here: %s\n", tz::systemZone().c_str() );
+    }
 }
 
 int main()
@@ -249,6 +296,7 @@ int main()
     testStorage();
     testDns();
     testDeviceInfo();
+    testTimeZone();
 
     if( failures != 0 )
     {

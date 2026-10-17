@@ -239,7 +239,9 @@ namespace mt
         sensitivity.attachTo( vTree, IDs::padSensitivity, Undo, "4" );
         curve.attachTo( vTree, IDs::padCurve, Undo, "4" );
         numTaps.attachTo( vTree, IDs::noOftaps, Undo, "2" );
-        timezone.attachTo( vTree, IDs::timeZone, Undo, "Asia/Kolkata" );
+        // Only used when the system's zone cannot be told. UTC, as the C
+        // library uses when no zone is set.
+        timezone.attachTo( vTree, IDs::timeZone, Undo, "UTC" );
     }
     bool KickHardware::isValid() { return vTree.hasType( IDs::PREFHARDWARE ); }
 

@@ -52,6 +52,7 @@
 #include "kick_NetInfo.h"
 #include "kick_OsRelease.h"
 #include "kick_SysFile.h"
+#include "kick_TimeZone.h"
 
 #define USB_DEVICE "/dev/ttyGS0"
 #define BAUDRATE   B115200

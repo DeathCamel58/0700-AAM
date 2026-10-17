@@ -775,31 +775,10 @@ namespace mt
 
     juce::String HwPref::getTimeZone()
     {
-#if defined( __linux__ ) || defined( __linux ) || defined( linux )
         // /etc/localtime links to the zone's file in the time zone database
         // (.../zoneinfo/Europe/Berlin), which is how systemd's timedated
         // sets and reports it.
-        char          target[PATH_MAX];
-        const ssize_t n = readlink( "/etc/localtime", target, sizeof( target ) - 1 );
-        if( n > 0 )
-        {
-            std::string zone( target, (size_t)n );
-            const auto  pos = zone.find( "zoneinfo/" );
-            if( pos != std::string::npos )
-            {
-                zone = zone.substr( pos + 9 );
-                for( const char* prefix : { "posix/", "right/" } )
-                    if( zone.rfind( prefix, 0 ) == 0 )
-                        zone = zone.substr( std::strlen( prefix ) );
-                return zone;
-            }
-        }
-
-        // Debian's way; also written by some builds.
-        return sysfile::readLine( "/etc/timezone" );
-#else
-        return {};
-#endif
+        return juce::String( tz::systemZone() );
     }
 
     int HwPref::setTimeZone( juce::String& str )
