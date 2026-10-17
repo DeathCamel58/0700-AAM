@@ -37,7 +37,7 @@ namespace kick_ui
 
         ui::KickLabel modeLabel{ TRANS( "Mode" ) };
         ui::KickLabel padLabel{ TRANS( "Levels" ) };
-        ui::KickLabel simultaniousPlayLabel{ TRANS( "Simultanious Play" ) };
+        ui::KickLabel simultaniousPlayLabel{ TRANS( "Simultaneous Play" ) };
         ui::KickLabel muteTarget{ TRANS( "Mute Target" ) };
 
         ui::KickListBox       muteGroup{ "Mute Group", 4 };

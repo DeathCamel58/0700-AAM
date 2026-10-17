@@ -41,9 +41,9 @@ namespace kick_ui
         int               Initialvelocity_ = 0;
         mt::KickSettings& settings{ mt::getSettings() };
 
-        ui::KickListBox padThreshold{ ui::KickListBox::withTitleBar, "Thresold", { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" }, 8 };
-        ui::KickListBox padSensitivity{ ui::KickListBox::withTitleBar, "Sensitivity", { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" }, 8 };
-        ui::KickListBox padCurve{ ui::KickListBox::withTitleBar, "Curve", { "1", "2", "3", "4" }, 1 };
+        ui::KickListBox padThreshold{ ui::KickListBox::withTitleBar, "THRESHOLD", { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" }, 8 };
+        ui::KickListBox padSensitivity{ ui::KickListBox::withTitleBar, "SENSITIVITY", { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16" }, 8 };
+        ui::KickListBox padCurve{ ui::KickListBox::withTitleBar, "CURVE", { "1", "2", "3", "4" }, 1 };
         ui::KickSlider  velocity{ "VELOCITY", juce::Slider::LinearBar, juce::Slider::TextBoxBelow };
         ui::KickSlider  afterTouch{ "AFTERTOUCH", juce::Slider::LinearBar, juce::Slider::TextBoxBelow };
 
@@ -57,7 +57,7 @@ namespace kick_ui
         ui::KickNumberT<int> date_YYYY{ "Year", 2014, 2099, 2024, 1, true };
 
         ui::KickNumberT<int> time_HH{ "Hour", 00, 23, 00, 1, true }, time_MM{ "Minute", 0, 59, 00, 1, true };
-        ui::KickListBox      timezone{ "timeZone", 4 };
+        ui::KickListBox      timezone{ "TIME ZONE", 4 };
 
         void updateDateTime();
         void setTime();

@@ -36,7 +36,7 @@ namespace kick_ui
 
     private:
     private:
-        ui::KickListBox sampleRate{ ui::KickListBox::withTitleBar, "Thresold", { "1", "2", "3", "4", "5", "6", "7", "8" }, 4 };
+        ui::KickListBox sampleRate{ ui::KickListBox::withTitleBar, "Threshold", { "1", "2", "3", "4", "5", "6", "7", "8" }, 4 };
         ui::KickListBox bitDepth{ ui::KickListBox::withTitleBar, "Sensitivity", { "1", "2", "3", "4", "5", "6", "7", "8" }, 4 };
     };
 }

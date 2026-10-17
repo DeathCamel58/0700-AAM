@@ -24,7 +24,7 @@ namespace kick_ui
         ui::KickLabel          noteInputFilter{ "Note Input Filter" };
         ui::KickCheckBoxButton selectedEvents{ TRANS( "Only apply to selected events" ) };
         ui::KickLabel          noteInputFilter2{ "Output Note Range" };
-        ui::KickLabel          noteInputFilter3{ "Quantized noted will be moved up/down by an octave to fit into this note range" };
+        ui::KickLabel          noteInputFilter3{ "Quantized notes will be moved up/down by an octave to fit into this note range" };
         ui::KickNoteSelector   startNote{ "START NOTE" };
         ui::KickNoteSelector   endNote{ "END NOTE" };
 

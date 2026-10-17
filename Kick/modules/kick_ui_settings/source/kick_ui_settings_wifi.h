@@ -46,9 +46,9 @@ namespace kick_ui
         ui::KickToggleButton enabled{ "Wifi", "ENABLED", "DISABLED" };
 
         ui::KickLabel        password{ "", "" };
-        ui::KickListBox      wifiList{ "availableWifi" };
-        ui::KickToggleButton scanWifi{ "scanWifi", "ScanWifi", "ScanWifi" };
-        ui::KickToggleButton connect{ "connect", "connect", "disconnected" };
+        ui::KickListBox      wifiList{ "NETWORK" };
+        ui::KickToggleButton scanWifi{ "scanWifi", "Scan", "Scan" };
+        ui::KickToggleButton connect{ "connect", "Disconnect", "Connect" };
 
         ui::KickLabel wifIP{ "IpAddress", "" };
         ui::KickLabel gateway{ "gatway", "" };

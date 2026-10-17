@@ -54,7 +54,7 @@ namespace kick_ui
         ui::KickListBox pdScale{ ui::KickListBox::withTitleBar, "SCALE", mt::ScaleAndNotes::scaleNames, 0, 3 };
         ui::KickNumber  pdSeq{ "SEQUENCES", 1, 64, 4, 1 };
         ui::KickNumber  pdTracks{ "TRACKS/SEQ", 1, 64, 4, 1 };
-        ui::KickListBox bitDepath{ ui::KickListBox::withTitleBar, "BIT Depth", { "16", "24" }, 1 };
+        ui::KickListBox bitDepath{ ui::KickListBox::withTitleBar, "BIT DEPTH", { "16", "24" }, 1 };
         ui::KickListBox enableList{ ui::KickListBox::BoxType::withoutTitleBar, "state", { "DISABLE", "TIME STAMP", "CUSTOM" } };
         ui::KickLabel   defaultName{ "" };
     };

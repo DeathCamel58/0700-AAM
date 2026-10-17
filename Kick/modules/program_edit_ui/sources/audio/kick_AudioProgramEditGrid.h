@@ -325,7 +325,7 @@ namespace kick_ui
         ui::KickToggleButton          reverse{ "REVERSE", "REVERSE", "REVERSE" };
         ui::KickToggleButton          mute{ "MUTE", "MUTE", "MUTE" };
         ui::KickToggleButton          tc{ "TC", "TC", "TC" };
-        ui::KickToggleButton          dontSnap{ "DONT'T SNAP", "DONT'T SNAP", "DONT'T SNAP" };
+        ui::KickToggleButton          dontSnap{ "DON'T SNAP", "DON'T SNAP", "DON'T SNAP" };
         ui::KickToggleButton          nudge{ "NUDGE", "NUDGE", "NUDGE" };
         ui::KickToggleButton          editStart{ "EDIT START", "EDIT START", "EDIT START" };
         ui::KickToggleButton          editEnd{ "EDIT END", "EDIT END", "EDIT END" };

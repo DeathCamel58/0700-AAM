@@ -271,7 +271,7 @@ namespace kick_ui
         ui::KickToggleButton                 typeOptions{ "Momentary", "Toggle" };
 
     protected:
-        ui::KickLabel lightLed{ "Light Led" };
+        ui::KickLabel lightLed{ "Light LED" };
         ui::KickLabel midiChannelLabel{ "MIDI Channel" };
         ui::KickLabel ccNumberLabel{ "CC Number" };
         ui::KickLabel type{ "Type" };
@@ -314,7 +314,7 @@ namespace kick_ui
         std::unique_ptr<ui::KickTable> table;
 
         ui::KickLabel velocityLabel{ "Velocity" };
-        ui::KickLabel led{ "Light Led" };
+        ui::KickLabel led{ "Light LED" };
         ui::KickLabel midiLabel{ "MIDI Channel" };
         ui::KickLabel noteLabel{ "Note" };
         ui::KickLabel afterTouchLabel{ "After Touch" };

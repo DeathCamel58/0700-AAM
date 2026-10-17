@@ -75,7 +75,7 @@ namespace kick_ui
         ui::KickSlider cpu{ "CPU" };
         ui::KickSlider ram{ "RAM" };
         ui::KickSlider flash{ "INTERNAL MEMORY" };
-        ui::KickSlider sdcard{ "SDCARD" };
+        ui::KickSlider sdcard{ "SD CARD" };
         ui::KickSlider usb{ "USB DRIVE" };
 
         // Turns the performance overlay on and off (the setting it shows
