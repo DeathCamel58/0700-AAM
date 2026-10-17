@@ -220,11 +220,10 @@ namespace ui
         KickLabel  title{ "" }, value{ "" };
         KickButton plus{ "+" }, minus{ "-" };
 
-        juce::Time lastClickTime{ 0 };
-        float      doubleClickTimeoutMs{ 400 };
+        // How far a press may move and still be a tap, in layout units.
+        static constexpr int tapSlop = 8;
 
-        void mouseDoubleClick( const juce::MouseEvent& e );
-        void mouseDown( const juce::MouseEvent& e );
+        void mouseUp( const juce::MouseEvent& e ) override;
         void resized() override;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( KickListBox )

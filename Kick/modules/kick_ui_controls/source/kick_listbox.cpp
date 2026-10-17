@@ -476,8 +476,6 @@ namespace ui
         title.setText( Title, juce::dontSendNotification );
         value.setText( list.getSelected(), juce::dontSendNotification );
 
-        addMouseListener( this, true );
-
         list.onSelectionChanged = [this]( int Index, const juce::String& Option ) {
             value.setText( Option, juce::dontSendNotification );
 
@@ -601,23 +599,21 @@ namespace ui
         }
     }
 
-    void KickListBox::mouseDoubleClick( const juce::MouseEvent& e )
+    void KickListBox::mouseUp( const juce::MouseEvent& e )
     {
-        knobClicked();
-    }
-
-    void KickListBox::mouseDown( const juce::MouseEvent& event )
-    {
-        Component::BailOutChecker checker( this );
-        if( checker.shouldBailOut() )
+        // A tap opens the list; the press has already given the box the
+        // focus, for the encoder. (It used to take a double tap, so a tap
+        // seemed to do nothing but outline the box.) The children take no
+        // clicks, so the -/+ buttons are found by position.
+        if( !isEnabled() || e.getDistanceFromDragStart() > tapSlop || !getLocalBounds().contains( e.getPosition() ) )
             return;
 
-        auto currentTime = juce::Time::getCurrentTime();
-
-        if( ( currentTime - lastClickTime ).inMilliseconds() <= doubleClickTimeoutMs && currentTime != lastClickTime )
-            mouseDoubleClick( event );
+        if( minus.isVisible() && minus.getBounds().contains( e.getPosition() ) )
+            minus.onClick();
+        else if( plus.isVisible() && plus.getBounds().contains( e.getPosition() ) )
+            plus.onClick();
         else
-            lastClickTime = currentTime;
+            knobClicked();
     }
 
     void KickListBox::resized()
