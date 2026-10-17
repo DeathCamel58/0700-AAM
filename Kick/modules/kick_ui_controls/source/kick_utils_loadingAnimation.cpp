@@ -63,7 +63,17 @@ namespace mt
             id          = 0;
             isAnimating = true;
 
-            popup = showPopup( this, { 0, 0, 80, 80 }, []( int R ) {} );
+            // Already showing: a second pop-up would take the animation
+            // from the first, which would then never close, and stay
+            // modal over the whole screen.
+            if( popup == nullptr )
+            {
+                popup = showPopup( this, { 0, 0, 80, 80 }, []( int R ) {} );
+                // Not shown (it could not be seen): the pop-up is free for
+                // others, and closing it later could close one of theirs.
+                if( !popup->isInUse )
+                    popup = nullptr;
+            }
 
             startTimerHz( 22 );
         }
