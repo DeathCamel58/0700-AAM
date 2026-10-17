@@ -35,8 +35,10 @@ namespace contracts
     // the pads, buttons and the centre knob (see the key map in the .cpp).
     // The state of every key is read with juce::KeyPress::isKeyCurrentlyDown().
     struct keyPressedDetector : public juce::KeyListener
+        , private juce::Timer
     {
         juce::Array<int> _keys;
+        juce::Array<int> _typedKeys;
 
         struct cmdInfo
         {
@@ -47,12 +49,45 @@ namespace contracts
         };
 
         bool isValidCmd( const cmdInfo& Cmd ) { return contracts::DeviceControlContracts::EN_INVALID_ID != Cmd.id; }
-        void detectForKeyCode( int KeyCode, const cmdInfo& Info );
+        void detectForKeyCode( int KeyCode, bool IsKeyDown, bool AllowPress, const cmdInfo& Info );
+
+        // Sends the events of the keys that went down or up since the last
+        // scan; IsKeyDown tells whether a key (a juce::KeyPress key code)
+        // is down. While TextInputHasFocus, keys going down are left to the
+        // text editor: they send nothing, then or later (they are typed),
+        // but the release of a key that went down before is still sent, so
+        // that no pad is left held.
+        void scanKeys( const std::function<bool( int )>& IsKeyDown, bool TextInputHasFocus );
+
+        // Sends Shift pressed or released if that is new. Shift going down
+        // while a text editor has the focus is left to the editor (it types
+        // capitals).
+        void setShiftDown( bool ShiftDown, bool TextInputHasFocus );
+
+        // Whether Focused takes typed text: an editable text editor.
+        static bool isTextInput( const juce::Component* Focused );
 
         bool              keyPressed( const juce::KeyPress& key, juce::Component* originatingComponent ) override;
         bool              keyStateChanged( bool isKeyDown, juce::Component* originatingComponent ) override;
         std::atomic<bool> shiftBtnState;
 
+        // Listens to the keys that reach Target: nullptr stops. Give it the
+        // window. JUCE hands a key to the focused component and then to its
+        // parents up to the window, or to the window alone while nothing
+        // has the focus, so only there are the keys seen wherever the focus
+        // is (a pop-up, a screen, nothing at all). While it listens, it
+        // also follows Shift.
+        void listenTo( juce::Component* Target );
+
+    private:
+        juce::Component::SafePointer<juce::Component> target;
+
+        // Shift alone is no key event: JUCE only updates the modifiers,
+        // and tells the component under the mouse, which need not pass it
+        // on (a slider does not). So Shift is read here, and before every
+        // key scan, to keep it ahead of a key pressed with it.
+        static constexpr int shiftPollMs = 20;
+        void                 timerCallback() override;
     };
     keyPressedDetector& getKeypressDetector();
 }

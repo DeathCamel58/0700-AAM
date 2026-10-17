@@ -64,6 +64,7 @@ namespace kick_ui
         void                 handleCommand( CPktMgr::HWMsg_t& );
         void                 knobCommand( int knob, int value );
         void                 resized() override;
+        void                 parentHierarchyChanged() override;
         void                 handleAsyncUpdate() override;
         inline void          setupLoadScreenVisibility();
         juce::Rectangle<int> getScreenBounds( IScreen* pScreen );
@@ -80,6 +81,7 @@ namespace kick_ui
 
         Screen currentScreen{ Screen::Invalid };
         Screen prevScreen{ Screen::Invalid };
+        bool   isShutDown{ false };
     };
 
     static void padPress( const std::vector<int>& Notes, int Velocity, mt::SamplePlayType PlayType );

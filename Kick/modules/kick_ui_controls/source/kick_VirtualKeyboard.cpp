@@ -454,6 +454,10 @@ namespace ui
         inputTextLabel.setFocusContainerType( juce::Component::FocusContainerType::focusContainer );
         inputTextLabel.setJustification( juce::Justification::centredLeft );
 
+        // Return and Escape on a computer keyboard: Apply and Cancel.
+        inputTextLabel.onReturnKey = [this]() { mt::utils::exitDialog( this, UI::APPLY ); };
+        inputTextLabel.onEscapeKey = [this]() { mt::utils::exitDialog( this, UI::CANCEL ); };
+
         auto keyEntered = [this]( const juce::String& key ) {
             if( !key.compareIgnoreCase( "clear" ) )
             {
@@ -530,6 +534,9 @@ namespace ui
     {
         showKeyboard( KeyboardType );
         mt::utils::showOptions( Title, this, std::forward<std::function<void( int )>>( Callback ), Bounds );
+
+        // The pop-up has taken the focus; typing goes to the text.
+        inputTextLabel.grabKeyboardFocus();
     }
 
     void KickVirtualKeyBoard::close()

@@ -110,17 +110,21 @@ namespace contracts
         { ']', { contracts::DeviceControlContracts::EN_NOTES, false } }
     };
 
-    void keyPressedDetector::detectForKeyCode( int KeyCode, const cmdInfo& Info )
+    void keyPressedDetector::detectForKeyCode( int KeyCode, bool isKeyDown, bool AllowPress, const cmdInfo& Info )
     {
         // Compose message header ...
         CPktMgr::HWMsg_t hwMsg;
         hwMsg.pktType = Info.pktType;
         hwMsg.pktCmd  = Info.pktCmd;
 
-        auto isKeyDown = juce::KeyPress::isKeyCurrentlyDown( KeyCode );
+        // A key typed into a text editor is the editor's until it is up.
+        if( !AllowPress && isKeyDown && !_keys.contains( KeyCode ) )
+            _typedKeys.addIfNotAlreadyThere( KeyCode );
+        else if( !isKeyDown )
+            _typedKeys.removeAllInstancesOf( KeyCode );
 
         // Check for Key Pressed...
-        if( isKeyDown && !_keys.contains( KeyCode ) )
+        if( isKeyDown && !_keys.contains( KeyCode ) && !_typedKeys.contains( KeyCode ) )
         {
             DBG( "Key Pressed: " << juce::KeyPress( KeyCode ).getTextDescription() );
             _keys.addIfNotAlreadyThere( KeyCode );
@@ -166,24 +170,69 @@ namespace contracts
         }
     }
 
+    void keyPressedDetector::listenTo( juce::Component* Target )
+    {
+        if( target == Target )
+            return;
+
+        if( target != nullptr )
+            target->removeKeyListener( this );
+
+        target = Target;
+
+        if( target != nullptr )
+        {
+            target->addKeyListener( this );
+            startTimer( shiftPollMs );
+        }
+        else
+        {
+            stopTimer();
+        }
+    }
+
+    void keyPressedDetector::timerCallback()
+    {
+        setShiftDown( juce::ModifierKeys::currentModifiers.isShiftDown(), isTextInput( juce::Component::getCurrentlyFocusedComponent() ) );
+    }
+
+    void keyPressedDetector::setShiftDown( bool ShiftDown, bool TextInputHasFocus )
+    {
+        if( shiftBtnState == ShiftDown || ( ShiftDown && TextInputHasFocus ) )
+            return;
+
+        shiftBtnState = ShiftDown;
+        CPktMgr::HWMsg_t hwMsg;
+        hwMsg.data.push_back( (juce::int8)contracts::DeviceControlContracts::EN_SHIFT );
+        hwMsg.data.push_back( ShiftDown ? (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED : (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED ); // Pressed while Shift is down, as the front panel sends it
+        contracts::KeyboardSignals::KeyboardEventTriggered( hwMsg );
+    }
+
+    void keyPressedDetector::scanKeys( const std::function<bool( int )>& IsKeyDown, bool TextInputHasFocus )
+    {
+        for( const auto& [keyCode, info] : _keyMap )
+            detectForKeyCode( keyCode, IsKeyDown( keyCode ), !TextInputHasFocus, info );
+    }
+
+    bool keyPressedDetector::isTextInput( const juce::Component* Focused )
+    {
+        auto editor = dynamic_cast<const juce::TextEditor*>( Focused );
+        return editor != nullptr && !editor->isReadOnly();
+    }
+
     bool keyPressedDetector::keyPressed( const juce::KeyPress&, juce::Component* )
     {
-        return true;
+        // Typing goes to a text editor, which has the key first; the rest of
+        // the keys are the front panel's.
+        return !isTextInput( juce::Component::getCurrentlyFocusedComponent() );
     }
 
     bool keyPressedDetector::keyStateChanged( bool, juce::Component* )
     {
-        auto mod = juce::ModifierKeys::getCurrentModifiers();
-        if( shiftBtnState != mod.isShiftDown() )
-        {
-            shiftBtnState = mod.isShiftDown();
-            CPktMgr::HWMsg_t hwMsg;
-            hwMsg.data.push_back( (juce::int8)contracts::DeviceControlContracts::EN_SHIFT );
-            hwMsg.data.push_back( shiftBtnState ? (juce::int8)contracts::DeviceControlContracts::BTN_PRESSED : (juce::int8)contracts::DeviceControlContracts::BTN_RELEASED ); // Pressed while Shift is down, as the front panel sends it
-            contracts::KeyboardSignals::KeyboardEventTriggered( hwMsg );
-        }
-        for( const auto& [keyCode, info] : _keyMap )
-            detectForKeyCode( keyCode, info );
-        return true;
+        const auto textInputHasFocus = isTextInput( juce::Component::getCurrentlyFocusedComponent() );
+
+        setShiftDown( juce::ModifierKeys::getCurrentModifiers().isShiftDown(), textInputHasFocus );
+        scanKeys( []( int keyCode ) { return juce::KeyPress::isKeyCurrentlyDown( keyCode ); }, textInputHasFocus );
+        return !textInputHasFocus;
     }
 } // namespace
