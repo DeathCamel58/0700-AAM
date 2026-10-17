@@ -19,7 +19,8 @@
 
 // Tests of the system information the preferences and the system resources
 // window show: CPU and memory use parsed from /proc, and the DNS server
-// from systemd-networkd's and systemd-resolved's state files. The parsers
+// from systemd-networkd's and systemd-resolved's state files; and how the
+// device information is written (kick_DisplayFormat.h). The parsers
 // and lookups are fed
 // fixture copies of the files, so the results do not depend on this
 // machine. Built with -DKICK_BUILD_TESTS=ON; it needs no arguments, creates
@@ -29,6 +30,7 @@
 
 #include "hardware/source/kick_Resorces.cpp"
 #include "hardware/source/kick_NetInfo.h"
+#include "common/source/kick_DisplayFormat.h"
 
 #include <cstdio>
 
@@ -219,6 +221,25 @@ namespace
 
         root.deleteRecursively();
     }
+
+    void testDeviceInfo()
+    {
+        namespace display = mt::display;
+
+        CHECK( display::buildDate( "Oct 17 2026", "02:28:15" ) == "2026-10-17 02:28" );
+        CHECK( display::buildDate( "Mar  9 2018", "12:34:56" ) == "2018-03-09 12:34" );
+        CHECK( display::buildDate( __DATE__, __TIME__ ).length() == 16 );
+        CHECK( display::buildDate( "someday", "" ) == "someday" );
+        CHECK( display::buildTimestamp( "20261017022815" ) == "2026-10-17 02:28" );
+        CHECK( display::buildTimestamp( "unknown" ) == "unknown" );
+
+        CHECK( display::serialNumber( "000000000" ) == display::unavailable() );
+        CHECK( display::serialNumber( "" ) == display::unavailable() );
+        CHECK( display::serialNumber( " 0000000000000000\n" ) == display::unavailable() );
+        CHECK( display::serialNumber( "1a2b0c3d" ) == "1a2b0c3d" );
+        CHECK( display::version( "" ) == display::unavailable() );
+        CHECK( display::version( "1.4" ) == "1.4" );
+    }
 }
 
 int main()
@@ -227,6 +248,7 @@ int main()
     testMemory();
     testStorage();
     testDns();
+    testDeviceInfo();
 
     if( failures != 0 )
     {

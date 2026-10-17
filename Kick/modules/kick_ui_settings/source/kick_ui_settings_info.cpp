@@ -82,23 +82,27 @@ namespace kick_ui
     {
         auto& hwpref = mt::HwPref::getHwPref();
 
-        juce::String serialNumber          = hwpref.getDevSerial();
-        juce::String ControlSurfaceVersion = hwpref.getSurfaceVersion();
-        juce::String firmWareVersion       = hwpref.getSystemVersion();
-
-        srNo.value.setText( serialNumber, juce::dontSendNotification );
-        cVer.value.setText( ControlSurfaceVersion, juce::dontSendNotification );
-        fVer.value.setText( firmWareVersion, juce::dontSendNotification );
+        // In an emulator, or before the control surface has answered,
+        // there is no serial number or control version: say so instead of
+        // showing zeros or nothing.
+        srNo.value.setText( mt::display::serialNumber( hwpref.getDevSerial() ), juce::dontSendNotification );
+        cVer.value.setText( mt::display::version( hwpref.getSurfaceVersion() ), juce::dontSendNotification );
+        fVer.value.setText( mt::display::version( hwpref.getSystemVersion() ), juce::dontSendNotification );
 
 #if defined( TIMESTAMP ) && ( TIMESTAMP > 0 )
-        juce::String buildStamp = juce::String( BUILD_TIMESTAMP_STR ) + " :: " + juce::String( GIT_SHORT_HASH_STR ) + " :: " + juce::String( GIT_BRANCH_STR );
+        juce::String buildStamp = mt::display::buildTimestamp( BUILD_TIMESTAMP_STR ) + " " + juce::String( GIT_SHORT_HASH_STR );
 #else
-        juce::String buildStamp = juce::String( __DATE__ ) + " :: " + juce::String( __TIME__ );
+        juce::String buildStamp = mt::display::buildDate( __DATE__, __TIME__ );
 #endif
-        date.value.setText( buildStamp, juce::dontSendNotification );
+        date.value.setText( buildStamp.trim(), juce::dontSendNotification );
     }
 
-    void SettingsInfo::refresh() {}
+    void SettingsInfo::refresh()
+    {
+        // The control version arrives from the control surface after the
+        // page is made.
+        updateInfo();
+    }
 
     void SettingsInfo::setupHeader( kick_ui::KickModeHeader& Hdr ) {}
 
