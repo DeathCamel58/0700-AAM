@@ -170,6 +170,7 @@ namespace ui
 
     void RecentProject::loadProject( juce::File& Project )
     {
+        ui::tapLog::write( "Tap: loading project " + Project.getFullPathName() + " (a load running " + juce::String( (int)isProjectLoading ) + ")" );
         ui::LoadProjectAndAnimation::getInstance().startLoading( Project );
     }
 
@@ -659,32 +660,55 @@ namespace ui
     {
         stopTimer();
 
+        const auto duration   = ui::tapLog::pressDuration( e );
+        const auto logRelease = [&]( const juce::String& decision ) {
+            ui::tapLog::write( "Tap: tile " + juce::String( index ) + " \"" + label.getText() + "\" released after " + juce::String( duration )
+                               + " ms, clicks " + juce::String( e.getNumberOfClicks() ) + ", dragged " + juce::String( (int)isDragging )
+                               + ", held timer ran " + juce::String( (int)isLongPressTriggered ) + " -> " + decision );
+        };
+
         if( isDragging ) //Ignore dragging
+        {
+            logRelease( "drag, ignored" );
             return;
+        }
 
         // A long press is told by how long the press lasted, from the
         // events' own times. The timer only shows the selection while the
         // tile is held: when the UI is busy it can run before a release
         // that came well within the threshold is handled, and the tap then
         // counted as a long press and only selected the tile.
-        if( ( e.eventTime - e.mouseDownTime ).inMilliseconds() >= longPressThreshold )
+        // A demo or a template has nothing to offer on a long press, so
+        // there a long press opens it as a tap does: a tap whose release
+        // is stamped late (by a busy display server, say) still opens it.
+        if( duration >= longPressThreshold && onLongPressed )
         {
+            logRelease( "long press" );
             DBG( "LongPressed " );
             if( !isLongPressTriggered )
                 select();
-            if( onLongPressed )
-                onLongPressed( index );
+            onLongPressed( index );
         }
         else if( e.getNumberOfClicks() == 1 ) // The second tap of a double tap is not another tap.
         {
+            logRelease( "tap, opening" );
             // A tap opens the item, after a moment to draw it selected.
             select();
             juce::Component::SafePointer<RecentItems> safeThis( this );
             juce::Timer::callAfterDelay( 20, [safeThis]() {
-                if( safeThis != nullptr && safeThis->onMouseDown )
+                if( safeThis == nullptr )
+                {
+                    ui::tapLog::write( "Tap: tile deleted before it could open" );
+                    return;
+                }
+                ui::tapLog::write( "Tap: tile " + juce::String( safeThis->index ) + " opening " + safeThis->path.getFullPathName()
+                                   + ( safeThis->onMouseDown ? juce::String() : juce::String( " (no handler)" ) ) );
+                if( safeThis->onMouseDown )
                     safeThis->onMouseDown( safeThis->index, safeThis->path );
             } );
         }
+        else
+            logRelease( "second tap of a double tap, ignored" );
     }
 
     void RecentItems::timerCallback()
@@ -693,6 +717,7 @@ namespace ui
         // offers to load or remove it).
         stopTimer();
         DBG( "Longpressed timer " );
+        ui::tapLog::write( "Tap: tile " + juce::String( index ) + " \"" + label.getText() + "\" held, selecting it" );
         isLongPressTriggered = true;
         select();
     }
@@ -735,6 +760,20 @@ namespace ui
     {
         if( !bounds.contains( e.getPosition() ) ) //checks whether clicking on outside
             setVisible( false );
+    }
+
+    void LongPressComp::inputAttemptWhenModal()
+    {
+        // See mt::fsPopup::inputAttemptWhenModal().
+        if( !isShowing() )
+        {
+            ui::tapLog::write( "Tap: ERROR: the project menu was modal but cannot be seen; closing it" );
+            exitModalState( 0 );
+            setVisible( false );
+            return;
+        }
+        ui::tapLog::write( "Tap: blocked by the project menu" );
+        juce::Component::inputAttemptWhenModal();
     }
 
     void LongPressComp::paint( juce::Graphics& g )

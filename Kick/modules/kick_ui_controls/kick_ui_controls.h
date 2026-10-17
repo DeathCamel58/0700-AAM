@@ -35,6 +35,7 @@
     #include "source/kick_layout.h"
     #include "source/kick_layoutRoot.h"
     #include "source/kick_LongPressHint.h"
+    #include "source/kick_TapLog.h"
 
     #include "source/kick_utils_blur.h"
     #include "source/kick_utils_focusDebugger.h"

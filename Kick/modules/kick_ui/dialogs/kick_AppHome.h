@@ -77,6 +77,7 @@ namespace kick_ui
         std::unique_ptr<KickLEDs>                  ledControl_;
         std::unique_ptr<PerformanceOverlay>        performanceOverlay_;
         std::unique_ptr<juce::TooltipWindow>       tooltipWindow_;
+        std::unique_ptr<ui::tapLog::Listener>      tapLog_;
         juce::Component::SafePointer<AppStatusbar> statusBar_;
         int                                        page{ 0 };
 

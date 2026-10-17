@@ -147,6 +147,10 @@ namespace kick_ui
         // (ui::LongPressHint).
         tooltipWindow_ = std::make_unique<juce::TooltipWindow>( this, 700 );
 
+        // Every press and release goes to the log ("Tap: "), to tell where
+        // a tap that seemed to do nothing went.
+        tapLog_ = std::make_unique<ui::tapLog::Listener>();
+
         // Connect sceeen signals.
         // Open screen as passed in Argument.
         signals::sigScreenOpen.connect( [&]( Screen Scrn ) {
@@ -266,6 +270,7 @@ namespace kick_ui
         isShutDown = true;
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
         tooltipWindow_.reset();
+        tapLog_.reset();
         removeAllChildren();
         ctrlBar_.reset();
         ledControl_.reset();

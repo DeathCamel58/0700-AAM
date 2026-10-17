@@ -89,8 +89,16 @@ namespace contracts
         { juce::KeyPress::F11Key, { contracts::DeviceControlContracts::EN_STOP, false } },
         { juce::KeyPress::spaceKey, { contracts::DeviceControlContracts::EN_PLAY, false } },
         { juce::KeyPress::F12Key, { contracts::DeviceControlContracts::EN_PLAYSTART, false } },
+#if !JUCE_LINUX
+        // On Linux, JUCE cannot tell whether these are down: it looks them
+        // up as key symbols that do not exist, and reads the state of key
+        // code 0. No key has that code (X's start at 8), and the keymap
+        // events JUCE copies the key states from do not carry it, so it
+        // reads whatever was left there. They then went "down" with
+        // whatever key was pressed next (PLAY START and STOP with Escape).
         { juce::KeyPress::playKey, { contracts::DeviceControlContracts::EN_PLAYSTART, false } },
         { juce::KeyPress::stopKey, { contracts::DeviceControlContracts::EN_STOP, false } },
+#endif
 
         { juce::KeyPress::escapeKey, { contracts::DeviceControlContracts::EN_MENU, false } },
         { juce::KeyPress::insertKey, { contracts::DeviceControlContracts::EN_PREF, false } },

@@ -81,10 +81,29 @@ namespace ui
 
     void KickButton::mouseUp( const juce::MouseEvent& e )
     {
+        const auto hintShown = longPressHint.isShowing();
+
         // A press held long enough to show the hint does not click: with the
         // button no longer down, juce::Button::mouseUp() does not click it.
-        if( longPressHint.mouseUp( e ) )
+        const auto held = longPressHint.mouseUp( e );
+        if( held )
             setState( juce::Button::buttonNormal );
+
+        // What juce::Button::mouseUp() decides on: the button clicks if it
+        // was still down and under the mouse.
+        const auto   wasDown = isDown();
+        const auto   wasOver = isOver();
+        juce::String decision;
+        if( held )
+            decision = "held for the hint, no click";
+        else if( wasDown && wasOver )
+            decision = "click";
+        else
+            decision = "no click";
+        ui::tapLog::write( "Tap: button " + ui::tapLog::describe( this ) + " released after " + juce::String( ui::tapLog::pressDuration( e ) )
+                           + " ms: down " + juce::String( (int)wasDown ) + ", over " + juce::String( (int)wasOver )
+                           + ", enabled " + juce::String( (int)isEnabled() ) + ", hint shown " + juce::String( (int)hintShown )
+                           + " -> " + decision );
 
         juce::Button::mouseUp( e );
     }

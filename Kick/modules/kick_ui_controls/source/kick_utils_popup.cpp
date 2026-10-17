@@ -180,6 +180,27 @@ namespace mt
         }
 
     protected:
+        // A press elsewhere while this is modal: JUCE keeps it from what it
+        // was meant for.
+        void inputAttemptWhenModal() override
+        {
+            juce::Logger::writeToLog( "Tap: blocked by " + getPopupName() + " (visible " + juce::String( (int)isVisible() )
+                                      + ", showing " + juce::String( (int)isShowing() ) + ")" );
+
+            // Modal and out of sight, nothing on the screen says so or can
+            // close it, and every tap elsewhere is dropped: cancel it, and
+            // the tap goes where it was meant to. (JUCE cancels a modal
+            // component that stops showing, but not one that was not
+            // showing when it became modal.)
+            if( !isShowing() )
+            {
+                juce::Logger::writeToLog( "Pop-up: ERROR: " + getPopupName() + " was modal but cannot be seen; cancelling it" );
+                exitModalState( UI::CANCEL );
+                return;
+            }
+            juce::Component::inputAttemptWhenModal();
+        }
+
         virtual void reset()
         {
             setAlwaysOnTop( false );

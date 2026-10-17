@@ -18,6 +18,18 @@ namespace ui
 
     void LoadProjectAndAnimation::startLoading( juce::File project )
     {
+        ui::tapLog::write( "Tap: start loading " + project.getFullPathName() + " (loader thread running " + juce::String( (int)isThreadRunning() )
+                           + ", animation running " + juce::String( (int)isAnimationRunning() ) + ")" );
+
+        // One load at a time: startThread() does nothing while the thread
+        // runs, so this project would not load, and run() could read proj
+        // while it is written here.
+        if( isThreadRunning() )
+        {
+            ui::tapLog::write( "Tap: a project is still loading; not loading " + project.getFullPathName() );
+            return;
+        }
+
         ui::RecentProject::isProjectLoading = true;
         proj                                = project;
         startThread();

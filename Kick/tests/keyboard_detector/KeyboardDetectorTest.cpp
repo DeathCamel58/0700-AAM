@@ -118,6 +118,18 @@ int main()
     down.erase( 'S' );
     scan();
 
+    // Escape is MENU, and only MENU. (On Linux JUCE reports the media keys
+    // play and stop as down at random, here along with Escape.)
+    down.insert( juce::KeyPress::escapeKey );
+#if JUCE_LINUX
+    down.insert( juce::KeyPress::playKey );
+    down.insert( juce::KeyPress::stopKey );
+#endif
+    scan();
+    check( sentOnly( DCC::EN_MENU, DCC::BTN_PRESSED ), "Escape presses MENU alone" );
+    down.clear();
+    scan();
+
     // Shift is sent as it goes down and up, once each.
     auto& detector = contracts::getKeypressDetector();
     sent.clear();
