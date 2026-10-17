@@ -36,16 +36,28 @@ namespace kick_ui
         : SettingsInterface( 6, 3, true )
     {
         ui::KickGrid::setBackgroundColour( juce::Colours::transparentBlack );
-        setRowTitles( { "", "WIFI SETTINGS", "SSID", "PASSWORD", "Connection/Status" } );
+        setRowTitles( { "", "WIFI SETTINGS", "SSID", "PASSWORD", "CONNECTION", "NETWORK" } );
 
         addComponent( enabled, 1, 0 );
         addComponent( scanWifi, 2, 0 );
         addComponent( wifiList, 2, 1 );
         addComponent( password, 3, 0 );
         addComponent( connect, 4, 0 );
-        addComponent( wifIP, 4, 1 );
-        addComponent( gateway, 4, 2 );
-        addComponent( subnet, 4, 3 );
+        // The connection's addresses, titled, on a row of their own (the
+        // subnet mask was placed in a fourth column of three, never shown).
+        addComponent( wifIP, 5, 0 );
+        addComponent( subnet, 5, 1 );
+        addComponent( gateway, 5, 2 );
+        wifIP.setTitle( TRANS( "IP Address" ) );
+        subnet.setTitle( TRANS( "Subnet Mask" ) );
+        gateway.setTitle( TRANS( "Gateway" ) );
+        for( auto* value : { &wifIP, &subnet, &gateway } )
+        {
+            value->showTitle( true );
+            value->setTitleColour( ui::Theme::textColour( 1 ) );
+            value->setTitleJustification( juce::Justification::centred );
+            value->setValueJustification( juce::Justification::centred );
+        }
 
         password.setEditable( false, true );
         enabled.onClick = [&]() {
