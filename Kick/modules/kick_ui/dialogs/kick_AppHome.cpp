@@ -195,7 +195,7 @@ namespace kick_ui
 
         // Start listining to inputs now...
         setWantsKeyboardFocus( true );
-        addKeyListener( &contracts::getKeypressDetector() );
+        contracts::getKeypressDetector().listenTo( this );
         // LED control
         ledControl_ = std::make_unique<KickLEDs>();
         // Not a child: the window shows it above this and its pop-ups.
@@ -257,13 +257,24 @@ namespace kick_ui
     {
         cancelPendingUpdate();
         ui::setLayoutRoot( nullptr );
-        removeKeyListener( &contracts::getKeypressDetector() );
+        contracts::getKeypressDetector().listenTo( nullptr );
+        isShutDown = true;
         contracts::DclSignals::hardwareInputTriggered.disconnect_all();
         removeAllChildren();
         ctrlBar_.reset();
         ledControl_.reset();
         performanceOverlay_.reset();
         screens_.clear();
+    }
+
+    void KickHome::parentHierarchyChanged()
+    {
+        // The keyboard is listened to at the window this is in (see
+        // listenTo()). Listening here missed every key typed while the
+        // focus was nowhere, as it is after a pop-up closes, until a tap
+        // gave something in here the focus again.
+        if( !isShutDown )
+            contracts::getKeypressDetector().listenTo( getTopLevelComponent() );
     }
 
     juce::Component* KickHome::getPerformanceOverlay()

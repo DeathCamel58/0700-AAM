@@ -53,6 +53,15 @@ namespace contracts
         bool              keyStateChanged( bool isKeyDown, juce::Component* originatingComponent ) override;
         std::atomic<bool> shiftBtnState;
 
+        // Listens to the keys that reach Target: nullptr stops. Give it the
+        // window. JUCE hands a key to the focused component and then to its
+        // parents up to the window, or to the window alone while nothing
+        // has the focus, so only there are the keys seen wherever the focus
+        // is (a pop-up, a screen, nothing at all).
+        void listenTo( juce::Component* Target );
+
+    private:
+        juce::Component::SafePointer<juce::Component> target;
     };
     keyPressedDetector& getKeypressDetector();
 }

@@ -166,6 +166,20 @@ namespace contracts
         }
     }
 
+    void keyPressedDetector::listenTo( juce::Component* Target )
+    {
+        if( target == Target )
+            return;
+
+        if( target != nullptr )
+            target->removeKeyListener( this );
+
+        target = Target;
+
+        if( target != nullptr )
+            target->addKeyListener( this );
+    }
+
     bool keyPressedDetector::keyPressed( const juce::KeyPress&, juce::Component* )
     {
         return true;
