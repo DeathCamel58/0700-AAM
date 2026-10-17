@@ -66,12 +66,26 @@ namespace ui
             UpperCaseLetterComponent();
         };
 
+        // The text field. It takes the keyboard focus while the pop-up is
+        // shown, so that a computer keyboard types into it; as a control it
+        // ignores the front panel's encoder and buttons, as the pop-up did
+        // while it had the focus.
+        struct InputField : public KickTextEditor
+            , public KickControlsProcessor
+        {
+            using KickTextEditor::KickTextEditor;
+
+            void sliderMoved( float ) override {}
+            void knobRotated( double ) override {}
+            void knobClicked() override {}
+        };
+
         Type                     currentType{ Type::KEYS_LOWERCASE_ALPHABETIC };
         LowerCaseLetterComponent letterComp;
         NumberComponent          numComp;
         SpecialSymbols           speSym;
         UpperCaseLetterComponent upperCaseComp;
-        KickTextEditor           inputTextLabel;
+        InputField               inputTextLabel;
 
         void resized() override;
 

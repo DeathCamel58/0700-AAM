@@ -37,6 +37,7 @@ namespace contracts
     struct keyPressedDetector : public juce::KeyListener
     {
         juce::Array<int> _keys;
+        juce::Array<int> _typedKeys;
 
         struct cmdInfo
         {
@@ -47,7 +48,18 @@ namespace contracts
         };
 
         bool isValidCmd( const cmdInfo& Cmd ) { return contracts::DeviceControlContracts::EN_INVALID_ID != Cmd.id; }
-        void detectForKeyCode( int KeyCode, const cmdInfo& Info );
+        void detectForKeyCode( int KeyCode, bool IsKeyDown, bool AllowPress, const cmdInfo& Info );
+
+        // Sends the events of the keys that went down or up since the last
+        // scan; IsKeyDown tells whether a key (a juce::KeyPress key code)
+        // is down. While TextInputHasFocus, keys going down are left to the
+        // text editor: they send nothing, then or later (they are typed),
+        // but the release of a key that went down before is still sent, so
+        // that no pad is left held.
+        void scanKeys( const std::function<bool( int )>& IsKeyDown, bool TextInputHasFocus );
+
+        // Whether Focused takes typed text: an editable text editor.
+        static bool isTextInput( const juce::Component* Focused );
 
         bool              keyPressed( const juce::KeyPress& key, juce::Component* originatingComponent ) override;
         bool              keyStateChanged( bool isKeyDown, juce::Component* originatingComponent ) override;
