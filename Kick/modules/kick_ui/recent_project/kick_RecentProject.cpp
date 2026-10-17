@@ -559,6 +559,7 @@ namespace ui
         mt::utils::addChildComponents( this, label, date, timeStamp, image, icon );
         mt::utils::makeVisible( image, label );
 
+        label.setInterceptsMouseClicks( false, false );
         date.setInterceptsMouseClicks( false, false );
         timeStamp.setInterceptsMouseClicks( false, false );
         icon.setInterceptsMouseClicks( false, false );
@@ -625,7 +626,7 @@ namespace ui
         date.setBoundsRelative( 0.35f, 0.5f, 0.55f, 0.15f );
     }
 
-    void RecentItems::mouseDown( const juce::MouseEvent& e )
+    void RecentItems::select()
     {
         if( clearAllShowBorderCallback )
             clearAllShowBorderCallback();
@@ -635,6 +636,11 @@ namespace ui
 
         showBorder( true );
         repaint();
+    }
+
+    void RecentItems::mouseDown( const juce::MouseEvent& )
+    {
+        isDragging           = false;
         isLongPressTriggered = false;
         startTimer( longPressThreshold ); // Start the timer for long press detection
     }
@@ -652,40 +658,37 @@ namespace ui
 
     void RecentItems::mouseUp( const juce::MouseEvent& e )
     {
-        if( isLongPressTriggered && !isDragging )
+        stopTimer();
+
+        if( isDragging ) //Ignore dragging
+            return;
+
+        if( isLongPressTriggered )
         {
             DBG( "LongPressed " );
             if( onLongPressed )
                 onLongPressed( index );
         }
-        else if( e.mouseWasClicked() && !isDragging ) //Ignore dragging
+        else if( e.getNumberOfClicks() == 1 ) // The second tap of a double tap is not another tap.
         {
-            startTimer( juce::MouseEvent::getDoubleClickTimeout() + 5 ); //Let it happend if it is double-click
+            // A tap opens the item, after a moment to draw it selected.
+            select();
+            juce::Component::SafePointer<RecentItems> safeThis( this );
+            juce::Timer::callAfterDelay( 20, [safeThis]() {
+                if( safeThis != nullptr && safeThis->onMouseDown )
+                    safeThis->onMouseDown( safeThis->index, safeThis->path );
+            } );
         }
-    }
-
-    void RecentItems::mouseDoubleClick( const juce::MouseEvent& e )
-    {
-        isDoubleClicked = true;
     }
 
     void RecentItems::timerCallback()
     {
-        if( !isDragging && getTimerInterval() == longPressThreshold )
-        {
-            DBG( "Longpressed timer " );
-
-            isLongPressTriggered = true;
-        }
-        else //mouseDown or mouseDoubleClick
-        {
-            juce::Timer::callAfterDelay( 20, [&]() { //Give some delay to draw the border
-                if( onMouseDown )
-                    onMouseDown( index, path );
-            } );
-            isDoubleClicked = false;
-        }
+        // A long press selects the item (and on release, for a project,
+        // offers to load or remove it).
         stopTimer();
+        DBG( "Longpressed timer " );
+        isLongPressTriggered = true;
+        select();
     }
 
     ////////////////////////////////////////////////////////////////////////////////

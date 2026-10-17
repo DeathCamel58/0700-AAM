@@ -55,6 +55,7 @@ namespace ui
         ~RecentItems() = default;
 
         void setProperties( int Index, const juce ::String& Path );
+        void select();
         void showBorder( bool );
 
         inline bool isShowBorder() const noexcept { return bShowBorder; }
@@ -63,14 +64,12 @@ namespace ui
         void mouseDown( const juce::MouseEvent& e ) override;
         void mouseUp( const juce::MouseEvent& e ) override;
         void mouseDrag( const juce::MouseEvent& e ) override;
-        void mouseDoubleClick( const juce::MouseEvent& e ) override;
         void timerCallback() override;
 
     private:
         bool bShowBorder{ false };
         bool isLongPressTriggered{ false };
         bool isDragging{ false };
-        bool isDoubleClicked{ false };
         int  longPressThreshold = 500; // Set the long press threshold (in milliseconds)
         int  dragThreshold      = 5;
         int  index{ -1 };
