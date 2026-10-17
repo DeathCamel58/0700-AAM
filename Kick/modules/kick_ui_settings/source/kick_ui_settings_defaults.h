@@ -42,7 +42,7 @@ namespace kick_ui
         ui::KickListBox ssLaunch{ ui::KickListBox::withTitleBar, "ON LAUNCH", { "Selector", "New Project", "Last Used" } };
         ui::KickNumber  ssRecProjects{ "RECENT PROJECTS", 1, 5, 5, 1 };
 
-        ui::KickToggleButton asEnabled{ "AUTO SAVE", "ENABLED", "DISABLED" };
+        ui::KickToggleOptions asEnabled{ "AUTO SAVE", { "Off", "On" } };
         ui::KickListBox      asTimeout{ ui::KickListBox::withTitleBar, "SAVE AFTER", { "15 Sec", "30 Sec", "1 min", "2 min", "5 min" }, 1 };
 
         ui::KickTempo   pdTempo{ "TEMPO", (int)BPM::MIN, (int)BPM::MAX, (int)BPM::DEFAULT, (int)BPM::STEP };

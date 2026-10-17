@@ -41,8 +41,8 @@ namespace kick_ui
         mt::utils::setValueFontHeight( 20.f, ssLaunch, ssRecProjects, asEnabled, asTimeout, pdTempo, pdBars, pdNum, pdDen,
                                        pdRootNote, pdScale, pdSeq, pdTracks, bitDepath, enableList, defaultName );
 
-        asEnabled.setToggleState( settings.projects.isAutoSave(), juce::dontSendNotification );
-        settings.setAutoSave( asEnabled.getToggleState() );
+        asEnabled.setSelected( settings.projects.isAutoSave() ? 1 : 0, juce::dontSendNotification );
+        settings.setAutoSave( settings.projects.isAutoSave() );
         asTimeout.setSelected( settings.projects.saveAfter(), juce::sendNotification );
 
         addComponent( ssLaunch, 0, 0 );
@@ -76,9 +76,9 @@ namespace kick_ui
             settings.projects.bitDepth = ( str );
         };
 
-        asEnabled.onClick = [this]() {
-            settings.setAutoSave( asEnabled.getToggleState() );
-            settings.projects.isAutoSave = ( asEnabled.getToggleState() );
+        asEnabled.onSelectionChanged = [this]( int index, const juce::String& ) {
+            settings.setAutoSave( index == 1 );
+            settings.projects.isAutoSave = ( index == 1 );
         };
         asTimeout.onSelectionChanged = [this]( int index, const juce::String& str ) {
             settings.projects.saveAfter = ( str );
@@ -159,7 +159,7 @@ namespace kick_ui
         ssLaunch.setSelected( str, juce::dontSendNotification );
 
         ssRecProjects.setValue( settings.projects.maxRecentProjects(), juce::dontSendNotification );
-        asEnabled.setToggleState( settings.projects.isAutoSave(), juce::dontSendNotification );
+        asEnabled.setSelected( settings.projects.isAutoSave() ? 1 : 0, juce::dontSendNotification );
         asTimeout.setSelected( settings.projects.saveAfter(), juce::dontSendNotification );
 
         bitDepath.setSelected( settings.projects.bitDepth(), juce::dontSendNotification );
