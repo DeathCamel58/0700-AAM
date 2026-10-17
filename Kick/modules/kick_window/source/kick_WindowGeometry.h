@@ -42,21 +42,39 @@ namespace kick::window
 
     // Where a panel panelSize layout units in size shows in an area that
     // shows the layout: scaled as the layout is, with its bottom-right
-    // corner margin layout units in from the bottom-right corner of the
-    // area (not of the letterboxed layout: of the window, the display in
-    // kiosk mode), on whole pixels. The transform maps the panel's bounds,
-    // at the origin, to that place.
+    // corner margin.x layout units in from the right edge of the area and
+    // margin.y up from its bottom edge (not of the letterboxed layout: of
+    // the window, the display in kiosk mode), on whole pixels. The
+    // transform maps the panel's bounds, at the origin, to that place.
     juce::AffineTransform placeInBottomRight( juce::Rectangle<int> area, juce::Rectangle<int> layout,
-                                              juce::Point<int> panelSize, int margin );
+                                              juce::Point<int> panelSize, juce::Point<int> margin );
 
     // A saved window position and size: "x y width height". The position
-    // is the frame's top-left corner, the size the client area's (as
-    // chooseWindowBounds() gives them).
+    // is the one to ask for (the frame's top-left corner, as
+    // chooseWindowBounds() gives it; see findPlacementOffset()), the size
+    // the client area's.
     juce::String                        formatWindowBounds( juce::Rectangle<int> bounds );
     std::optional<juce::Rectangle<int>> parseWindowBounds( const juce::String& text );
 
-    // The bounds to save for a window with this client area and frame.
-    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::BorderSize<int> frame );
+    // How far from the position a desktop window asked for (its frame's
+    // top-left corner, as chooseWindowBounds() gives it) the window manager
+    // put its client area, from where it was once placed. ICCCM window
+    // managers put the frame's top-left corner there, so that the client
+    // area is the frame's left and top borders in. Weston's X window
+    // manager puts the visible part of its frame there, but the frame it
+    // publishes (_NET_FRAME_EXTENTS) includes the shadow around it (32
+    // pixels on each side), so the client area is 32 pixels less far in
+    // than that frame says: subtracting that frame on saving moved the
+    // window 32 pixels up and to the left on every start.
+    // An offset no frame can make (beyond the frame's left or top border,
+    // or the assumed frame's when it is larger; or negative) means the
+    // window manager put the window somewhere else (or the user moved it
+    // first): the frame's top-left corner is taken instead.
+    juce::Point<int> findPlacementOffset( juce::Point<int> requested, juce::Point<int> placed, juce::BorderSize<int> frame );
+
+    // The bounds to save for a window with this client area, placed with
+    // this offset: the position to ask for to get the same client area.
+    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::Point<int> placementOffset );
 
     // When a desktop window's bounds are saved: once they have not changed
     // for a while (moves and resizes come in bursts, and each save writes

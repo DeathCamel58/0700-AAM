@@ -44,8 +44,15 @@ namespace kick_ui
         ~PerformanceOverlay() override;
 
         // In layout units; the window scales it with the layout.
-        static constexpr int width  = 300;
+        static constexpr int width  = 260;
         static constexpr int height = 170;
+
+        // Where it shows, in layout units in from the window's right edge
+        // and up from its bottom edge: above the button row (Apply,
+        // Cancel) of the standard dialogs and the keyboard pop-up, and so
+        // above the status bar and its BAR : BEAT : TICK counter too. At
+        // 1024x600 it covers 758-1018 x 307-477.
+        static juce::Point<int> getMargin();
 
     private:
         // One graph and its figures. Up to two lines (a and b), and up to
@@ -103,7 +110,8 @@ namespace kick_ui
         Row memory{ "RAM", 100.0f };
         Row audio{ "AUDIO", 100.0f };
 
-        perf::History xruns{ historySize };
+        perf::History      xruns{ historySize };
+        perf::RecentFrames recentFrames{ samplesPerSecond };
 
         perf::CpuTimes lastCpu;
         juce::uint64   lastProcessTicks{ 0 };

@@ -35,6 +35,7 @@
 #include <map>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace
 {
@@ -412,16 +413,103 @@ namespace
 
 namespace
 {
+    // A window manager: where it puts a window's client area relative to
+    // the position the window asks for, and the frame it publishes.
+    struct WindowManager
+    {
+        const char*           name;
+        juce::Point<int>      clientOffset;
+        juce::BorderSize<int> frameExtents; // top, left, bottom, right
+    };
+
+    const WindowManager windowManagers[] = {
+        // No frame (no window manager, or an undecorated window).
+        { "none", { 0, 0 }, {} },
+        // ICCCM: the frame's top-left corner where the window asks.
+        { "ICCCM", { 4, 40 }, { 40, 4, 4, 4 } },
+        { "ICCCM, thin frame", { 1, 1 }, { 1, 1, 1, 1 } },
+        { "ICCCM, large title bar", { 8, 64 }, { 64, 8, 8, 8 } },
+        // Weston 13's X window manager: the visible frame (a 6 pixel
+        // border and a 27 pixel title bar) where the window asks, but a
+        // published frame with the 32 pixel shadow around it.
+        { "Weston", { 6, 27 }, { 27 + 32, 6 + 32, 6 + 32, 6 + 32 } },
+    };
+
+    // Opens the window from the saved text as the window does, lets the
+    // window manager place it, and returns its client area and the text it
+    // saves.
+    std::pair<juce::Rectangle<int>, juce::String> openAndSave( const WindowManager& wm, const juce::String& saved,
+                                                               juce::Rectangle<int> display )
+    {
+        const auto requested = kick::window::chooseWindowBounds( kick::window::parseWindowBounds( saved ), { display }, display,
+                                                                 { 1024, 600 }, { 512, 300 } );
+        const auto client    = requested + wm.clientOffset;
+        const auto offset    = kick::window::findPlacementOffset( requested.getPosition(), client.getPosition(), wm.frameExtents );
+        return { client, kick::window::formatWindowBounds( kick::window::windowBoundsToSave( client, offset ) ) };
+    }
+
+    // Save, restore, save: the same bounds, and the window where it was.
+    void testWindowPlacementRoundTrip( const WindowManager& wm, juce::Rectangle<int> display )
+    {
+        // Nothing saved: wherever it opens is where it opens next time.
+        auto [client, saved] = openAndSave( wm, {}, display );
+        for( int start = 0; start < 3; ++start )
+        {
+            const auto [nextClient, nextSaved] = openAndSave( wm, saved, display );
+            CHECK( nextClient == client );
+            CHECK( nextSaved == saved );
+            if( nextSaved != saved )
+                std::printf( "  %s: %s, then %s\n", wm.name, saved.toRawUTF8(), nextSaved.toRawUTF8() );
+        }
+
+        // Moved and resized by the user (as in QEMU: its client area to
+        // 312,194 at 597x350): the window opens there again, every time.
+        const auto offset = kick::window::findPlacementOffset( client.getPosition() - wm.clientOffset, client.getPosition(),
+                                                               wm.frameExtents );
+        const juce::Rectangle<int> moved( 312, 194, 597, 350 );
+        saved = kick::window::formatWindowBounds( kick::window::windowBoundsToSave( moved, offset ) );
+        for( int start = 0; start < 3; ++start )
+        {
+            const auto [nextClient, nextSaved] = openAndSave( wm, saved, display );
+            CHECK( nextClient == moved );
+            CHECK( nextSaved == saved );
+        }
+    }
+
+    void testWindowPlacementRoundTrip()
+    {
+        // QEMU's display, where the window crept 32 pixels up and to the
+        // left on every start under Weston's desktop shell, and a larger one.
+        for( const auto display : { juce::Rectangle<int>( 0, 0, 1024, 600 ), juce::Rectangle<int>( 0, 0, 1280, 800 ) } )
+            for( const auto& wm : windowManagers )
+                testWindowPlacementRoundTrip( wm, display );
+
+        // Subtracting Weston's published frame instead moved the window 32
+        // pixels up and to the left on every start.
+        const auto& weston = windowManagers[4];
+        CHECK( kick::window::windowBoundsToSave( { 306, 170, 1024, 600 }, { weston.frameExtents.getLeft(), weston.frameExtents.getTop() } )
+               == juce::Rectangle<int>( 306 - 6 - 32, 170 - 27 - 32, 1024, 600 ) );
+
+        // Placed somewhere else than it asked (a window manager that places
+        // windows itself, or the user moved it first): the frame's top-left
+        // corner is subtracted.
+        CHECK( kick::window::findPlacementOffset( { 100, 100 }, { 400, 300 }, { 40, 4, 4, 4 } ) == juce::Point<int>( 4, 40 ) );
+        CHECK( kick::window::findPlacementOffset( { 100, 100 }, { 90, 120 }, { 40, 4, 4, 4 } ) == juce::Point<int>( 4, 40 ) );
+        CHECK( kick::window::findPlacementOffset( { 100, 100 }, { 400, 300 }, {} ) == juce::Point<int>() );
+        // Within the assumed frame when none is published (yet).
+        CHECK( kick::window::findPlacementOffset( { 100, 100 }, { 104, 140 }, {} ) == juce::Point<int>( 4, 40 ) );
+    }
+
     void testBoundsSaving()
     {
         using kick::window::BoundsSaving;
 
-        // The frame's top-left corner, with the client area's size.
-        CHECK( kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, { 40, 4, 4, 4 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        // The position to ask for, with the client area's size.
+        CHECK( kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, { 4, 40 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
         CHECK( kick::window::windowBoundsToSave( { 10, 20, 1024, 600 }, {} ) == juce::Rectangle<int>( 10, 20, 1024, 600 ) );
         // Restored there, the window manager puts the frame back where it was.
         const auto restored = kick::window::parseWindowBounds( kick::window::formatWindowBounds(
-            kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, kick::window::assumedWindowFrame ) ) );
+            kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, { 4, 40 } ) ) );
         const juce::Rectangle<int> qemu( 0, 0, 1280, 800 );
         CHECK( restored.has_value()
                && kick::window::chooseWindowBounds( restored, { qemu }, qemu, { 1024, 600 }, { 512, 300 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
@@ -526,7 +614,7 @@ namespace
     // The panel's corners, where the window shows them.
     juce::Rectangle<float> placedPanel( juce::Rectangle<int> area, juce::Point<int> panel, int margin )
     {
-        const auto transform = kick::window::placeInBottomRight( area, layout, panel, margin );
+        const auto transform = kick::window::placeInBottomRight( area, layout, panel, { margin, margin } );
         return juce::Rectangle<float>( 0.0f, 0.0f, (float)panel.x, (float)panel.y ).transformedBy( transform );
     }
 
@@ -562,7 +650,7 @@ namespace
         for( auto area : { juce::Rectangle<int>( 0, 0, 1280, 800 ), juce::Rectangle<int>( 0, 0, 1366, 768 ),
                            juce::Rectangle<int>( 0, 0, 777, 455 ) } )
         {
-            const auto transform = kick::window::placeInBottomRight( area, layout, panel, 6 );
+            const auto transform = kick::window::placeInBottomRight( area, layout, panel, { 6, 6 } );
             CHECK( juce::exactlyEqual( transform.getTranslationX(), std::round( transform.getTranslationX() ) ) );
             CHECK( juce::exactlyEqual( transform.getTranslationY(), std::round( transform.getTranslationY() ) ) );
             CHECK( area.toFloat().contains( placedPanel( area, panel, 6 ) ) );
@@ -577,7 +665,19 @@ namespace
         CHECK( shown.getX() >= 0.0f && shown.getY() >= 0.0f );
 
         // Nothing to show in: no scale, no singular transform.
-        CHECK( !kick::window::placeInBottomRight( {}, layout, panel, 6 ).isSingularity() );
+        CHECK( !kick::window::placeInBottomRight( {}, layout, panel, { 6, 6 } ).isSingularity() );
+
+        // Further up than in from the side (Kick's performance overlay, 260
+        // by 170, above the dialogs' button row, whose top is at 483, and
+        // the status bar, at 536).
+        const juce::Point<int> overlay( 260, 170 ), above( 6, 123 );
+        auto transform = kick::window::placeInBottomRight( { 0, 0, 1024, 600 }, layout, overlay, above );
+        shown          = juce::Rectangle<float>( 0.0f, 0.0f, 260.0f, 170.0f ).transformedBy( transform );
+        CHECK( shown == juce::Rectangle<float>( 758.0f, 307.0f, 260.0f, 170.0f ) );
+        CHECK( shown.getBottom() < 483.0f );
+        transform = kick::window::placeInBottomRight( { 0, 0, 2048, 1200 }, layout, overlay, above );
+        shown     = juce::Rectangle<float>( 0.0f, 0.0f, 260.0f, 170.0f ).transformedBy( transform );
+        CHECK( shown == juce::Rectangle<float>( 1516.0f, 614.0f, 520.0f, 340.0f ) );
     }
 
     bool nearMs( double a, double b )
@@ -703,6 +803,7 @@ int main()
     testWindowBounds();
     testAspectRatio();
     testBoundsSaving();
+    testWindowPlacementRoundTrip();
     testOverlayPlacement();
     testFrameTiming();
     testFrameTimingThreads();

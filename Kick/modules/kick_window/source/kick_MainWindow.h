@@ -67,6 +67,9 @@ namespace kick::window
             // (ScaledHost::setOverlay()). Not owned; it is taken out of the
             // window when the window is destroyed.
             juce::Component* overlay{ nullptr };
+            // Its distance from the right and the bottom edge, in layout
+            // units.
+            juce::Point<int> overlayMargin{ ScaledHost::overlayMargin, ScaledHost::overlayMargin };
         };
 
         // The content is not owned. The window is shown when this returns.
@@ -94,6 +97,9 @@ namespace kick::window
 
         // Notes the desktop window's bounds, to save them once they settle.
         void noteBounds();
+        // Finds where the window manager put the client area (once the
+        // window has not moved for a while after it was shown).
+        void notePlacement();
         void saveBoundsWhenDue();
         void saveBounds( const juce::String& bounds );
 
@@ -114,6 +120,15 @@ namespace kick::window
         // manager may give it back: the window is then left letterboxed).
         juce::Rectangle<int> settledBounds;
         juce::Rectangle<int> correctedFrom;
+
+        // Where the desktop window asked to be (its frame's top-left
+        // corner), and how far from there the window manager put its
+        // client area (findPlacementOffset()). Bounds are saved once that
+        // is known.
+        static constexpr int            placementDelayInMS = 1000;
+        juce::Point<int>                requestedPosition;
+        std::optional<juce::Point<int>> placementOffset;
+        juce::TimedCallback             placementCheck{ [this]() { notePlacement(); } };
 
         static constexpr int boundsSaveDelayInMS = 1000;
         BoundsSaving         boundsSaving{ boundsSaveDelayInMS };

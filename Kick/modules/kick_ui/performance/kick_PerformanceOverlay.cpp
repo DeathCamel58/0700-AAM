@@ -26,7 +26,7 @@ namespace kick_ui
 {
     namespace
     {
-        const auto backgroundColour = juce::Colours::black.withAlpha( 0.6f );
+        const auto backgroundColour = juce::Colours::black.withAlpha( 0.5f );
         const auto titleColour      = juce::Colours::white.withAlpha( 0.9f );
         const auto detailColour     = juce::Colours::white.withAlpha( 0.65f );
         const auto gridColour       = juce::Colours::white.withAlpha( 0.18f );
@@ -48,6 +48,18 @@ namespace kick_ui
 
         // A frame at 60 Hz.
         constexpr float frameGuideMs = 1000.0f / 60.0f;
+    }
+
+    juce::Point<int> PerformanceOverlay::getMargin()
+    {
+        // The dialogs are centred, their buttons in a 73 unit row inside a
+        // 4 unit edge at the bottom (kick_utils_popup.cpp).
+        constexpr int dialogButtonRowHeight = 73 + 4;
+        const auto    dialogHeight          = juce::jmax( ui::layout::dialog.getHeight(), ui::layout::keyBoardPopup.getHeight() );
+        const auto    buttonRowTop          = ( ui::appHeight + dialogHeight ) / 2 - dialogButtonRowHeight;
+
+        const auto bottom = juce::jmax( ui::appHeight - buttonRowTop, ui::appHeight - ui::layout::statusBar.getY() ) + padding;
+        return { padding, bottom };
     }
 
     PerformanceOverlay::Row::Row( const juce::String& rowTitle, float topValue )
@@ -151,6 +163,7 @@ namespace kick_ui
                 text.clear();
         }
         xruns.clear();
+        recentFrames.clear();
         xrunsShown    = 0;
         lastXRunCount = -1;
 
@@ -219,12 +232,14 @@ namespace kick_ui
         const auto period = host->getFrameTiming().takePeriod();
         frames.a.push( (float)period.longestPaintMs );
         frames.b.push( (float)period.longestTickGapMs );
+        recentFrames.add( period.lengthMs, period.frames, period.longestPaintMs, period.longestTickGapMs );
 
-        // The slowest frame and the longest wait in the period: what is
-        // felt, where an average hides it.
-        frames.texts[0] = perf::formatFramesPerSecond( period.framesPerSecond() );
-        frames.texts[1] = "paint " + perf::formatMilliseconds( period.longestPaintMs );
-        frames.texts[2] = "gap " + perf::formatMilliseconds( period.longestTickGapMs );
+        // Over the last second (the graphs show each period): the rate, and
+        // the slowest frame and the longest wait, what is felt, where an
+        // average hides it.
+        frames.texts[0] = perf::formatFramesPerSecond( recentFrames.framesPerSecond() );
+        frames.texts[1] = "paint " + perf::formatMilliseconds( recentFrames.longestPaintMs() );
+        frames.texts[2] = "gap " + perf::formatMilliseconds( recentFrames.longestTickGapMs() );
     }
 
     void PerformanceOverlay::sampleCpu()

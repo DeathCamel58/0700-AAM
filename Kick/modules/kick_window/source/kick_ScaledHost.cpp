@@ -49,10 +49,17 @@ namespace kick::window
         content.setTransform( {} );
     }
 
-    void ScaledHost::setOverlay( juce::Component* newOverlay )
+    void ScaledHost::setOverlay( juce::Component* newOverlay, juce::Point<int> margin )
     {
-        if( overlay == newOverlay )
+        if( overlay == newOverlay && overlayCornerMargin == margin )
             return;
+
+        overlayCornerMargin = margin;
+        if( overlay == newOverlay )
+        {
+            placeOverlay();
+            return;
+        }
 
         if( overlay != nullptr )
         {
@@ -110,6 +117,6 @@ namespace kick::window
         if( overlay->getPosition() != juce::Point<int>() )
             overlay->setTopLeftPosition( 0, 0 );
         overlay->setTransform( placeInBottomRight( getLocalBounds(), layout,
-                                                   { overlay->getWidth(), overlay->getHeight() }, overlayMargin ) );
+                                                   { overlay->getWidth(), overlay->getHeight() }, overlayCornerMargin ) );
     }
 }
