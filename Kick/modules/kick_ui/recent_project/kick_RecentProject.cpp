@@ -528,7 +528,6 @@ namespace ui
         auto bounds     = getLocalBounds();
         auto background = bounds.removeFromRight( bounds.proportionOfWidth( 0.9 ) );
 
-        mt::utils::fillRoundedRect( g, bounds.removeFromLeft( 3 ), ui::Theme::foregroundColour( 1 ) );
         mt::utils::fillRoundedRect( g, background, ui::Theme::backgroundColour( 0 ) );
     }
 
