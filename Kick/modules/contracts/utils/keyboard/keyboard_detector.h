@@ -31,7 +31,9 @@ namespace contracts
 {
     
 
-#if defined( _WIN32 ) || defined( _WIN64 )
+    // Emulates the front panel with a computer keyboard: keys stand for
+    // the pads, buttons and the centre knob (see the key map in the .cpp).
+    // The state of every key is read with juce::KeyPress::isKeyCurrentlyDown().
     struct keyPressedDetector : public juce::KeyListener
     {
         juce::Array<int> _keys;
@@ -52,12 +54,5 @@ namespace contracts
         std::atomic<bool> shiftBtnState;
 
     };
-#else // implement  this class for other non windows platforms.
-    struct keyPressedDetector : public juce::KeyListener
-    {
-        bool keyPressed( const juce::KeyPress& key, juce::Component* originatingComponent ) override { return false;}
-        bool keyStateChanged( bool isKeyDown, juce::Component* originatingComponent ) override { return false; };
-    };
-#endif // defined( _WIN32 ) || defined( _WIN64 )
     keyPressedDetector& getKeypressDetector();
 }

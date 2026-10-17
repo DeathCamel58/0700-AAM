@@ -56,6 +56,10 @@ namespace ui
                                                            bool isScrollbarVertical, int thumbStartPosition, int thumbSize, bool isMouseOver, [[maybe_unused]] bool isMouseDown ) override;
         void                                fillTextEditorBackground( juce::Graphics&, int width, int height, juce::TextEditor& ) override;
         std::unique_ptr<juce::FocusOutline> createFocusOutlineForComponent( juce::Component& ) override;
+
+        // Menus (combo boxes, text editors) open inside the home screen
+        // rather than as windows of their own.
+        juce::Component* getParentComponentForMenuOptions( const juce::PopupMenu::Options& options ) override;
         void                                drawLabelText( juce::Graphics&, juce::Label& label, mt::MTProperties& props, juce::Rectangle<int>& bounds );
         void                                drawButtonText( juce::Graphics&, juce::TextButton& button, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown, mt::MTProperties& props, juce::Rectangle<int>& bounds );
 

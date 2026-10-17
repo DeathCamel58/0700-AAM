@@ -35,6 +35,8 @@
 #include "kick_exit_message_handler.h"
 #include "kick_service_notifier.h"
 
+#include <kick_window_options/kick_window_options.h>
+
 #define COMMAND_LINE_ARGUMENT_STANDALONE "standalone"
 
 class KickMain : public contracts::IPCApplication
@@ -54,10 +56,17 @@ public:
         return false;
     }
 
-    void initialise( const juce::String& commandLine ) override
+    void initialise( const juce::String& ) override
     {
+        // The user interface's window options are not part of the IPC
+        // configuration. Passed on in the environment, the children use
+        // the same choice.
+        const auto windowOptions = kick::window::StartupOptions::fromProcess( getCommandLineParameterArray() );
+        windowOptions.exportToEnvironment();
+
         reportStatus( "Starting" );
-        IPCApplication::initialise( commandLine );
+        IPCApplication::initialise( windowOptions.getCommandLine() );
+        windowOptions.log();
 
         // A process that exits, or is restarted, leaves a heartbeat behind
         // that its successor must not be judged by.

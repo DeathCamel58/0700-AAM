@@ -573,6 +573,13 @@ namespace ui
         mt::utils::fillRoundedRect( g, { 0, 0, width, height }, textEditor.findColour( juce::TextEditor::backgroundColourId ), 6.f );
     }
 
+    juce::Component* KickLooknFeel::getParentComponentForMenuOptions( const juce::PopupMenu::Options& options )
+    {
+        if( auto* parent = options.getParentComponent() )
+            return parent;
+        return getLayoutRoot();
+    }
+
     std::unique_ptr<juce::FocusOutline> KickLooknFeel::createFocusOutlineForComponent( juce::Component& )
     {
         struct WindowProperties final : public juce::FocusOutline::OutlineWindowProperties

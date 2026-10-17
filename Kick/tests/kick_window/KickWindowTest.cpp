@@ -1,0 +1,344 @@
+/*
+ * This file is part of Kick.
+ *
+ * Kick is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option)
+ * any later version.
+ *
+ * Kick is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with Kick. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+// Tests of how a Kick process chooses its window mode and renderer
+// (kick_StartupOptions.h): command-line options, environment, build default
+// and their order, unknown values, and removing the options from the
+// command line so that the IPC configuration still parses. And of the
+// window's geometry (kick_WindowGeometry.h): the letterboxed scale of the
+// layout and how input maps back through it, and the saved window bounds.
+// Built with -DKICK_BUILD_TESTS=ON; it needs no arguments and creates no
+// window (no juce::Desktop, no display).
+
+#include "kick_window_options/source/kick_StartupOptions.cpp"
+#include "kick_window/source/kick_WindowGeometry.cpp"
+
+#include <cstdio>
+#include <map>
+#include <string>
+
+namespace
+{
+    int failures = 0;
+
+#define CHECK( condition )                                                      \
+    do                                                                          \
+    {                                                                           \
+        if( !( condition ) )                                                    \
+        {                                                                       \
+            std::printf( "%s:%d: FAILED: %s\n", __FILE__, __LINE__, #condition ); \
+            ++failures;                                                         \
+        }                                                                       \
+    } while( false )
+
+    using kick::window::Letterbox;
+    using kick::window::Renderer;
+    using kick::window::StartupOptions;
+    using kick::window::WindowMode;
+
+    StartupOptions::EnvironmentLookup environment( std::map<std::string, juce::String> variables )
+    {
+        return [variables]( const char* name ) -> std::optional<juce::String> {
+            auto found = variables.find( name );
+            if( found == variables.end() )
+                return std::nullopt;
+            return found->second;
+        };
+    }
+
+    StartupOptions resolve( const juce::StringArray& arguments, std::map<std::string, juce::String> variables = {},
+                            const juce::String& defaultWindowMode = "kiosk", const juce::String& defaultRenderer = "software" )
+    {
+        return StartupOptions::resolve( arguments, environment( std::move( variables ) ), defaultWindowMode, defaultRenderer );
+    }
+
+    void testParsing()
+    {
+        CHECK( kick::window::parseWindowMode( "kiosk" ) == WindowMode::kiosk );
+        CHECK( kick::window::parseWindowMode( " Windowed " ) == WindowMode::windowed );
+        CHECK( !kick::window::parseWindowMode( "fullscreen" ).has_value() );
+        CHECK( !kick::window::parseWindowMode( "" ).has_value() );
+        CHECK( kick::window::parseRenderer( "software" ) == Renderer::software );
+        CHECK( kick::window::parseRenderer( "OpenGL" ) == Renderer::openGL );
+        CHECK( !kick::window::parseRenderer( "vulkan" ).has_value() );
+        CHECK( kick::window::toString( WindowMode::windowed ) == "windowed" );
+        CHECK( kick::window::toString( Renderer::openGL ) == "opengl" );
+        // What toString() writes, parse*() reads (exportToEnvironment()).
+        CHECK( kick::window::parseWindowMode( kick::window::toString( WindowMode::kiosk ) ) == WindowMode::kiosk );
+        CHECK( kick::window::parseRenderer( kick::window::toString( Renderer::openGL ) ) == Renderer::openGL );
+    }
+
+    void testDefaults()
+    {
+        auto options = resolve( {} );
+        CHECK( options.windowMode == WindowMode::kiosk );
+        CHECK( options.renderer == Renderer::software );
+        CHECK( options.windowModeSource == "build default" );
+        CHECK( options.problems.isEmpty() );
+        CHECK( options.getCommandLine().isEmpty() );
+
+        options = resolve( {}, {}, "windowed", "opengl" );
+        CHECK( options.windowMode == WindowMode::windowed );
+        CHECK( options.renderer == Renderer::openGL );
+
+        // A bad build default: the fallback, and a problem to log.
+        options = resolve( {}, {}, "maximised", "software" );
+        CHECK( options.windowMode == WindowMode::kiosk );
+        CHECK( options.windowModeSource == "fallback" );
+        CHECK( options.problems.size() == 1 );
+    }
+
+    void testPrecedence()
+    {
+        // The environment overrides the build default.
+        auto options = resolve( {}, { { "KICK_WINDOW_MODE", "windowed" }, { "KICK_RENDERER", "opengl" } } );
+        CHECK( options.windowMode == WindowMode::windowed );
+        CHECK( options.renderer == Renderer::openGL );
+        CHECK( options.windowModeSource == "KICK_WINDOW_MODE" );
+        CHECK( options.rendererSource == "KICK_RENDERER" );
+
+        // The command line overrides the environment.
+        options = resolve( { "--window-mode=kiosk", "--renderer=software" },
+                           { { "KICK_WINDOW_MODE", "windowed" }, { "KICK_RENDERER", "opengl" } } );
+        CHECK( options.windowMode == WindowMode::kiosk );
+        CHECK( options.renderer == Renderer::software );
+        CHECK( options.windowModeSource == "--window-mode" );
+        CHECK( options.rendererSource == "--renderer" );
+
+        // The last option given counts.
+        options = resolve( { "--window-mode=kiosk", "--window-mode=windowed" } );
+        CHECK( options.windowMode == WindowMode::windowed );
+
+        // An empty variable is as good as none.
+        options = resolve( {}, { { "KICK_WINDOW_MODE", "" } }, "windowed" );
+        CHECK( options.windowMode == WindowMode::windowed );
+        CHECK( options.problems.isEmpty() );
+    }
+
+    void testUnknownValues()
+    {
+        // An unknown option value falls back to the environment.
+        auto options = resolve( { "--window-mode=huge" }, { { "KICK_WINDOW_MODE", "windowed" } } );
+        CHECK( options.windowMode == WindowMode::windowed );
+        CHECK( options.windowModeSource == "KICK_WINDOW_MODE" );
+        CHECK( options.problems.size() == 1 );
+
+        // An unknown variable falls back to the build default.
+        options = resolve( {}, { { "KICK_RENDERER", "directx" } }, "kiosk", "opengl" );
+        CHECK( options.renderer == Renderer::openGL );
+        CHECK( options.rendererSource == "build default" );
+        CHECK( options.problems.size() == 1 );
+
+        // An option without a value is removed and reported.
+        options = resolve( { "--renderer", "standalone" } );
+        CHECK( options.renderer == Renderer::software );
+        CHECK( options.problems.size() == 1 );
+        CHECK( options.remainingArguments == juce::StringArray( "standalone" ) );
+    }
+
+    void testCommandLine()
+    {
+        // KickMain's own argument survives.
+        auto options = resolve( { "standalone", "--window-mode=windowed" } );
+        CHECK( options.getCommandLine() == "standalone" );
+
+        // A child's IPC configuration: one argument, JSON with spaces, which
+        // JUCE quotes; the IPC code strips the quotes again.
+        const juce::String json = "{\n  \"hostId\": 2,\n  \"name\": \"KickUserInterface\"\n}";
+        options = resolve( { "--renderer=opengl", json } );
+        CHECK( options.renderer == Renderer::openGL );
+        CHECK( options.getCommandLine() == json.quoted( '"' ) );
+        auto parsed = juce::JSON::parse( options.getCommandLine().unquoted() );
+        CHECK( (int)parsed.getProperty( "hostId", -1 ) == 2 );
+
+        // Arguments without spaces stay as they are; other options too.
+        options = resolve( { "--verbose", "--window-modes=x", "a b" } );
+        CHECK( options.getCommandLine() == "--verbose --window-modes=x \"a b\"" );
+        CHECK( options.problems.isEmpty() );
+    }
+
+    bool near( float a, float b )
+    {
+        return std::abs( a - b ) < 1.0e-3f;
+    }
+
+    bool near( juce::Point<float> a, juce::Point<float> b )
+    {
+        return near( a.x, b.x ) && near( a.y, b.y );
+    }
+
+    const juce::Rectangle<int> layout( 0, 0, 1024, 600 );
+
+    void testLetterbox()
+    {
+        // The layout's own size: unchanged (today's kiosk window).
+        auto box = kick::window::computeLetterbox( { 0, 0, 1024, 600 }, layout );
+        CHECK( juce::exactlyEqual( box.scale, 1.0f ) );
+        CHECK( box.transform.isIdentity() );
+        CHECK( box.contentArea == layout.toFloat() );
+
+        // Twice the size: scaled by two, no bars.
+        box = kick::window::computeLetterbox( { 0, 0, 2048, 1200 }, layout );
+        CHECK( near( box.scale, 2.0f ) );
+        CHECK( near( box.offset, { 0.0f, 0.0f } ) );
+        CHECK( box.contentArea == juce::Rectangle<float>( 0, 0, 2048, 1200 ) );
+
+        // 16:9 (wider than 1024:600): bars at the sides, centred, whole
+        // pixels.
+        box = kick::window::computeLetterbox( { 0, 0, 1920, 1080 }, layout );
+        CHECK( near( box.scale, 1.8f ) );
+        CHECK( near( box.offset, { 38.0f, 0.0f } ) ); // (1920 - 1843.2) / 2 = 38.4
+        CHECK( near( box.contentArea.getWidth(), 1843.2f ) );
+        CHECK( near( box.contentArea.getHeight(), 1080.0f ) );
+
+        // 4:3 (taller): bars at the top and bottom.
+        box = kick::window::computeLetterbox( { 0, 0, 800, 600 }, layout );
+        CHECK( near( box.scale, 800.0f / 1024.0f ) );
+        CHECK( near( box.offset, { 0.0f, 66.0f } ) ); // (600 - 468.75) / 2 = 65.6
+        CHECK( box.contentArea.getBottom() <= 600.0f );
+
+        // An offset area.
+        box = kick::window::computeLetterbox( { 100, 50, 1024, 600 }, layout );
+        CHECK( juce::exactlyEqual( box.scale, 1.0f ) );
+        CHECK( near( box.offset, { 100.0f, 50.0f } ) );
+
+        // Nothing to show in: no transform.
+        box = kick::window::computeLetterbox( {}, layout );
+        CHECK( box.transform.isIdentity() );
+    }
+
+    void testInputThroughLetterbox()
+    {
+        // JUCE maps a position in the window back into the layout with the
+        // inverse transform: the corners and centre of the layout's area
+        // must land on the layout's corners and centre.
+        for( auto area : { juce::Rectangle<int>( 0, 0, 1920, 1080 ), juce::Rectangle<int>( 0, 0, 800, 600 ),
+                           juce::Rectangle<int>( 0, 0, 1280, 800 ), juce::Rectangle<int>( 0, 0, 512, 300 ) } )
+        {
+            auto box     = kick::window::computeLetterbox( area, layout );
+            auto inverse = box.transform.inverted();
+
+            auto topLeft     = box.contentArea.getTopLeft().transformedBy( inverse );
+            auto bottomRight = box.contentArea.getBottomRight().transformedBy( inverse );
+            auto centre      = box.contentArea.getCentre().transformedBy( inverse );
+            CHECK( near( topLeft, { 0.0f, 0.0f } ) );
+            CHECK( near( bottomRight, { 1024.0f, 600.0f } ) );
+            CHECK( near( centre, { 512.0f, 300.0f } ) );
+
+            // A pad at (100, 200) in the layout is drawn at, and hit at,
+            // the same transformed position.
+            auto shown = juce::Point<float>( 100.0f, 200.0f ).transformedBy( box.transform );
+            CHECK( near( shown.transformedBy( inverse ), { 100.0f, 200.0f } ) );
+
+            // The bars are outside the layout.
+            if( box.offset.x > 1.0f )
+                CHECK( juce::Point<float>( box.offset.x / 2.0f, 10.0f ).transformedBy( inverse ).x < 0.0f );
+            if( box.offset.y > 1.0f )
+                CHECK( juce::Point<float>( 10.0f, box.offset.y / 2.0f ).transformedBy( inverse ).y < 0.0f );
+        }
+    }
+
+    void testWindowBoundsText()
+    {
+        CHECK( kick::window::formatWindowBounds( { 10, -20, 1024, 600 } ) == "10 -20 1024 600" );
+        auto bounds = kick::window::parseWindowBounds( "10 -20 1024 600" );
+        CHECK( bounds.has_value() && *bounds == juce::Rectangle<int>( 10, -20, 1024, 600 ) );
+        CHECK( kick::window::parseWindowBounds( "  1  2  3  4 " ).has_value() );
+
+        CHECK( !kick::window::parseWindowBounds( "" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3 4 5" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "a b c d" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 3.5 4" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 0 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 -1024 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "1 2 99999999999 600" ).has_value() );
+        CHECK( !kick::window::parseWindowBounds( "- 2 3 4" ).has_value() );
+    }
+
+    void testWindowBounds()
+    {
+        const juce::Point<int>                  size( 1024, 600 ), minimum( 512, 300 );
+        const juce::Rectangle<int>              primary( 0, 0, 1920, 1050 ), secondary( 1920, 0, 1280, 1024 );
+        const juce::Array<juce::Rectangle<int>> displays{ primary, secondary };
+
+        // Nothing saved: the layout's size, centred on the display.
+        auto bounds = kick::window::chooseWindowBounds( std::nullopt, displays, primary, size, minimum );
+        CHECK( bounds.getWidth() == 1024 && bounds.getHeight() == 600 );
+        CHECK( bounds.getCentre() == primary.getCentre() );
+
+        // On the second display.
+        bounds = kick::window::chooseWindowBounds( std::nullopt, displays, secondary, size, minimum );
+        CHECK( secondary.contains( bounds ) );
+
+        // A display smaller than the layout: 90% of it, same aspect ratio.
+        const juce::Rectangle<int> small( 0, 0, 800, 480 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { small }, small, size, minimum );
+        CHECK( small.contains( bounds ) );
+        CHECK( bounds.getWidth() == 720 );
+        CHECK( bounds.getHeight() == 422 ); // 720 * 600 / 1024 = 421.9
+
+        // Never below the minimum.
+        const juce::Rectangle<int> tiny( 0, 0, 320, 240 );
+        bounds = kick::window::chooseWindowBounds( std::nullopt, { tiny }, tiny, size, minimum );
+        CHECK( bounds.getWidth() == 512 && bounds.getHeight() == 300 );
+
+        // Saved bounds on a display are used, with the aspect ratio kept.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 2000, 100, 1536, 1000 ), displays, primary, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 2000, 100, 1536, 900 ) );
+
+        // Mostly off screen, but a corner still reachable: kept.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 1800, 900, 1024, 600 ), { primary }, primary, size, minimum );
+        CHECK( bounds.getPosition() == juce::Point<int>( 1800, 900 ) );
+
+        // On a display that is gone: centred on the current one instead.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 3500, 100, 1024, 600 ), { primary }, primary, size, minimum );
+        CHECK( bounds.getCentre() == primary.getCentre() );
+
+        // Too small to be valid: the default.
+        bounds = kick::window::chooseWindowBounds( juce::Rectangle<int>( 10, 10, 100, 60 ), displays, primary, size, minimum );
+        CHECK( bounds.getWidth() == 1024 );
+
+        // No display known: the layout's size at the origin.
+        bounds = kick::window::chooseWindowBounds( std::nullopt, {}, {}, size, minimum );
+        CHECK( bounds == juce::Rectangle<int>( 0, 0, 1024, 600 ) );
+    }
+}
+
+int main()
+{
+    testParsing();
+    testDefaults();
+    testPrecedence();
+    testUnknownValues();
+    testCommandLine();
+    testLetterbox();
+    testInputThroughLetterbox();
+    testWindowBoundsText();
+    testWindowBounds();
+
+    if( failures != 0 )
+    {
+        std::printf( "%d check(s) failed\n", failures );
+        return 1;
+    }
+
+    std::printf( "All window tests passed\n" );
+    return 0;
+}

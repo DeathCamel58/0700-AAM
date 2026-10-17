@@ -27,7 +27,12 @@ namespace mt
         bubbleNotification()
             : juce::BubbleMessageComponent()
         {
-            addToDesktop( 0 );
+            // Inside Kick's window, positioned in layout coordinates.
+            if( auto root = ui::getLayoutRoot() )
+                root->addChildComponent( this );
+            else
+                addToDesktop( 0 );
+            setAlwaysOnTop( true );
             setAllowedPlacement( BubbleMessageComponent::above );
         }
 
@@ -45,7 +50,9 @@ namespace mt
 
         void show( const juce::AttributedString& Str, juce::Rectangle<int> Bounds = ui::layout::statusBar, int TimeInMS = 1500 )
         {
-            showAt( Bounds, Str, TimeInMS );
+            // Deletes itself once it has gone: showNotification() does not
+            // keep it, and every one would stay a child of the home screen.
+            showAt( Bounds, Str, TimeInMS, true, true );
             setPosition( Bounds.getCentre(), -1 );
         }
 

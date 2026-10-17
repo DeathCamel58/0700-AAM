@@ -35,7 +35,7 @@
    website:            http://www.musictribe.com/
    license:            AGPLv3
 
-   dependencies:        kick_ui_header, kick_ui_settings, kick_ui_channel_mixer, kick_leds
+   dependencies:        kick_ui_header, kick_ui_settings, kick_ui_channel_mixer, kick_leds, kick_window
 
   END_JUCE_MODULE_DECLARATION
 
@@ -49,6 +49,7 @@
     #include <kick_ui_settings/kick_ui_settings.h>
     #include <kick_ui_channel_mixer/kick_ui_channel_mixer.h>
     #include <kick_leds/kick_leds.h>
+    #include <kick_window/kick_window.h>
     #include <project/project.h>
 
 //common
@@ -129,6 +130,7 @@
     #include "modes/filebrowser/kick_fileBrowser.h"
 
     #include "dialogs/kick_AppHome.h"
+    #include "dialogs/kick_AppWindow.h"
     //new file
     #include "recent_project/kick_RecentProject.h"
     #include "recent_project/kick_RecentProject_Utils.h"

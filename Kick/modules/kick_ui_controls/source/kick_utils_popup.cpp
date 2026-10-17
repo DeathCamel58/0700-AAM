@@ -31,10 +31,9 @@ namespace mt
         {
             setOpaque( true );
 
-            auto display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
-            auto b       = display->totalArea;
-            setBounds( b ); // Overall component Area.
-            addToDesktop( compPeer::windowIsTemporary | compPeer::windowHasDropShadow );
+            // Covers the layout; getFullScreenModalPopUP() makes it a child
+            // of the home screen.
+            setBounds( ui::layout::screen );
         }
 
         virtual ~fsPopup() = default;
@@ -60,13 +59,18 @@ namespace mt
         {
             image.clear( ui::layout::screen );
 
-            if( auto w = juce::TopLevelWindow::getActiveTopLevelWindow() )
+            // The blurred background: what the layout shows now.
+            juce::Component* background = ui::getLayoutRoot();
+            if( background == nullptr )
+                background = juce::TopLevelWindow::getActiveTopLevelWindow();
+            if( background != nullptr )
             {
-                image = w->createComponentSnapshot( ui::layout::screen, false );
+                image = background->createComponentSnapshot( ui::layout::screen, false );
                 stack_blur<10>( image );
             }
 
             isInUse = true;
+            setAlwaysOnTop( true );
             setVisible( true );
             toFront( true );
             enterModalState( true, juce::ModalCallbackFunction::create( [Callback, this]( int R ) {
@@ -326,8 +330,16 @@ namespace mt
 
         _popups.emplace_back( new Type() );
         auto& p = _popups.back();
-        auto  c = juce::TopLevelWindow::getActiveTopLevelWindow();
-        c->addAndMakeVisible( p.get() );
+
+        // A child of the home screen, so that it shows in Kick's window,
+        // scaled with the layout. (As a window of its own it was placed at
+        // the screen's origin, and the active window could be none.)
+        if( auto root = ui::getLayoutRoot() )
+            root->addChildComponent( p.get() );
+        else if( auto c = juce::TopLevelWindow::getActiveTopLevelWindow() )
+            c->addChildComponent( p.get() );
+        else
+            p->addToDesktop( compPeer::windowIsTemporary | compPeer::windowHasDropShadow );
         return p.get();
     }
 
