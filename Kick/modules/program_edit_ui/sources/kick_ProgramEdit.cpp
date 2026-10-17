@@ -222,9 +222,9 @@ namespace kick_ui
             audioheader.setVisible( false );
             header.setVisible( true );
             if( Type == mt::MTProgramType::Audio )
-                infoLabel.setText( "Program Edit is not available for Audio Program", juce::dontSendNotification );
+                infoLabel.setText( "Program Edit is not available for audio programs", juce::dontSendNotification );
             else
-                infoLabel.setText( "No Programs Available", juce::dontSendNotification );
+                infoLabel.setText( "This track has no program to edit", juce::dontSendNotification );
             infoLabel.setVisible( true );
         }
     }
