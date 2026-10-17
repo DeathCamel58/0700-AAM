@@ -36,6 +36,11 @@ namespace kick_ui
         ui::KickGrid::setBackgroundColour( juce::Colours::transparentBlack );
         setRowTitles( { "Startup Settings", "Auto Save", "Time Defaults", "Project Defaults", "Default Project Name" } );
 
+        // One size for all the values on the page: the numbers were drawn
+        // larger than the lists next to them, the auto save button smaller.
+        mt::utils::setValueFontHeight( 20.f, ssLaunch, ssRecProjects, asEnabled, asTimeout, pdTempo, pdBars, pdNum, pdDen,
+                                       pdRootNote, pdScale, pdSeq, pdTracks, bitDepath, enableList, defaultName );
+
         asEnabled.setToggleState( settings.projects.isAutoSave(), juce::dontSendNotification );
         settings.setAutoSave( asEnabled.getToggleState() );
         asTimeout.setSelected( settings.projects.saveAfter(), juce::sendNotification );
@@ -142,7 +147,6 @@ namespace kick_ui
         };
 
         defaultName.setValueJustification( juce::Justification::centred );
-        defaultName.setValueFontHeight( 20 );
         defaultName.onTextChange = [&]() {
             juce::String text            = defaultName.getText();
             settings.projects.namePrefix = ( text );
