@@ -60,12 +60,16 @@ namespace kick_ui
         }
 
         password.setEditable( false, true );
-        enabled.onClick = [&]() {
-            settings.wifi.enabled = ( enabled.getToggleState() );
+        enabled.setSelected( settings.wifi.enabled() ? 1 : 0, juce::dontSendNotification );
+        enabled.onSelectionChanged = [&]( int index, const juce::String& ) {
+            settings.wifi.enabled = ( index == 1 );
         };
 
+        // Scan is an action, not a state: every tap scans (as a toggle,
+        // every other tap only switched it off).
+        scanWifi.setClickingTogglesState( false );
         scanWifi.onClick = [&]() {
-            if( scanWifi.getToggleState() && !scanning )
+            if( !scanning )
             {
                 DBG( "Scanning Wifi" );
                 scanning = true;
@@ -114,7 +118,7 @@ namespace kick_ui
 
     void SettingsWifi::handleEnabledClick()
     {
-        bool status = enabled.getToggleState();
+        bool status = enabled.getSelected() == 1;
         if( status )
         {
             mt::WifiManager::getWifiInterface()->enableWiFi();
