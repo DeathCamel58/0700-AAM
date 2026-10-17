@@ -482,6 +482,12 @@ namespace ui
 
         this->setPaintingIsUnclipped( true );
         this->setInterceptsMouseClicks( true, false );
+        // The labels take no clicks, so a tap on them reaches the box
+        // (mouseUp() opens the list). setInterceptsMouseClicks( true,
+        // false ) above does not keep clicks from them: JUCE only applies
+        // that to the children of a component that takes no clicks itself.
+        // The -/+ buttons keep their clicks.
+        mt::utils::disableMouseIntercepts( title, value );
 
         // Setup defaults...
         title.setText( Title, juce::dontSendNotification );
@@ -614,8 +620,9 @@ namespace ui
     {
         // A tap opens the list; the press has already given the box the
         // focus, for the encoder. (It used to take a double tap, so a tap
-        // seemed to do nothing but outline the box.) The children take no
-        // clicks, so the -/+ buttons are found by position.
+        // seemed to do nothing but outline the box.) The labels take no
+        // clicks; the -/+ buttons click themselves, but a tap that lands
+        // here over them (e.g. on their edge) still steps the value.
         if( !isEnabled() || e.getDistanceFromDragStart() > tapSlop || !getLocalBounds().contains( e.getPosition() ) )
         {
             ui::tapLog::write( "List box \"" + getName() + "\": not a tap (enabled " + juce::String( (int)isEnabled() )
