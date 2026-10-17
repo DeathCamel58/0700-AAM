@@ -28,7 +28,6 @@ namespace kick_ui
 
         cpu.setEnabled( false );
         cpu.setRange( 0.0, 100.0 );
-        cpu.setTextValueSuffix( " %" );
         cpu.setTitleProportion( .35f );
         cpu.setValueProportion( .35f );
         cpu.showTitle( true, juce::Justification::centredTop );
@@ -36,7 +35,6 @@ namespace kick_ui
 
         ram.setEnabled( false );
         ram.setRange( 0.0, 100.0 );
-        ram.setTextValueSuffix( " %" );
         ram.setTitleProportion( .35f );
         ram.setValueProportion( .35f );
         ram.showTitle( true, juce::Justification::centred );
@@ -44,7 +42,6 @@ namespace kick_ui
 
         flash.setEnabled( false );
         flash.setRange( 0.0, 100.0 );
-        flash.setTextValueSuffix( " %" );
         flash.setTitleProportion( .35f );
         flash.setValueProportion( .35f );
         flash.showTitle( true, juce::Justification::centred );
@@ -52,7 +49,6 @@ namespace kick_ui
 
         sdcard.setEnabled( false );
         sdcard.setRange( 0.0, 100.0 );
-        sdcard.setTextValueSuffix( " %" );
         sdcard.setTitleProportion( .35f );
         sdcard.setValueProportion( .35f );
         sdcard.showTitle( true, juce::Justification::centred );
@@ -60,11 +56,18 @@ namespace kick_ui
 
         usb.setEnabled( false );
         usb.setRange( 0.0, 100.0 );
-        usb.setTextValueSuffix( " %" );
         usb.setTitleProportion( .35f );
         usb.setValueProportion( .35f );
         usb.showTitle( true, juce::Justification::centred );
         usb.showValue( true, juce::Justification::centred, juce::Slider::TextBoxBelow );
+
+        // The figures read "--" until they are known, and a card or disk
+        // that is not there says so rather than showing 0 %.
+        cpu.textFromValueFunction    = [this]( double v ) { return percentText( v, cpuKnown, "--" ); };
+        ram.textFromValueFunction    = [this]( double v ) { return percentText( v, ramKnown, "--" ); };
+        flash.textFromValueFunction  = [this]( double v ) { return percentText( v, flashKnown, "--" ); };
+        sdcard.textFromValueFunction = [this]( double v ) { return percentText( v, sdCardKnown, "Not present" ); };
+        usb.textFromValueFunction    = [this]( double v ) { return percentText( v, usbKnown, "Not present" ); };
 
         storage.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
         storage.setValueColour( ui::Theme::textColour( 2 ) );
@@ -99,8 +102,18 @@ namespace kick_ui
         } );
     }
 
+    juce::String KSystemResources::percentText( double value, bool known, const juce::String& unknown )
+    {
+        return known ? juce::String( juce::roundToInt( value ) ) + " %" : unknown;
+    }
+
     void KSystemResources::start()
     {
+        // Show real figures as soon as the window opens, not a second
+        // later: memory and storage need one reading, and CPU use, which is
+        // the change between two, gets its first one now.
+        mt::SystemResource::getResourceInterface().startCpuMeasurement();
+        update( false );
         startTimerHz( 1 );
     }
 
@@ -108,40 +121,47 @@ namespace kick_ui
     {
         stopTimer();
     }
+
     void KSystemResources::timerCallback()
     {
-        double          cpuusage;
-        mt::sysRamInfo  rInfo;
-        mt::sysSizeInfo sInfo;
-        mt::SystemResource::getResourceInterface().cpuInfo( cpuusage );
-        mt::SystemResource::getResourceInterface().ramInfo( rInfo );
+        update( true );
+    }
 
-        mt::SystemResource::getResourceInterface().sizeInfo( internalPath, sInfo );
-        cpu.setValue( cpuusage, juce::dontSendNotification );
-        ram.setValue( rInfo.perRam, juce::dontSendNotification );
-        flash.setValue( sInfo.perSize, juce::dontSendNotification );
+    void KSystemResources::update( bool readCpu )
+    {
+        auto& resources = mt::SystemResource::getResourceInterface();
+
+        double cpuUsage = 0.0;
+        cpuKnown        = readCpu && resources.cpuInfo( cpuUsage );
+        showValue( cpu, cpuUsage );
+
+        mt::sysRamInfo rInfo;
+        resources.ramInfo( rInfo );
+        ramKnown = rInfo.totalRam > 0;
+        showValue( ram, rInfo.perRam );
+
+        mt::sysSizeInfo sInfo;
+        resources.sizeInfo( internalPath, sInfo );
+        flashKnown = sInfo.status;
+        showValue( flash, sInfo.perSize );
+
         sdCardPath = mt::getRemovableMediaPath( mt::RemovableMedia::SdCard );
-        mt::SystemResource::getResourceInterface().sizeInfo( sdCardPath, sInfo );
-        if( sInfo.status )
-        {
-            sdcard.setVisible( true );
-            sdcard.setValue( sInfo.perSize, juce::dontSendNotification );
-        }
-        else
-        {
-            sdcard.setVisible( false );
-        }
+        resources.sizeInfo( sdCardPath, sInfo );
+        sdCardKnown = sInfo.status;
+        showValue( sdcard, sInfo.perSize );
+
         usbDiskPath = mt::getRemovableMediaPath( mt::RemovableMedia::UsbDisk );
-        mt::SystemResource::getResourceInterface().sizeInfo( usbDiskPath, sInfo );
-        if( sInfo.status )
-        {
-            usb.setVisible( true );
-            usb.setValue( sInfo.perSize, juce::dontSendNotification );
-        }
-        else
-        {
-            usb.setVisible( false );
-        }
+        resources.sizeInfo( usbDiskPath, sInfo );
+        usbKnown = sInfo.status;
+        showValue( usb, sInfo.perSize );
+    }
+
+    void KSystemResources::showValue( ui::KickSlider& slider, double value )
+    {
+        // The text depends on more than the value: repaint even when the
+        // value is the same.
+        slider.setValue( value, juce::dontSendNotification );
+        slider.repaint();
     }
 
     void KSystemResources::paint( juce::Graphics& g )

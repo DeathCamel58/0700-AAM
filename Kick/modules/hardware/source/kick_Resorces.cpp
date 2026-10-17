@@ -26,48 +26,68 @@
     #include <sys/statvfs.h>
 #endif
 
+#include <algorithm>
 #include <filesystem>
+#include <sstream>
 
 namespace mt
 {
-    void SystemResource::cpuInfo( double& cpuUsage )
+    bool SystemResource::parseCpuTimes( const std::string& procStat, cpuTimes& times )
     {
-#if( JUCE_LINUX || __linux__ )
         // The first line of /proc/stat holds the time all CPUs have spent
-        // in each state since boot; the usage is the share of non-idle time
-        // since the previous call.
-        std::string stat;
-        sysfile::read( "/proc/stat", stat );
-        std::istringstream iss( stat.substr( 0, stat.find( '\n' ) ) );
+        // in each state since boot.
+        std::istringstream iss( procStat.substr( 0, procStat.find( '\n' ) ) );
 
         std::string cpuLabel;
         long long   user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0;
-        iss >> cpuLabel >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+        if( !( iss >> cpuLabel >> user >> nice >> system >> idle ) || cpuLabel != "cpu" )
+            return false;
+        // Older kernels have fewer columns.
+        iss >> iowait >> irq >> softirq >> steal;
 
         // guest and guest_nice are already counted in user and nice.
-        const long long totalTime = user + nice + system + idle + iowait + irq + softirq + steal;
-        const long long idleTime  = idle + iowait;
+        times.total = user + nice + system + idle + iowait + irq + softirq + steal;
+        times.idle  = idle + iowait;
+        return true;
+    }
 
-        static long long lastTotal = 0, lastIdle = 0;
-        const long long  total     = totalTime - lastTotal;
-        const long long  idled     = idleTime - lastIdle;
-        lastTotal                  = totalTime;
-        lastIdle                   = idleTime;
+    double SystemResource::cpuUsageBetween( const cpuTimes& earlier, const cpuTimes& later )
+    {
+        const long long total = later.total - earlier.total;
+        const long long idled = later.idle - earlier.idle;
+        if( total <= 0 )
+            return 0.0;
+        return std::clamp( static_cast<double>( total - idled ) / static_cast<double>( total ) * 100.0, 0.0, 100.0 );
+    }
 
-        cpuUsage = total > 0 ? static_cast<double>( total - idled ) / static_cast<double>( total ) * 100.0 : 0.0;
-#elif( defined( _WIN32 ) || defined( _WIN64 ) )
-        // Dummy data for Windows
-        static double dummyCpuUsage = 0.0;
-        dummyCpuUsage += 5.0;
-        if( dummyCpuUsage > 100.0 )
-        {
-            dummyCpuUsage = 0.0;
-        }
-        cpuUsage = dummyCpuUsage;
-#else
-        // Handle other platforms if necessary
+    void SystemResource::startCpuMeasurement()
+    {
+        std::string stat;
+        sysfile::read( "/proc/stat", stat );
+        haveLastCpu = parseCpuTimes( stat, lastCpu );
+    }
+
+    bool SystemResource::cpuInfo( double& cpuUsage )
+    {
+        // The usage is the share of non-idle time since the previous
+        // reading: one reading alone says nothing about now.
         cpuUsage = 0.0;
-#endif
+        std::string stat;
+        sysfile::read( "/proc/stat", stat );
+
+        cpuTimes now;
+        if( !parseCpuTimes( stat, now ) )
+        {
+            haveLastCpu = false;
+            return false;
+        }
+
+        const bool known = haveLastCpu;
+        if( known )
+            cpuUsage = cpuUsageBetween( lastCpu, now );
+        lastCpu     = now;
+        haveLastCpu = true;
+        return known;
     }
 
     void SystemResource::sizeInfo( std::string& path, sysSizeInfo& info )
@@ -107,18 +127,17 @@ namespace mt
 #endif
     }
 
-    void SystemResource::ramInfo( sysRamInfo& info )
+    bool SystemResource::parseMemInfo( const std::string& procMeminfo, sysRamInfo& info )
     {
-#if( JUCE_LINUX || __linux__ )
         // MemAvailable is the kernel's estimate of what can be allocated
         // without swapping, page cache and reclaimable memory included;
         // MemFree leaves those out, so memory looked nearly full whenever
         // files had been read.
-        std::string meminfo;
-        sysfile::read( "/proc/meminfo", meminfo );
+        info = {};
 
         unsigned long long totalKiB = 0, availableKiB = 0;
-        std::istringstream lines( meminfo );
+        bool               haveAvailable = false;
+        std::istringstream lines( procMeminfo );
         for( std::string line; std::getline( lines, line ); )
         {
             std::istringstream fields( line );
@@ -129,19 +148,37 @@ namespace mt
             if( name == "MemTotal:" )
                 totalKiB = value;
             else if( name == "MemAvailable:" )
-                availableKiB = value;
+            {
+                availableKiB  = value;
+                haveAvailable = true;
+            }
         }
 
-        info.totalRam = (double)( totalKiB / 1024 );
-        info.freeRam  = (double)( availableKiB / 1024 );
-        info.usedRam  = (double)( ( totalKiB - std::min( availableKiB, totalKiB ) ) / 1024 );
-        info.perRam   = totalKiB > 0 ? (int)( ( totalKiB - std::min( availableKiB, totalKiB ) ) * 100 / totalKiB ) : 0;
+        if( totalKiB == 0 || !haveAvailable )
+            return false;
+
+        const auto usedKiB = totalKiB - std::min( availableKiB, totalKiB );
+        info.totalRam      = (double)( totalKiB / 1024 );
+        info.freeRam       = (double)( std::min( availableKiB, totalKiB ) / 1024 );
+        info.usedRam       = (double)( usedKiB / 1024 );
+        info.perRam        = (int)( usedKiB * 100 / totalKiB );
+        return true;
+    }
+
+    void SystemResource::ramInfo( sysRamInfo& info )
+    {
+#if( JUCE_LINUX || __linux__ )
+        std::string meminfo;
+        sysfile::read( "/proc/meminfo", meminfo );
+        parseMemInfo( meminfo, info );
 #elif( defined( _WIN32 ) || defined( _WIN64 ) )
         // Dummy data for Windows
         info.totalRam = 100;
         info.usedRam  = 50;
         info.freeRam  = 50;
         info.perRam   = 50;
+#else
+        info = {};
 #endif
     }
 
