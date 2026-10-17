@@ -760,6 +760,20 @@ namespace ui
             setVisible( false );
     }
 
+    void LongPressComp::inputAttemptWhenModal()
+    {
+        // See mt::fsPopup::inputAttemptWhenModal().
+        if( !isShowing() )
+        {
+            ui::tapLog::write( "Tap: ERROR: the project menu was modal but cannot be seen; closing it" );
+            exitModalState( 0 );
+            setVisible( false );
+            return;
+        }
+        ui::tapLog::write( "Tap: blocked by the project menu" );
+        juce::Component::inputAttemptWhenModal();
+    }
+
     void LongPressComp::paint( juce::Graphics& g )
     {
         mt::utils::fillRoundedRect( g, bounds, ui::Theme::backgroundColour( 1 ), 5.0f, true, true, true, true );

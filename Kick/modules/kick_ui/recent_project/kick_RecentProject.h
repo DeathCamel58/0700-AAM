@@ -24,6 +24,7 @@ namespace ui
         void paint( juce::Graphics& g ) override;
         void resized() override;
         void mouseDown( const juce::MouseEvent& e ) override;
+        void inputAttemptWhenModal() override;
     };
 
     class NewProjectBtn : public juce::Component
