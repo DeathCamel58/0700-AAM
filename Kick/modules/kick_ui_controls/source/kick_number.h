@@ -70,7 +70,6 @@ namespace ui
         {
             setTitle( Name );
             setName( Name );
-            addMouseListener( this, true );
             setValueBounds( Min, Max, Default, StepSize );
 
             setTitleColour( ui::Theme::textColour() );
@@ -259,23 +258,15 @@ namespace ui
             }
         }
 
-        void mouseDoubleClick( const juce::MouseEvent& /*e*/ ) override
+        // A tap opens the number pad, as a tap opens a list box's choices.
+        // (It used to take a double tap, timed by hand.) A press that moved
+        // or ended off the box is not a tap.
+        void mouseUp( const juce::MouseEvent& e ) override
         {
-            showOptionsDlg();
-        }
-
-        void mouseDown( const juce::MouseEvent& event )
-        {
-            Component::BailOutChecker checker( this );
-            if( checker.shouldBailOut() )
+            if( e.getDistanceFromDragStart() > tapSlop || !getLocalBounds().contains( e.getPosition() ) )
                 return;
 
-            auto currentTime = juce::Time::getCurrentTime();
-
-            if( ( currentTime - lastClickTime ).inMilliseconds() <= doubleClickTimeoutMs && currentTime != lastClickTime )
-                mouseDoubleClick( event );
-            else
-                lastClickTime = currentTime;
+            showOptionsDlg();
         }
 
     private:
@@ -291,8 +282,8 @@ namespace ui
 
         juce::ListenerList<KickNumberT<Type>::Listener> listeners;
 
-        juce::Time lastClickTime;
-        float      doubleClickTimeoutMs{ 400 };
+        // How far a press may move and still be a tap, in layout units.
+        static constexpr int tapSlop = 8;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( KickNumberT<Type> )
     };
