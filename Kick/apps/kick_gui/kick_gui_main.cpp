@@ -82,7 +82,7 @@ public:
         mt::getAudioInterface();
 
         // Initialize User Interface...
-        w = kick_ui::createMainWindow( getApplicationName(), windowOptions, nullptr );
+        w = kick_ui::createMainWindow( getApplicationName(), windowOptions, [this]() { quitKick(); } );
     }
 
     void shutdown() override
@@ -109,6 +109,7 @@ public:
 
     juce::var getConfig( const juce::String& commandLine )
     {
+        standalone = commandLine.isEmpty();
         return ( commandLine.isEmpty() ?
             contracts::GUIIPCConfig().getStandAloneConfig() :
             ipc::createJsonObjectFromCommandLineString( commandLine ) );
@@ -133,7 +134,31 @@ public:
     }
 
 private:
+    // The window was closed: the user wants Kick to end, not just this
+    // process, which KickMain would start again. KickMain stops every
+    // process (this one with SIGTERM) and exits with status 0.
+    void quitKick()
+    {
+        if( standalone )
+        {
+            systemRequestedQuit();
+            return;
+        }
+
+        juce::Logger::writeToLog( "The window was closed; asking KickMain to stop Kick" );
+        contracts::SystemSignals::SendSystemCommand( contracts::SystemIPCHelpers::prepareExitSystemMessage() );
+
+        // Without an answer from KickMain, quit anyway.
+        juce::Timer::callAfterDelay( exitTimeoutInMS, [this]() {
+            juce::Logger::writeToLog( "KickMain did not stop Kick; quitting" );
+            systemRequestedQuit();
+        } );
+    }
+
+    static constexpr int exitTimeoutInMS = 10000;
+
    kick::window::StartupOptions                windowOptions;
+   bool                                        standalone{ false }; // started without KickMain
    std::unique_ptr<kick::window::MainWindow>   w{ nullptr };
    std::unique_ptr<contracts::DclIPCInterface> dclInterface{ nullptr }; // create this to enable handling sendCommandToDcl signal.
    std::unique_ptr<contracts::AudioEngineIPCInterface> audioEngineInterface{ nullptr };
