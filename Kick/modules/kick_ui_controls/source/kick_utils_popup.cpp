@@ -284,11 +284,14 @@ namespace mt
             b = b.reduced( 4 );
 
             // Setup Title and close button
-            auto bTitle  = b.removeFromTop( ( ui::layout::screen == dialogArea ) ? 76 : 40 );
+            // The title bar spans the dialog, under the close button: next
+            // to a shorter one, the blurred background showed around the
+            // button (a colored glow behind the X).
+            auto bTitle = b.removeFromTop( ( ui::layout::screen == dialogArea ) ? 76 : 40 );
+            title.setBounds( bTitle );
             auto cBounds = bTitle.removeFromRight( 16 + closeButtonSize );
             closeBounds  = cBounds.withSizeKeepingCentre( closeButtonSize, closeButtonSize );
             closeButton.setBounds( closeBounds );
-            title.setBounds( bTitle );
 
             // If options, Setup Apply/Cancel buttons
             if( showYesNoButtons )
