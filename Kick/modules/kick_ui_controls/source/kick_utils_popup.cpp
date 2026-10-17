@@ -107,6 +107,11 @@ namespace mt
 
         virtual void paint( juce::Graphics& g )
         {
+            // The pop-up is opaque, so JUCE paints nothing under it; but the
+            // snapshot is transparent wherever the layout paints nothing
+            // (around the project name and the header buttons, say), and
+            // there the old, sharp pixels showed through the blur.
+            g.fillAll( juce::Colours::black );
             g.drawImageAt( image, 0, 0 );
         }
 
@@ -158,6 +163,9 @@ namespace mt
             } );
 
             setWantsKeyboardFocus( true );
+            // It takes the focus for the front panel's controls, but an
+            // outline around the whole screen says nothing.
+            setHasFocusOutline( false );
             setContentBackgroundColour( backgroundColour );
             setShowYesNoButtons( ShowYesNoButtons );
             setTitle( Title );
@@ -279,11 +287,14 @@ namespace mt
             b = b.reduced( 4 );
 
             // Setup Title and close button
-            auto bTitle  = b.removeFromTop( ( ui::layout::screen == dialogArea ) ? 76 : 40 );
+            // The title bar spans the dialog, under the close button: next
+            // to a shorter one, the blurred background showed around the
+            // button (a colored glow behind the X).
+            auto bTitle = b.removeFromTop( ( ui::layout::screen == dialogArea ) ? 76 : 40 );
+            title.setBounds( bTitle );
             auto cBounds = bTitle.removeFromRight( 16 + closeButtonSize );
             closeBounds  = cBounds.withSizeKeepingCentre( closeButtonSize, closeButtonSize );
             closeButton.setBounds( closeBounds );
-            title.setBounds( bTitle );
 
             // If options, Setup Apply/Cancel buttons
             if( showYesNoButtons )

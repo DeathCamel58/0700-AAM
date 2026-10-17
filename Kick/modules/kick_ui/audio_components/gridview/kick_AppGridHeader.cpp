@@ -38,6 +38,16 @@ namespace kick_ui
         magnify.setRadioGroupId( (int)RadioGroupId::AppGridHeader, juce::dontSendNotification );
 
         mt::utils::addChildComponents( this, tracks, pencil, erase, select, copy, play, paste, cut, bars, magnify );
+
+        // The tools' names: shown on hover, or when held (ui::LongPressHint).
+        play.setTooltip( TRANS( "Play / Stop" ) );
+        magnify.setTooltip( TRANS( "Magnify" ) );
+        select.setTooltip( TRANS( "Select" ) );
+        pencil.setTooltip( TRANS( "Draw" ) );
+        erase.setTooltip( TRANS( "Erase" ) );
+        cut.setTooltip( TRANS( "Cut" ) );
+        copy.setTooltip( TRANS( "Copy" ) );
+        paste.setTooltip( TRANS( "Paste" ) );
         mt::utils::setTitleColour( ui::Theme::textColour( 1 ), tracks, bars );
         mt::utils::setTitleFontHeight( 16, tracks, bars );
         bars.setTitleProportion( .4f );
@@ -106,6 +116,7 @@ namespace kick_ui
         };
 
         ui::themeChanged.connect( [&]() {
+            magnify.setImages( "Search_Browser", "Search_BrowserActive" );
             pencil.setImages( "Pencil_Normal", "Pencil_Active" );
             erase.setImages( "Erase_Normal", "Erase_Active" );
             select.setImages( "Select", "Select_Normal", "Select_Active" );

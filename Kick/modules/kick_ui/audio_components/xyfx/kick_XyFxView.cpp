@@ -102,6 +102,8 @@ namespace kick_ui
         mt::utils::addAndMakeVisible( this, setupScreen, latch, setup, xyFx, header, on_off, output, hdrComp );
         mt::utils::addListener( this, latch, setup );
         xyFx.setEnabled( false );
+        // The pad does nothing until the effect is on: say how.
+        xyFx.setDisabledHint( TRANS( "Turn the effect on (top right) to play it here" ) );
 
         hdrComp.setValueBackgroundColor( ui::Theme::backgroundColour( 3 ) );
         header.showOptions( false, true );
@@ -116,8 +118,8 @@ namespace kick_ui
 
         xyFx.setXYCoordinates( setupScreen.getXYdata() );
 
-        on_off.onClick = [&]() {
-            xyFx.setEnabled( on_off.getToggleState() );
+        on_off.onSelectionChanged = [&]( int index, const juce::String& ) {
+            xyFx.setEnabled( index == 1 );
             xyFx.repaint();
         };
 
@@ -133,7 +135,6 @@ namespace kick_ui
         ui::themeChanged.connect( [&]() {
             latch.setToggleButtonText( "Latch", "Latch" );
             setup.setToggleButtonText( "Setup", "Setup" );
-            on_off.setToggleButtonText( "Off", "On" );
             header.setIcon( "Icon_XY" );
         } );
     }

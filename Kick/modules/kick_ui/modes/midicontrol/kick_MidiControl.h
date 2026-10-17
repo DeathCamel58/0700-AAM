@@ -141,7 +141,7 @@ namespace kick_ui
         ui::KickToggleButton    hardware{ "Hardware", "Hardware", "Hardware" };
         ui::KickToggleButton    xy{ "XY", "XY", "XY" };
         ui::KickToggleButton    midiLearn{ "MIDI Learn", "MIDI Learn", "MIDI Learn" };
-        ui::KickButton          monitor{ "Midi Monitor" };
+        ui::KickButton          monitor{ "MIDI Monitor" };
         MidiMonitor             midiMonitor;
 
         MidiControlHardware  hardWareTab;

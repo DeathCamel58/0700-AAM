@@ -36,8 +36,13 @@ namespace kick_ui
         ui::KickGrid::setBackgroundColour( juce::Colours::transparentBlack );
         setRowTitles( { "Startup Settings", "Auto Save", "Time Defaults", "Project Defaults", "Default Project Name" } );
 
-        asEnabled.setToggleState( settings.projects.isAutoSave(), juce::dontSendNotification );
-        settings.setAutoSave( asEnabled.getToggleState() );
+        // One size for all the values on the page: the numbers were drawn
+        // larger than the lists next to them, the auto save button smaller.
+        mt::utils::setValueFontHeight( 20.f, ssLaunch, ssRecProjects, asEnabled, asTimeout, pdTempo, pdBars, pdNum, pdDen,
+                                       pdRootNote, pdScale, pdSeq, pdTracks, bitDepath, enableList, defaultName );
+
+        asEnabled.setSelected( settings.projects.isAutoSave() ? 1 : 0, juce::dontSendNotification );
+        settings.setAutoSave( settings.projects.isAutoSave() );
         asTimeout.setSelected( settings.projects.saveAfter(), juce::sendNotification );
 
         addComponent( ssLaunch, 0, 0 );
@@ -71,9 +76,9 @@ namespace kick_ui
             settings.projects.bitDepth = ( str );
         };
 
-        asEnabled.onClick = [this]() {
-            settings.setAutoSave( asEnabled.getToggleState() );
-            settings.projects.isAutoSave = ( asEnabled.getToggleState() );
+        asEnabled.onSelectionChanged = [this]( int index, const juce::String& ) {
+            settings.setAutoSave( index == 1 );
+            settings.projects.isAutoSave = ( index == 1 );
         };
         asTimeout.onSelectionChanged = [this]( int index, const juce::String& str ) {
             settings.projects.saveAfter = ( str );
@@ -142,7 +147,6 @@ namespace kick_ui
         };
 
         defaultName.setValueJustification( juce::Justification::centred );
-        defaultName.setValueFontHeight( 20 );
         defaultName.onTextChange = [&]() {
             juce::String text            = defaultName.getText();
             settings.projects.namePrefix = ( text );
@@ -155,7 +159,7 @@ namespace kick_ui
         ssLaunch.setSelected( str, juce::dontSendNotification );
 
         ssRecProjects.setValue( settings.projects.maxRecentProjects(), juce::dontSendNotification );
-        asEnabled.setToggleState( settings.projects.isAutoSave(), juce::dontSendNotification );
+        asEnabled.setSelected( settings.projects.isAutoSave() ? 1 : 0, juce::dontSendNotification );
         asTimeout.setSelected( settings.projects.saveAfter(), juce::dontSendNotification );
 
         bitDepath.setSelected( settings.projects.bitDepth(), juce::dontSendNotification );
@@ -171,7 +175,8 @@ namespace kick_ui
         pdSeq.setValue( settings.projects.numSeq(), juce::dontSendNotification );
         pdTracks.setValue( settings.projects.numTrackPerSeq(), juce::dontSendNotification );
 
-        enableList.setSelected( settings.projects.namingStyle(), juce::dontSendNotification );
+        auto style = std::find( namingStyles.begin(), namingStyles.end(), settings.projects.namingStyle() );
+        enableList.setSelected( style != namingStyles.end() ? (int)std::distance( namingStyles.begin(), style ) : 0, juce::dontSendNotification );
         defaultName.setText( settings.projects.namePrefix(), juce::dontSendNotification );
     }
 

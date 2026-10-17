@@ -129,7 +129,7 @@ namespace ui
         KickImageButton sampleButton{ "Sample", "Sample_Browser", "Sample_BrowserActive" };
         KickImageButton allButton{ "All", "All_Browser", "All_BrowserActive" };
 
-        KickButton      sampleAssignButton{ "Sample Assign", "Sample Assign" };
+        KickButton      sampleAssignButton{ "Sample Assign", "Assign" };
         KickImageButton playIconButton{ "Play", "Play_browser", "Play_browser_Active" };
 
         KickMultiSelectTabBarButton auditionButton{ 3, getTabbedButtonBar(), "OFF" };

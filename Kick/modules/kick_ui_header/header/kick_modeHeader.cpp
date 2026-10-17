@@ -41,6 +41,16 @@ namespace kick_ui
         headerLabel.setValueColour( ui::Theme::textColour( 1 ) );
         headerLabel.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
 
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        back.setTooltip( TRANS( "Back" ) );
+        resources.setTooltip( TRANS( "System Resources" ) );
+        metronome.setTooltip( TRANS( "Metronome" ) );
+        automation.setTooltip( TRANS( "Automation" ) );
+        settings.setTooltip( TRANS( "Options" ) );
+        playStop.setTooltip( TRANS( "Play / Stop" ) );
+        newProject.setTooltip( TRANS( "New Project" ) );
+        autoLoad.setTooltip( TRANS( "Auto Load: open the last project at startup" ) );
+
         back.onClick = [this]() {
             if( onBackButtonPressed )
                 onBackButtonPressed( back.getToggleState() );

@@ -35,6 +35,16 @@ namespace ui
         ui::themeChanged.connect( [svgSetter]() { svgSetter(); } );
 
         svgSetter();
+
+        // Tooltips in the theme's colors, like the long-press hints
+        // (LongPressHint), rather than LookAndFeel_V4's blue.
+        auto tooltipColours = [this]() {
+            setColour( juce::TooltipWindow::backgroundColourId, ui::Theme::backgroundColour( 2 ) );
+            setColour( juce::TooltipWindow::textColourId, ui::Theme::textColour( 1 ) );
+            setColour( juce::TooltipWindow::outlineColourId, ui::Theme::outlineColour( 1 ) );
+        };
+        ui::themeChanged.connect( tooltipColours );
+        tooltipColours();
     }
 
     void KickLooknFeel::drawLabel( juce::Graphics& g, juce::Label& label )
@@ -457,7 +467,10 @@ namespace ui
             // Slider Knob area.
             if( props.isShowingKnob() )
             {
-                mt::utils::fillRoundedRect( g, knobRect.toNearestInt(), juce::Colours::aqua, 5.f );
+                // The theme's accent (it was cyan), outlined so that it
+                // stands out from the fill under it.
+                mt::utils::fillRoundedRect( g, knobRect.toNearestInt(), ui::Theme::foregroundColour( 1 ), 5.f );
+                mt::utils::renderRoundedRect( g, knobRect.toNearestInt(), ui::Theme::backgroundColour( 5 ), 1, 5.f );
             }
         }
     }

@@ -43,12 +43,12 @@ namespace kick_ui
         mt::KickSettings&    settings{ mt::getSettings() };
         bool                 scanning = false;
         juce::String         passphrase;
-        ui::KickToggleButton enabled{ "Wifi", "ENABLED", "DISABLED" };
+        ui::KickToggleOptions enabled{ "WI-FI", { "Off", "On" } };
 
         ui::KickLabel        password{ "", "" };
-        ui::KickListBox      wifiList{ "availableWifi" };
-        ui::KickToggleButton scanWifi{ "scanWifi", "ScanWifi", "ScanWifi" };
-        ui::KickToggleButton connect{ "connect", "connect", "disconnected" };
+        ui::KickListBox      wifiList{ "NETWORK" };
+        ui::KickToggleButton scanWifi{ "scanWifi", "Scan", "Scan" };
+        ui::KickToggleButton connect{ "connect", "Disconnect", "Connect" };
 
         ui::KickLabel wifIP{ "IpAddress", "" };
         ui::KickLabel gateway{ "gatway", "" };

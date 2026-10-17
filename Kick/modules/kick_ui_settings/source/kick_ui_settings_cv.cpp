@@ -36,7 +36,7 @@ namespace kick_ui
         ui::KickGrid::setBackgroundColour( juce::Colours::transparentBlack );
         setRowTitles( { "CV Range Settings", "", "", "" } );
 
-        calMsg.setText( "Note: Before starting calibration process, please disconnect any external gears connected on CV ports.", juce::dontSendNotification );
+        calMsg.setText( "Before calibrating, disconnect all gear from the CV ports.", juce::dontSendNotification );
         calMsg.setValueFontHeight( 16 );
         calMsg.setValueJustification( juce::Justification::centred );
         calMsg.setValueColour( ui::Theme::textColour( 2 ) );

@@ -38,6 +38,12 @@ namespace ui
                 selectedCells[prevSel] = isLatch ? 255 : 0;
             repaint();
         }
+        // Shown on the pad while it is disabled (empty: nothing).
+        void setDisabledHint( const juce::String& Hint )
+        {
+            disabledHint = Hint;
+            repaint();
+        }
 
     private:
         void                   updateSelection( const juce::MouseEvent& event );
@@ -61,5 +67,6 @@ namespace ui
         bool             isLatch{ false };
         float            xCoordinate{ 0 }, yCoordinate{ 0 }, xCoord{ 0 }, yCoord{ 0 };
         juce::String     xLeft{ "" }, xRight{ "" }, yTop{ "" }, yBottom{ "" };
+        juce::String     disabledHint;
     };
 }

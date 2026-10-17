@@ -207,6 +207,11 @@ namespace ui
         void enableRowSelection( bool State ) { enableRowSelectionFlag = State; }
         void setTableEndInfo( const juce::String&, juce::Colour, float, bool bEnable = false );
 
+        // A line shown in the middle of the table while it has no rows
+        // (say, "No tracks yet"), so that an empty table does not look
+        // like one that failed to load. Empty (the default) shows nothing.
+        void setEmptyText( const juce::String& Text );
+
     private:
         void resized() override;
         void paint( juce::Graphics& g ) override;
@@ -216,6 +221,8 @@ namespace ui
         void setViewPosition();
 
         KickLabel endLabelInfo{ "END" };
+
+        juce::String emptyText;
 
         bool bEndLabelEnabled{ false };
         bool bAutoScrollEnabed{ false };

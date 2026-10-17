@@ -65,7 +65,7 @@ namespace kick_ui
     private:
         ui::KickToggleButton latch{ "Latch", "Latch", "Latch" };
         ui::KickToggleButton setup{ "Setup", "Setup", "Setup" };
-        ui::KickToggleButton on_off{ "Off", "On", "Off" };
+        ui::KickToggleOptions on_off{ "", { "Off", "On" } };
         ui::KickListBox      output{ ui::KickListBox::withTitleBar, "XY Location", {} };
         ui::XYFXGrid         xyFx;
 

@@ -29,6 +29,9 @@ namespace kick_ui
         boxInfo.setValueJustification( juce::Justification::centred );
         boxInfo.setColours( ui::Theme::textColour( 2 ), ui::Theme::backgroundColour( 5 ) );
         boxInfo.setFontHeight( 18 );
+        // Empty until there is something to report (the label's name is
+        // not a message).
+        boxInfo.setText( {}, juce::dontSendNotification );
         // Progress Bar...
         progressBar.setTextToDisplay( "" );
         progressBar.setColour( juce::ProgressBar::backgroundColourId, ui::Theme::backgroundColour( 12 ) );

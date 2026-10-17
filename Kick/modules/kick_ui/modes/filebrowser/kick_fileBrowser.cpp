@@ -70,6 +70,8 @@ namespace ui
                             << "Button - Memory " << i + 5 << ".svg";
 
             grpNum.push_back( std::make_unique<ui::KickImageButton>( buttonName.str(), imagePath.str(), activeImagePath.str(), activeImagePath.str() ) );
+            grpNum.back()->setTooltip( TRANS( "Favorite folder" ) + " " + juce::String( i ) + ". "
+                                       + TRANS( "Tap to keep the current folder here, tap again to go back to it, double-tap to clear." ) );
         }
         favouriteButtonImplementation();
 
@@ -1015,7 +1017,7 @@ namespace ui
             top.renameBtn.setToggleState( false, juce::dontSendNotification );
             selectBtnOnClick();
             bottom.allButton.setToggleState( true, juce::dontSendNotification );
-            statusBar.setBoxInfo( "Box Info" );
+            statusBar.setBoxInfo( {} );
         }
     }
 
@@ -1212,7 +1214,7 @@ namespace ui
                 {
                     if( asset.hasFileExtension( sampleFileList ) )
                     {
-                        statusBar.setBoxInfo( asset.getFileNameWithoutExtension() + " has Loaded" );
+                        statusBar.setBoxInfo( asset.getFileNameWithoutExtension() + " loaded" );
                         break;
                     }
                 }
@@ -1381,7 +1383,10 @@ namespace ui
     FileBrowserRightPanel::FileBrowserRightPanel()
     {
         table.reset( new KickTableView( "List", provider ) );
-        mt::utils::addAndMakeVisible( this, *table, name, date, timeStamp, size, backButton );
+        // One column for the modification date and time (the rows show
+        // both in it): timeStamp is not shown.
+        mt::utils::addAndMakeVisible( this, *table, name, date, size, backButton );
+        date.setText( TRANS( "Modified" ), juce::dontSendNotification );
 
         table->setRowHeight( rightTableRowHeight );
         table->setRowSpacing( 0 );
@@ -1389,6 +1394,7 @@ namespace ui
         table->setSelectedRowBackgroundColour( ui::Theme::backgroundColour( 0 ) );
         table->setSelectedRowOutlineColour( ui::Theme::outlineColour( 0 ) );
         table->setAutoScrollToSelection( true );
+        table->setEmptyText( TRANS( "No files to show" ) );
 
         name.setPadding( labelLeftMargin );
         name.setFontHeight( labelFontHeight );
@@ -1434,8 +1440,7 @@ namespace ui
         table->setBoundsRelative( 0.012f, 0.16f, 0.987f, 0.842f );
         backButton.setBoundsRelative( 0.0153f, 0.0292f, 0.0521f, 0.0994f );
         name.setBoundsRelative( 0.09227f, 0.0146f, 0.2622f, 0.1286f );
-        date.setBoundsRelative( 0.3857f, 0.0146f, 0.1840f, 0.1286f );
-        timeStamp.setBoundsRelative( 0.5991f, 0.0146f, 0.1840f, 0.1286f );
+        date.setBoundsRelative( 0.3857f, 0.0146f, 0.3974f, 0.1286f );
         size.setBoundsRelative( 0.81780f, 0.0146f, 0.1840f, 0.1286f );
     }
 
@@ -1452,6 +1457,15 @@ namespace ui
         searchLabel.setValueBackgroundColour( ui::Theme::backgroundColour( 13 ) );
         searchLabel.setPadding( 10 );
         searchLabel.setFontHeight( 18.0f );
+
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        searchButton.setTooltip( TRANS( "Search" ) );
+        selectBtn.setTooltip( TRANS( "Select files" ) );
+        deleteBtn.setTooltip( TRANS( "Delete" ) );
+        cutBtn.setTooltip( TRANS( "Cut" ) );
+        copyBtn.setTooltip( TRANS( "Copy" ) );
+        pasteBtn.setTooltip( TRANS( "Paste" ) );
+        renameBtn.setTooltip( TRANS( "Rename" ) );
 
         onElementChangedCallback = [&]() {
             repaint();
@@ -1514,6 +1528,14 @@ namespace ui
         mt::utils::setRadioGroupID( (int)kick_ui::RadioGroupId::FileBrowserFilter, allButton, projectButton, sampleButton );
 
         auditionButton.incrementSelection();
+
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        projectButton.setTooltip( TRANS( "Show projects" ) );
+        sampleButton.setTooltip( TRANS( "Show samples" ) );
+        allButton.setTooltip( TRANS( "Show all files" ) );
+        playIconButton.setTooltip( TRANS( "Play the selected sample" ) );
+        volumeBtn.setTooltip( TRANS( "Preview volume" ) );
+        volumeMuteBtn.setTooltip( TRANS( "Preview volume" ) );
 
         sampleAssignButton.setValueColour( ui::Theme::textColour( 1 ) );
         sampleAssignButton.setValueFontHeight( 16 );
@@ -1704,7 +1726,7 @@ namespace ui
         size.setFontHeight( 14.0f );
         size.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
 
-        mt::utils::addAndMakeVisible( this, file, date, time, size );
+        mt::utils::addAndMakeVisible( this, file, date, size );
     }
 
     void FileRightEntry::resized()
@@ -1714,8 +1736,7 @@ namespace ui
         isFolder ? x = 0.028f : x = 0.034f;
         imageBtn.setBoundsRelative( x, 0.33f, width / b.getWidth(), height / b.getHeight() );
         file.setBoundsRelative( 0.08f, 0.185f, 0.33f, 0.611f );
-        date.setBoundsRelative( 0.383f, 0.203f, 0.19f, 0.574f );
-        time.setBoundsRelative( 0.6f, 0.203f, 0.19f, 0.574f );
+        date.setBoundsRelative( 0.383f, 0.203f, 0.407f, 0.574f );
         size.setBoundsRelative( 0.826f, 0.203f, 0.19f, 0.574f );
     }
     void FileRightEntry::paint( juce::Graphics& g )
@@ -1728,10 +1749,10 @@ namespace ui
         width  = Width;
         height = Height;
         file.setText( File, juce::dontSendNotification );
-        date.setText( Date, juce::dontSendNotification );
-        time.setText( Time, juce::dontSendNotification );
+        // Date and time in one column, under "Modified".
+        date.setText( Time.isEmpty() ? Date : Date + "  " + Time, juce::dontSendNotification );
         size.setText( Size, juce::dontSendNotification );
-        mt::utils::addAndMakeVisible( this, imageBtn, file, date, time, size );
+        mt::utils::addAndMakeVisible( this, imageBtn, file, date, size );
         resized();
     }
 

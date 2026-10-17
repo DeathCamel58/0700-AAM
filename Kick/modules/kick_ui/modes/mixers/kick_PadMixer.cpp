@@ -157,8 +157,11 @@ namespace kick_ui
         trackLabel.setValueBackgroundColour( ui::Theme::backgroundColour( 9 ) );
         programLabel.setValueColour( ui::Theme::textColour( 1 ) );
         trackLabel.setValueColour( ui::Theme::textColour( 1 ) );
-        programLabel.setValueJustification( juce::Justification::centred );
-        trackLabel.setValueJustification( juce::Justification::centred );
+        // Aligned with the values in the boxes below them.
+        programLabel.setValueJustification( juce::Justification::centredLeft );
+        trackLabel.setValueJustification( juce::Justification::centredLeft );
+        programLabel.setPaddingLeft( 8 );
+        trackLabel.setPaddingLeft( 8 );
         sampleAssign.setValueColour( ui::Theme::textColour( 1 ) );
 
         header.onBackButtonPressed = [this]( bool ) { closeScreen(); };
@@ -203,8 +206,9 @@ namespace kick_ui
         header.setBounds( b.removeFromTop( ui::layout::header.getHeight() ) );
         padHeaderComp.setBoundsRelative( 0.225f, 0.0503f, 0.3620f, 0.0636f );
         padEnabler.setBoundsRelative( 0.8063f, 0.0299f, 0.0430f, 0.0824f );
-        programLabel.setBoundsRelative( .225f, 0.0000f, .0648f, .0583f );
-        trackLabel.setBoundsRelative( .424f, 0.0000f, .0648f, .0583f );
+        // As wide as the text ("PROGRAM" was cut short); the boxes are below.
+        programLabel.setBoundsRelative( .225f, 0.0000f, .1f, .0583f );
+        trackLabel.setBoundsRelative( .424f, 0.0000f, .1f, .0583f );
         sampleAssign.setBoundsRelative( .685f, .0299f, .1174f, .0824f );
 
         padContent.setBounds( b );
@@ -439,8 +443,8 @@ namespace kick_ui
             mt::utils::makeVisible( infoLabel );
 
             sampleList.clear();
-            auto prog = pProg ? juce::String( mt::toString( pProg->type.get() ) ) : "Unknown ";
-            infoLabel.setText( "Pad Mixer Is Not Applicable For " + prog + " Program", juce::dontSendNotification );
+            infoLabel.setText( pProg ? "The Pad Mixer works with drum and clip programs only" : "This track has no program",
+                               juce::dontSendNotification );
         }
 
         tableView->setVisible( isProgramAvailable );

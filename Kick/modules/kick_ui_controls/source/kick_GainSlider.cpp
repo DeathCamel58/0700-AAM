@@ -75,13 +75,22 @@ namespace ui
         int  i  = 0;
         g.setColour( juce::Colours::white );
 
+        // The values are 12 px high and one is left out when it would
+        // overlap the one above it: at 16 px, 0 and -3 ran into each other.
+        const int textHeight = 12;
+        int       textTop    = std::numeric_limits<int>::min();
         for( auto it : markings )
         {
             auto y = bMarkingLines.getY() + it;
             g.drawLine( x1, y, x2, y, 0.5f );
 
-            juce::Rectangle<int> bText{ x2 + 2, (int)y - 8, t2, 16 };
-            mt::utils::renderText( g, juce::String( decibles[i++] ), bText, juce::Colours::white, juce::Justification::centredLeft );
+            juce::Rectangle<int> bText{ x2 + 2, (int)y - textHeight / 2, t2, textHeight };
+            if( bText.getY() >= textTop )
+            {
+                mt::utils::renderText( g, juce::String( decibles[i] ), bText, juce::Colours::white, juce::Justification::centredLeft, (float)textHeight );
+                textTop = bText.getBottom();
+            }
+            ++i;
         }
 
         // Draw Slider track...
@@ -96,7 +105,19 @@ namespace ui
         auto kw  = bSliderTrack.getWidth() + 16;
         bSliderKnob.setBounds( 8, (int)sPos - 10, KnobWidth, KnobHeight );
 
-        _knobImg->drawAt( g, 8, (int)bSliderKnob.getY() - 10, 1.0f );
+        // The knob, centered on the track, stays left of the values (at its
+        // full width it covered the "-" of "-100" at the bottom). Where
+        // there is room it keeps its size.
+        if( _knobImg )
+        {
+            auto  knob  = _knobImg->getDrawableBounds();
+            auto  cx    = (float)bSliderTrack.getCentreX();
+            auto  half  = juce::jmin( knob.getWidth() / 2.f, (float)x2 + 1.f - cx );
+            auto  scale = juce::jmax( 0.f, 2.f * half / knob.getWidth() );
+            auto  area  = juce::Rectangle<float>( knob.getWidth() * scale, knob.getHeight() * scale )
+                            .withCentre( { cx, (float)bSliderKnob.getY() - 10.f + knob.getHeight() / 2.f } );
+            _knobImg->drawWithin( g, area, juce::RectanglePlacement::centred, 1.0f );
+        }
     }
 
     void KickGainSlider::resized()

@@ -125,8 +125,9 @@ namespace kick_ui
         {
             master.setBoundsRelative( .0f, .0f, .0544f, 1.0f );
             ioListBox.setBoundsRelative( .4295f, .1339f, .1634f, .5535f );
-            masterInserts.setBoundsRelative( .2563f, .3035f, .0978f, .3928f );
-            limiter.setBoundsRelative( .3581f, .3035f, .0489f, .3928f );
+            // Limiter gets the width Inserts can spare: it was cut to "Limi...".
+            masterInserts.setBoundsRelative( .2563f, .3035f, .085f, .3928f );
+            limiter.setBoundsRelative( .3453f, .3035f, .0743f, .3928f );
             levelSlider.setBoundsRelative( .6125f, .0892f, .1682f, .8214f );
             panSlider.setBoundsRelative( .7954f, .0892f, .0782f, .8214f );
             mute.setBoundsRelative( .9001f, .3035f, .0587f, .3928f );
