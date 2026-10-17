@@ -38,6 +38,18 @@ namespace kick_ui
 
         mainModeButton.setToggleState( true, juce::dontSendNotification );
 
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        menuButton.setTooltip( TRANS( "Menu" ) );
+        mainModeButton.setTooltip( TRANS( "Home" ) );
+        gridButton.setTooltip( TRANS( "Grid View" ) );
+        stepSeqButton.setTooltip( TRANS( "Step Sequencer" ) );
+        axisButton.setTooltip( TRANS( "XY Effects" ) );
+        kickPlayButton.setTooltip( TRANS( "Play / Stop" ) );
+        kickBrowseButton.setTooltip( TRANS( "File Browser" ) );
+        metronomeButton.setTooltip( TRANS( "Metronome" ) );
+        newFileButton.setTooltip( TRANS( "Projects" ) );
+        settingsButton.setTooltip( TRANS( "Preferences" ) );
+
         setPaintingIsUnclipped( true );
         setInterceptsMouseClicks( false, true );
 

@@ -70,6 +70,8 @@ namespace ui
                             << "Button - Memory " << i + 5 << ".svg";
 
             grpNum.push_back( std::make_unique<ui::KickImageButton>( buttonName.str(), imagePath.str(), activeImagePath.str(), activeImagePath.str() ) );
+            grpNum.back()->setTooltip( TRANS( "Favorite folder" ) + " " + juce::String( i ) + ". "
+                                       + TRANS( "Tap to keep the current folder here, tap again to go back to it, double-tap to clear." ) );
         }
         favouriteButtonImplementation();
 
@@ -1459,6 +1461,15 @@ namespace ui
         searchLabel.setPadding( 10 );
         searchLabel.setFontHeight( 18.0f );
 
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        searchButton.setTooltip( TRANS( "Search" ) );
+        selectBtn.setTooltip( TRANS( "Select files" ) );
+        deleteBtn.setTooltip( TRANS( "Delete" ) );
+        cutBtn.setTooltip( TRANS( "Cut" ) );
+        copyBtn.setTooltip( TRANS( "Copy" ) );
+        pasteBtn.setTooltip( TRANS( "Paste" ) );
+        renameBtn.setTooltip( TRANS( "Rename" ) );
+
         onElementChangedCallback = [&]() {
             repaint();
             resized();
@@ -1520,6 +1531,14 @@ namespace ui
         mt::utils::setRadioGroupID( (int)kick_ui::RadioGroupId::FileBrowserFilter, allButton, projectButton, sampleButton );
 
         auditionButton.incrementSelection();
+
+        // The icons' names: shown on hover, or when held (ui::LongPressHint).
+        projectButton.setTooltip( TRANS( "Show projects" ) );
+        sampleButton.setTooltip( TRANS( "Show samples" ) );
+        allButton.setTooltip( TRANS( "Show all files" ) );
+        playIconButton.setTooltip( TRANS( "Play the selected sample" ) );
+        volumeBtn.setTooltip( TRANS( "Preview volume" ) );
+        volumeMuteBtn.setTooltip( TRANS( "Preview volume" ) );
 
         sampleAssignButton.setValueColour( ui::Theme::textColour( 1 ) );
         sampleAssignButton.setValueFontHeight( 16 );
