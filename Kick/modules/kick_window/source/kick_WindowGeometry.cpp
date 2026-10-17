@@ -140,6 +140,55 @@ namespace kick::window
         return juce::Rectangle<int>( values[0], values[1], values[2], values[3] );
     }
 
+    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::BorderSize<int> frame )
+    {
+        return clientArea.translated( -frame.getLeft(), -frame.getTop() );
+    }
+
+    BoundsSaving::BoundsSaving( int delayInMS )
+        : delay( juce::jmax( 0, delayInMS ) )
+    {
+    }
+
+    void BoundsSaving::setSaved( const juce::String& bounds )
+    {
+        saved = bounds;
+    }
+
+    void BoundsSaving::changed( const juce::String& bounds, uint32_t now )
+    {
+        // Back where they were saved: nothing to do.
+        waiting   = bounds != saved;
+        pending   = bounds;
+        changedAt = now;
+    }
+
+    int BoundsSaving::getTimeUntilDue( uint32_t now ) const
+    {
+        if( !waiting )
+            return 0;
+
+        const auto waited = now - changedAt; // modulo 2^32
+        return waited >= (uint32_t)delay ? 0 : delay - (int)waited;
+    }
+
+    std::optional<juce::String> BoundsSaving::takeDue( uint32_t now )
+    {
+        if( !waiting || getTimeUntilDue( now ) > 0 )
+            return std::nullopt;
+        return flush();
+    }
+
+    std::optional<juce::String> BoundsSaving::flush()
+    {
+        if( !waiting )
+            return std::nullopt;
+
+        waiting = false;
+        saved   = pending;
+        return saved;
+    }
+
     juce::Rectangle<int> keepAspectRatio( juce::Rectangle<int> bounds,
                                           juce::Rectangle<int> previous,
                                           juce::Point<int>     layoutSize,

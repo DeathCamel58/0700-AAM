@@ -380,6 +380,70 @@ namespace
 
 namespace
 {
+    void testBoundsSaving()
+    {
+        using kick::window::BoundsSaving;
+
+        // The frame's top-left corner, with the client area's size.
+        CHECK( kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, { 40, 4, 4, 4 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+        CHECK( kick::window::windowBoundsToSave( { 10, 20, 1024, 600 }, {} ) == juce::Rectangle<int>( 10, 20, 1024, 600 ) );
+        // Restored there, the window manager puts the frame back where it was.
+        const auto restored = kick::window::parseWindowBounds( kick::window::formatWindowBounds(
+            kick::window::windowBoundsToSave( { 128, 134, 1024, 600 }, kick::window::assumedWindowFrame ) ) );
+        const juce::Rectangle<int> qemu( 0, 0, 1280, 800 );
+        CHECK( restored.has_value()
+               && kick::window::chooseWindowBounds( restored, { qemu }, qemu, { 1024, 600 }, { 512, 300 } ) == juce::Rectangle<int>( 124, 94, 1024, 600 ) );
+
+        // A move: saved once it has settled, not before.
+        BoundsSaving saving( 1000 );
+        saving.setSaved( "124 94 1024 600" );
+        CHECK( !saving.isWaiting() );
+        saving.changed( "200 94 1024 600", 5000 );
+        CHECK( saving.isWaiting() );
+        CHECK( saving.getTimeUntilDue( 5000 ) == 1000 );
+        CHECK( !saving.takeDue( 5999 ).has_value() );
+        CHECK( saving.getTimeUntilDue( 5400 ) == 600 );
+
+        // More moves restart the wait; only the last bounds are saved.
+        saving.changed( "300 94 1024 600", 5900 );
+        CHECK( !saving.takeDue( 6000 ).has_value() );
+        auto due = saving.takeDue( 6900 );
+        CHECK( due.has_value() && *due == "300 94 1024 600" );
+        CHECK( !saving.isWaiting() );
+        CHECK( !saving.takeDue( 9000 ).has_value() );
+        CHECK( !saving.flush().has_value() );
+
+        // Back to the bounds saved: nothing to save.
+        saving.changed( "310 94 1024 600", 10000 );
+        saving.changed( "300 94 1024 600", 10100 );
+        CHECK( !saving.isWaiting() );
+        CHECK( !saving.takeDue( 20000 ).has_value() );
+
+        // Quitting before the wait is over: flushed.
+        saving.changed( "400 94 1024 600", 30000 );
+        due = saving.flush();
+        CHECK( due.has_value() && *due == "400 94 1024 600" );
+        CHECK( !saving.flush().has_value() );
+
+        // Nothing saved before: the first bounds are saved.
+        BoundsSaving first( 1000 );
+        first.changed( "124 94 1024 600", 0 );
+        CHECK( first.isWaiting() );
+        CHECK( first.takeDue( 1000 ).has_value() );
+
+        // The millisecond counter wraps.
+        BoundsSaving wrapping( 1000 );
+        wrapping.changed( "1 2 1024 600", 0xffffff00u );
+        CHECK( !wrapping.takeDue( 0xffffff00u + 999u ).has_value() );
+        CHECK( wrapping.getTimeUntilDue( 0x100u ) == 488 );
+        CHECK( wrapping.takeDue( 0xffffff00u + 1000u ).has_value() );
+
+        // No delay: due at once.
+        BoundsSaving immediate( 0 );
+        immediate.changed( "1 2 1024 600", 7 );
+        CHECK( immediate.takeDue( 7 ).has_value() );
+    }
+
     void testAspectRatio()
     {
         using kick::window::keepAspectRatio;
@@ -605,6 +669,7 @@ int main()
     testWindowBoundsText();
     testWindowBounds();
     testAspectRatio();
+    testBoundsSaving();
     testOverlayPlacement();
     testFrameTiming();
     testFrameTimingThreads();

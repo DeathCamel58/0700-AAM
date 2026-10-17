@@ -50,7 +50,8 @@ namespace kick::window
             Renderer   renderer{ Renderer::software };
 
             // The saved bounds (formatWindowBounds()), read when the
-            // windowed window opens and written when it is destroyed.
+            // windowed window opens, and written a second after it is moved
+            // or resized and when it is destroyed.
             std::function<juce::String()>             loadBounds;
             std::function<void( const juce::String& )> saveBounds;
 
@@ -68,6 +69,7 @@ namespace kick::window
         MainWindow( const juce::String& name, juce::Component& content, Options options );
         ~MainWindow() override;
 
+        void moved() override;
         void resized() override;
         void closeButtonPressed() override;
         void inputAttemptWhenModal() override;
@@ -86,6 +88,11 @@ namespace kick::window
         // minimum and maximum size on to it on Linux).
         void keepAspectRatio();
 
+        // Notes the desktop window's bounds, to save them once they settle.
+        void noteBounds();
+        void saveBoundsWhenDue();
+        void saveBounds( const juce::String& bounds );
+
         void openKiosk();
         void openWindowed();
         void attachOpenGL();
@@ -103,6 +110,10 @@ namespace kick::window
         // manager may give it back: the window is then left letterboxed).
         juce::Rectangle<int> settledBounds;
         juce::Rectangle<int> correctedFrom;
+
+        static constexpr int boundsSaveDelayInMS = 1000;
+        BoundsSaving         boundsSaving{ boundsSaveDelayInMS };
+        juce::TimedCallback  boundsSaveTimer{ [this]() { saveBoundsWhenDue(); } };
 
         std::unique_ptr<OpenGLWatch>         openGLWatch;
         std::unique_ptr<juce::OpenGLContext> openGLContext;

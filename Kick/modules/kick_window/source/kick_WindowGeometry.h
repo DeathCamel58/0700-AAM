@@ -49,9 +49,49 @@ namespace kick::window
     juce::AffineTransform placeInBottomRight( juce::Rectangle<int> area, juce::Rectangle<int> layout,
                                               juce::Point<int> panelSize, int margin );
 
-    // A saved window position and size: "x y width height".
+    // A saved window position and size: "x y width height". The position
+    // is the frame's top-left corner, the size the client area's (as
+    // chooseWindowBounds() gives them).
     juce::String                        formatWindowBounds( juce::Rectangle<int> bounds );
     std::optional<juce::Rectangle<int>> parseWindowBounds( const juce::String& text );
+
+    // The bounds to save for a window with this client area and frame.
+    juce::Rectangle<int> windowBoundsToSave( juce::Rectangle<int> clientArea, juce::BorderSize<int> frame );
+
+    // When a desktop window's bounds are saved: once they have not changed
+    // for a while (moves and resizes come in bursts, and each save writes
+    // the settings file), and whatever is still waiting when the window
+    // goes. Bounds equal to the last ones saved are not saved again.
+    // Times are in milliseconds, from any counter that wraps (such as
+    // juce::Time::getMillisecondCounter()).
+    class BoundsSaving
+    {
+    public:
+        explicit BoundsSaving( int delayInMS );
+
+        // The bounds saved before, if any.
+        void setSaved( const juce::String& bounds );
+
+        // The window's bounds are now these.
+        void changed( const juce::String& bounds, uint32_t now );
+
+        // The bounds to save now, if they have been waiting for the delay.
+        std::optional<juce::String> takeDue( uint32_t now );
+
+        // The bounds to save now that the window goes, if any are waiting.
+        std::optional<juce::String> flush();
+
+        bool isWaiting() const { return waiting; }
+
+        // How long until the waiting bounds are due (0: they are).
+        int getTimeUntilDue( uint32_t now ) const;
+
+    private:
+        const int    delay;
+        juce::String saved, pending;
+        bool         waiting{ false };
+        uint32_t     changedAt{ 0 };
+    };
 
     // The room the window manager's frame takes around a desktop window's
     // client area (the title bar at the top). The real frame is only known

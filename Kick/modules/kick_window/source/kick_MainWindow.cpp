@@ -110,9 +110,15 @@ namespace kick::window
         // While the components it paints still exist.
         detachOpenGL();
 
-        if( options.windowMode == WindowMode::windowed && options.saveBounds && !isMinimised() && !isFullScreen()
-            && !fillsADisplay( getBounds(), getDisplayAreas() ) )
-            options.saveBounds( formatWindowBounds( getBounds() ) );
+        // Whatever has not been saved yet: the process is quitting (the
+        // window was closed, or SIGTERM, or KickMain's exit message).
+        if( options.windowMode == WindowMode::windowed )
+        {
+            boundsSaveTimer.stopTimer();
+            noteBounds();
+            if( const auto bounds = boundsSaving.flush() )
+                saveBounds( *bounds );
+        }
 
         clearContentComponent();
     }
@@ -149,7 +155,11 @@ namespace kick::window
 
         std::optional<juce::Rectangle<int>> saved;
         if( options.loadBounds )
-            saved = parseWindowBounds( options.loadBounds() );
+        {
+            const auto text = options.loadBounds();
+            boundsSaving.setSaved( text );
+            saved = parseWindowBounds( text );
+        }
 
         setBounds( chooseWindowBounds( saved, getDisplayAreas(), preferredArea, { layout.getWidth(), layout.getHeight() }, minimum ) );
 
@@ -211,6 +221,12 @@ namespace kick::window
         } );
     }
 
+    void MainWindow::moved()
+    {
+        juce::DocumentWindow::moved();
+        noteBounds();
+    }
+
     void MainWindow::resized()
     {
         // The scaled host, the content component, follows the window.
@@ -218,6 +234,43 @@ namespace kick::window
 
         if( options.windowMode == WindowMode::windowed && isOnDesktop() )
             aspectCheck.startTimer( aspectCheckDelayInMS );
+        noteBounds();
+    }
+
+    void MainWindow::noteBounds()
+    {
+        auto* peer = getPeer();
+        if( options.windowMode != WindowMode::windowed || !options.saveBounds || peer == nullptr )
+            return;
+
+        // Not bounds the window keeps when it is shown again.
+        if( isMinimised() || isFullScreen() || fillsADisplay( getBounds(), getDisplayAreas() ) )
+            return;
+
+        // The window manager's frame is known once the window is shown.
+        boundsSaving.changed( formatWindowBounds( windowBoundsToSave( getBounds(), peer->getFrameSize() ) ),
+                              juce::Time::getMillisecondCounter() );
+        if( boundsSaving.isWaiting() )
+            boundsSaveTimer.startTimer( boundsSaveDelayInMS );
+        else
+            boundsSaveTimer.stopTimer();
+    }
+
+    void MainWindow::saveBoundsWhenDue()
+    {
+        boundsSaveTimer.stopTimer();
+
+        const auto now = juce::Time::getMillisecondCounter();
+        if( const auto bounds = boundsSaving.takeDue( now ) )
+            saveBounds( *bounds );
+        else if( boundsSaving.isWaiting() )
+            boundsSaveTimer.startTimer( juce::jmax( 1, boundsSaving.getTimeUntilDue( now ) ) );
+    }
+
+    void MainWindow::saveBounds( const juce::String& bounds )
+    {
+        juce::Logger::writeToLog( "Window: saving its bounds (" + bounds + ")" );
+        options.saveBounds( bounds );
     }
 
     void MainWindow::keepAspectRatio()
