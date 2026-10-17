@@ -66,6 +66,27 @@ namespace ui
     {
         juce::Button::mouseDown( e );
         startTimer( getTimerSpeed() );
+        longPressHint.mouseDown( *this, e );
+    }
+
+    void KickButton::mouseDrag( const juce::MouseEvent& e )
+    {
+        // While the hint shows, the press stays a request for it.
+        if( longPressHint.isShowing() )
+            return;
+
+        longPressHint.mouseDrag( e );
+        juce::Button::mouseDrag( e );
+    }
+
+    void KickButton::mouseUp( const juce::MouseEvent& e )
+    {
+        // A press held long enough to show the hint does not click: with the
+        // button no longer down, juce::Button::mouseUp() does not click it.
+        if( longPressHint.mouseUp() )
+            setState( juce::Button::buttonNormal );
+
+        juce::Button::mouseUp( e );
     }
 
     void KickButton::mouseExit( const juce::MouseEvent& e )

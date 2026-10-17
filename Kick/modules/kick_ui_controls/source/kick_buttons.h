@@ -40,10 +40,15 @@ namespace ui
 
     protected:
         void mouseDown( const juce::MouseEvent& ) override;
+        void mouseDrag( const juce::MouseEvent& ) override;
+        void mouseUp( const juce::MouseEvent& ) override;
         void mouseExit( const juce::MouseEvent& ) override;
         void timerCallback() override;
 
     private:
+        // Pressing and holding a button that has a tooltip shows the tooltip.
+        LongPressHint longPressHint;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR( KickButton )
     };
 
