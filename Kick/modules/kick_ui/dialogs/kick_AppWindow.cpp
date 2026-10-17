@@ -25,6 +25,7 @@ namespace kick_ui
         kick::window::MainWindow::Options options;
         options.windowMode       = startupOptions.windowMode;
         options.renderer         = startupOptions.renderer;
+        options.showCursor       = startupOptions.showCursor;
         options.onCloseRequested = std::move( onCloseRequested );
         options.loadBounds       = []() { return mt::getSettings().window.bounds.get(); };
         options.saveBounds       = []( const juce::String& bounds ) {

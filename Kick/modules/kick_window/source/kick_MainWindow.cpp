@@ -101,6 +101,8 @@ namespace kick::window
         else
             openKiosk();
 
+        detail::setDefaultCursor( options.showCursor, options.windowMode == WindowMode::kiosk );
+
         if( options.renderer == Renderer::openGL )
             attachOpenGL();
     }

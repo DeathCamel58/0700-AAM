@@ -38,4 +38,18 @@ namespace kick::window::detail
     // moved while the window manager does not handle its requests
     // (override-redirect, while it is not mapped).
     void askForPosition( juce::ResizableWindow& window );
+
+    // Shows an arrow, or nothing, where Kick's components ask for JUCE's
+    // normal mouse cursor.
+    //
+    // JUCE sets no cursor on its window for the normal cursor, so the
+    // window shows its parent's: the window manager's frame, or the root
+    // window. Weston's X window manager sets the root window's (and its
+    // frames') from the Xcursor theme; without a theme on the system they
+    // keep the X server's default, an "X". So the root window's cursor is
+    // set here: in kiosk mode, where Kick is all there is on the display,
+    // and under Xwayland, where the root window is not seen and is not the
+    // user's desktop. Components that ask for another cursor (a text
+    // field's I-beam, say) still show it.
+    void setDefaultCursor( bool show, bool kiosk );
 }

@@ -49,6 +49,10 @@ namespace kick::window
             WindowMode windowMode{ WindowMode::kiosk };
             Renderer   renderer{ Renderer::software };
 
+            // Whether the mouse pointer shows where Kick does not ask for a
+            // particular one (StartupOptions::showCursor).
+            bool showCursor{ true };
+
             // The saved bounds (formatWindowBounds()), read when the
             // windowed window opens, and written a second after it is moved
             // or resized and when it is destroyed.

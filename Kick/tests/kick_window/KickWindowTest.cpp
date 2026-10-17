@@ -107,6 +107,38 @@ namespace
         CHECK( options.problems.size() == 1 );
     }
 
+    void testCursor()
+    {
+        // Windowed: the pointer shows, whatever the variable says.
+        auto options = resolve( {}, { { "KICK_WINDOW_MODE", "windowed" } } );
+        CHECK( options.showCursor );
+        options = resolve( {}, { { "KICK_WINDOW_MODE", "windowed" }, { "KICK_SHOW_CURSOR", "0" } } );
+        CHECK( options.showCursor );
+
+        // Kiosk (a touch screen): hidden, unless KICK_SHOW_CURSOR says so.
+        options = resolve( {} );
+        CHECK( !options.showCursor );
+        CHECK( options.describe().endsWith( "mouse pointer hidden" ) );
+        for( const auto* value : { "1", "true", "YES", " on " } )
+        {
+            options = resolve( {}, { { "KICK_SHOW_CURSOR", value } } );
+            CHECK( options.showCursor );
+            CHECK( options.problems.isEmpty() );
+            CHECK( options.describe().endsWith( "mouse pointer shown" ) );
+        }
+        for( const auto* value : { "0", "false", "no", "off", "" } )
+        {
+            options = resolve( {}, { { "KICK_SHOW_CURSOR", value } } );
+            CHECK( !options.showCursor );
+            CHECK( options.problems.isEmpty() );
+        }
+
+        // Not understood: hidden, and a problem to log.
+        options = resolve( {}, { { "KICK_SHOW_CURSOR", "sometimes" } } );
+        CHECK( !options.showCursor );
+        CHECK( options.problems.size() == 1 );
+    }
+
     void testPrecedence()
     {
         // The environment overrides the build default.
@@ -662,6 +694,7 @@ int main()
     testParsing();
     testDefaults();
     testPrecedence();
+    testCursor();
     testUnknownValues();
     testCommandLine();
     testLetterbox();

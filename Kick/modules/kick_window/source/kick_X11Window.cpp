@@ -50,6 +50,53 @@ namespace kick::window::detail
         }
     }
 
+    namespace
+    {
+        bool isXwayland( ::Display* display )
+        {
+            int opcode = 0, event = 0, error = 0;
+            return juce::X11Symbols::getInstance()->xQueryExtension( display, "XWAYLAND", &opcode, &event, &error )
+                   || juce::SystemStats::getEnvironmentVariable( "WAYLAND_DISPLAY", {} ).isNotEmpty();
+        }
+
+        // A cursor with no pixels set.
+        Cursor createBlankCursor( ::Display* display, ::Window root )
+        {
+            auto*      x11    = juce::X11Symbols::getInstance();
+            const auto pixmap = x11->xCreatePixmap( display, root, 1, 1, 1 );
+            if( pixmap == None )
+                return None;
+
+            // An empty 1x1 bitmap: no pixel of the cursor or its mask is set.
+            XColor black{};
+            auto   cursor = x11->xCreatePixmapCursor( display, pixmap, pixmap, &black, &black, 0, 0 );
+            x11->xFreePixmap( display, pixmap );
+            return cursor;
+        }
+    }
+
+    void setDefaultCursor( bool show, bool kiosk )
+    {
+        auto* display = juce::XWindowSystem::getInstance()->getDisplay();
+        if( display == nullptr || ( !kiosk && !isXwayland( display ) ) )
+            return;
+
+        juce::XWindowSystemUtilities::ScopedXLock xLock;
+        auto*                                     x11  = juce::X11Symbols::getInstance();
+        const auto                                root = x11->xRootWindow( display, x11->xDefaultScreen( display ) );
+
+        const auto cursor = show ? x11->xCreateFontCursor( display, XC_left_ptr ) : createBlankCursor( display, root );
+        if( cursor == None )
+            return;
+
+        // The server keeps the cursor while the root window uses it.
+        x11->xDefineCursor( display, root, cursor );
+        x11->xFreeCursor( display, cursor );
+        x11->xFlush( display );
+
+        juce::Logger::writeToLog( juce::String( "Display: mouse pointer " ) + ( show ? "shown (arrow)" : "hidden" ) );
+    }
+
     void askForPosition( juce::ResizableWindow& window )
     {
         auto* peer    = window.getPeer();

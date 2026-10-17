@@ -122,7 +122,8 @@ namespace kick::window
     juce::String StartupOptions::describe() const
     {
         return "window mode " + toString( windowMode ) + " (from " + windowModeSource + "), renderer "
-               + toString( renderer ) + " (from " + rendererSource + ")";
+               + toString( renderer ) + " (from " + rendererSource + "), mouse pointer "
+               + ( showCursor ? "shown" : "hidden" );
     }
 
     void StartupOptions::log() const
@@ -178,6 +179,16 @@ namespace kick::window
                                       defaultRenderer, Renderer::software, parseRenderer, options.problems );
         options.renderer       = renderer.value;
         options.rendererSource = renderer.source;
+
+        options.showCursor = options.windowMode == WindowMode::windowed;
+        if( const auto value = environment ? environment( showCursorVariable ) : std::nullopt )
+        {
+            const auto text = normalised( *value );
+            if( text == "1" || text == "true" || text == "yes" || text == "on" )
+                options.showCursor = true;
+            else if( text != "0" && text != "false" && text != "no" && text != "off" && text.isNotEmpty() )
+                options.problems.add( "Ignoring " + juce::String( showCursorVariable ) + "=" + *value + ": use 1 or 0" );
+        }
 
         return options;
     }
