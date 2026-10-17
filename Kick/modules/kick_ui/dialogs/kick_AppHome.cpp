@@ -35,6 +35,7 @@ namespace kick_ui
         template<typename ScreenType>
         std::unique_ptr<IScreen> makeScreen()
         {
+            const ui::stallLog::Phase phase( "creating screen", typeid( ScreenType ).name() );
             return std::make_unique<ScreenType>();
         }
     }
@@ -365,6 +366,8 @@ namespace kick_ui
     {
         if( auto p = screens_[currentScreen].get() )
         {
+            const ui::stallLog::Phase phase( "showing screen", typeid( *p ).name() );
+
             // Turn off all screens.
             for( const auto& it : screens_ )
             {

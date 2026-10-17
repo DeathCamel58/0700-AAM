@@ -35,6 +35,7 @@
 #include "source/kick_layoutRoot.cpp"
 #include "source/kick_LongPressHint.cpp"
 #include "source/kick_TapLog.cpp"
+#include "source/kick_StallLog.cpp"
 #include "source/kick_StackedComponent.cpp"
 #include "source/kick_GainSlider.cpp"
 #include "source/kick_MultiSelectTabBarButton.cpp"

@@ -84,11 +84,14 @@ public:
 
         // Initialize User Interface...
         w = kick_ui::createMainWindow( windowOptions, [this]() { quitKick(); } );
+
+        stallDetector = std::make_unique<ui::stallLog::Detector>();
     }
 
     void shutdown() override
     {
         // Add your application's shutdown code here ...
+        stallDetector.reset();
         if( w )
         {
             w.reset();
@@ -161,6 +164,7 @@ private:
    kick::window::StartupOptions                windowOptions;
    bool                                        standalone{ false }; // started without KickMain
    std::unique_ptr<kick::window::MainWindow>   w{ nullptr };
+   std::unique_ptr<ui::stallLog::Detector>     stallDetector;
    std::unique_ptr<contracts::DclIPCInterface> dclInterface{ nullptr }; // create this to enable handling sendCommandToDcl signal.
    std::unique_ptr<contracts::AudioEngineIPCInterface> audioEngineInterface{ nullptr };
 };
