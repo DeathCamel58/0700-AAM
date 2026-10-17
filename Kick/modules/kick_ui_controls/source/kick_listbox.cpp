@@ -260,8 +260,19 @@ namespace ui
 
     void KickList::show( const juce::String& Title, std::function<void( int )> CallbackOnExit, juce::Rectangle<int> Bounds )
     {
-        if( !isDialogOpen )
+        // Marked open but in no dialog (its pop-up could not be shown, say):
+        // it would never open again.
+        if( isDialogOpen && findParentComponentOfClass<mt::dialogDisplayer>() == nullptr )
         {
+            juce::Logger::writeToLog( "List \"" + getTitle() + "\": was marked open but is in no dialog" );
+            isDialogOpen = false;
+        }
+
+        if( isDialogOpen )
+            juce::Logger::writeToLog( "List \"" + getTitle() + "\": already open" );
+        else
+        {
+            juce::Logger::writeToLog( "List \"" + getTitle() + "\": opening, " + juce::String( numOptions ) + " choices" );
             isDialogOpen = true;
             setHighlight( getSelectedIndex(), true );
             mt::utils::showOptions(
@@ -606,7 +617,11 @@ namespace ui
         // seemed to do nothing but outline the box.) The children take no
         // clicks, so the -/+ buttons are found by position.
         if( !isEnabled() || e.getDistanceFromDragStart() > tapSlop || !getLocalBounds().contains( e.getPosition() ) )
+        {
+            juce::Logger::writeToLog( "List box \"" + getName() + "\": not a tap (enabled " + juce::String( (int)isEnabled() )
+                                      + ", moved " + juce::String( e.getDistanceFromDragStart() ) + ", at " + e.getPosition().toString() + ")" );
             return;
+        }
 
         if( minus.isVisible() && minus.getBounds().contains( e.getPosition() ) )
             minus.onClick();
