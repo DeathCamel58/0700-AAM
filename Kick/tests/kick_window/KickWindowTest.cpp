@@ -22,16 +22,19 @@
 // and their order, unknown values, and removing the options from the
 // command line so that the IPC configuration still parses. And of the
 // window's geometry (kick_WindowGeometry.h): the letterboxed scale of the
-// layout and how input maps back through it, and the saved window bounds.
+// layout and how input maps back through it, the saved window bounds, and
+// where the overlay goes. And of the frame timing (kick_FrameTiming.h).
 // Built with -DKICK_BUILD_TESTS=ON; it needs no arguments and creates no
 // window (no juce::Desktop, no display).
 
 #include "kick_window_options/source/kick_StartupOptions.cpp"
 #include "kick_window/source/kick_WindowGeometry.cpp"
+#include "kick_window/source/kick_FrameTiming.cpp"
 
 #include <cstdio>
 #include <map>
 #include <string>
+#include <thread>
 
 namespace
 {
@@ -321,6 +324,174 @@ namespace
     }
 }
 
+namespace
+{
+    // The panel's corners, where the window shows them.
+    juce::Rectangle<float> placedPanel( juce::Rectangle<int> area, juce::Point<int> panel, int margin )
+    {
+        const auto transform = kick::window::placeInBottomRight( area, layout, panel, margin );
+        return juce::Rectangle<float>( 0.0f, 0.0f, (float)panel.x, (float)panel.y ).transformedBy( transform );
+    }
+
+    void testOverlayPlacement()
+    {
+        const juce::Point<int> panel( 300, 170 );
+
+        // The device: the layout's size, the panel unscaled, 6 in from the
+        // corner.
+        auto shown = placedPanel( { 0, 0, 1024, 600 }, panel, 6 );
+        CHECK( shown == juce::Rectangle<float>( 718.0f, 424.0f, 300.0f, 170.0f ) );
+
+        // Twice the size: scaled with the layout, margin too.
+        shown = placedPanel( { 0, 0, 2048, 1200 }, panel, 6 );
+        CHECK( shown == juce::Rectangle<float>( 1436.0f, 848.0f, 600.0f, 340.0f ) );
+
+        // Bars at the sides (16:9 at 1080 lines, scale 1.8): in the
+        // window's corner, over the bar, not in the layout's corner.
+        shown = placedPanel( { 0, 0, 1920, 1080 }, panel, 6 );
+        CHECK( near( shown.getRight(), 1920.0f - 11.0f ) ); // 6 * 1.8 = 10.8
+        CHECK( near( shown.getBottom(), 1080.0f - 11.0f ) );
+        CHECK( near( shown.getWidth(), 540.0f ) );
+        CHECK( near( shown.getHeight(), 306.0f ) );
+
+        // Bars at the top and bottom (4:3, scale 0.78).
+        shown = placedPanel( { 0, 0, 800, 600 }, panel, 6 );
+        CHECK( near( shown.getWidth(), 300.0f * 800.0f / 1024.0f ) );
+        // (6 * 0.78 = 4.7 in, give or take the rounding to whole pixels.)
+        CHECK( shown.getRight() <= 800.0f - 3.5f && shown.getRight() >= 800.0f - 6.0f );
+        CHECK( shown.getBottom() <= 600.0f - 3.5f && shown.getBottom() >= 600.0f - 6.0f );
+
+        // Whole pixels at any scale.
+        for( auto area : { juce::Rectangle<int>( 0, 0, 1280, 800 ), juce::Rectangle<int>( 0, 0, 1366, 768 ),
+                           juce::Rectangle<int>( 0, 0, 777, 455 ) } )
+        {
+            const auto transform = kick::window::placeInBottomRight( area, layout, panel, 6 );
+            CHECK( juce::exactlyEqual( transform.getTranslationX(), std::round( transform.getTranslationX() ) ) );
+            CHECK( juce::exactlyEqual( transform.getTranslationY(), std::round( transform.getTranslationY() ) ) );
+            CHECK( area.toFloat().contains( placedPanel( area, panel, 6 ) ) );
+        }
+
+        // An area not at the origin.
+        shown = placedPanel( { 100, 50, 1024, 600 }, panel, 6 );
+        CHECK( shown.getBottomRight() == juce::Point<float>( 1118.0f, 644.0f ) );
+
+        // Smaller than the panel: kept at the area's top-left, not outside.
+        shown = placedPanel( { 0, 0, 200, 100 }, panel, 6 );
+        CHECK( shown.getX() >= 0.0f && shown.getY() >= 0.0f );
+
+        // Nothing to show in: no scale, no singular transform.
+        CHECK( !kick::window::placeInBottomRight( {}, layout, panel, 6 ).isSingularity() );
+    }
+
+    bool nearMs( double a, double b )
+    {
+        return std::abs( a - b ) < 1.0e-6;
+    }
+
+    void testFrameTiming()
+    {
+        kick::window::FrameTiming timing;
+
+        // Off: nothing is recorded.
+        timing.paintStarted( 0.0 );
+        timing.paintFinished( 5.0 );
+        timing.displayTick( 1.0 );
+        CHECK( !timing.isEnabled() );
+        CHECK( timing.takePeriod( 10.0 ).frames == 0 );
+
+        timing.setEnabled( true, 100.0 );
+        CHECK( timing.isEnabled() );
+
+        // Three frames: 100-104, 116.7-118.7, 150-160.
+        timing.paintStarted( 100.0 );
+        timing.paintFinished( 104.0 );
+        timing.paintStarted( 116.7 );
+        timing.paintFinished( 118.7 );
+        timing.paintStarted( 150.0 );
+        timing.paintFinished( 160.0 );
+
+        // Display ticks 16.7 ms apart, then one 50 ms late.
+        timing.displayTick( 100.0 );
+        timing.displayTick( 116.7 );
+        timing.displayTick( 133.4 );
+        timing.displayTick( 183.4 );
+
+        auto period = timing.takePeriod( 200.0 );
+        CHECK( juce::exactlyEqual( period.lengthMs, 100.0 ) );
+        CHECK( period.frames == 3 );
+        CHECK( nearMs( period.framesPerSecond(), 30.0 ) );
+        CHECK( nearMs( period.longestPaintMs, 10.0 ) );
+        CHECK( nearMs( period.averagePaintMs(), 16.0 / 3.0 ) );
+        CHECK( nearMs( period.longestTickGapMs, 50.0 ) );
+
+        // The next period starts empty, but the gaps carry on from the last
+        // tick.
+        timing.displayTick( 200.0 );
+        timing.paintStarted( 210.0 );
+        timing.paintFinished( 211.0 );
+        period = timing.takePeriod( 300.0 );
+        CHECK( juce::exactlyEqual( period.lengthMs, 100.0 ) );
+        CHECK( period.frames == 1 );
+        CHECK( nearMs( period.longestTickGapMs, 16.6 ) );
+        CHECK( nearMs( period.longestPaintMs, 1.0 ) );
+
+        // Nothing painted: no frames, no rates, no division by zero.
+        period = timing.takePeriod( 400.0 );
+        CHECK( period.frames == 0 );
+        CHECK( juce::exactlyEqual( period.framesPerSecond(), 0.0 ) );
+        CHECK( juce::exactlyEqual( period.averagePaintMs(), 0.0 ) );
+        CHECK( juce::exactlyEqual( timing.takePeriod( 400.0 ).framesPerSecond(), 0.0 ) );
+
+        // Turned on half-way through a frame: that frame is not counted.
+        timing.setEnabled( false, 500.0 );
+        timing.paintStarted( 500.0 );
+        timing.setEnabled( true, 501.0 );
+        timing.paintFinished( 502.0 );
+        period = timing.takePeriod( 600.0 );
+        CHECK( period.frames == 0 );
+
+        // Turning it on again starts afresh: no gap from before.
+        timing.setEnabled( false, 700.0 );
+        timing.setEnabled( true, 1000.0 );
+        timing.paintStarted( 1000.0 );
+        timing.paintFinished( 1001.0 );
+        timing.displayTick( 1000.0 );
+        period = timing.takePeriod( 1100.0 );
+        CHECK( period.frames == 1 );
+        CHECK( juce::exactlyEqual( period.longestTickGapMs, 0.0 ) );
+    }
+
+    void testFrameTimingThreads()
+    {
+        // The OpenGL renderer paints on its own thread while the overlay
+        // takes the figures on the message thread: no frame may be lost or
+        // counted twice.
+        kick::window::FrameTiming timing;
+        timing.setEnabled( true, 0.0 );
+
+        constexpr int     framesToPaint = 200000;
+        std::atomic<bool> done{ false };
+        int               taken = 0;
+
+        std::thread painter( [&]() {
+            for( int i = 0; i < framesToPaint; ++i )
+            {
+                timing.paintStarted( i * 2.0 );
+                timing.paintFinished( i * 2.0 + 1.0 );
+            }
+            done = true;
+        } );
+
+        double now = 0.0;
+        while( !done )
+            taken += timing.takePeriod( now += 1.0 ).frames;
+        painter.join();
+        taken += timing.takePeriod( now + 1.0 ).frames;
+
+        CHECK( taken == framesToPaint );
+    }
+}
+
 int main()
 {
     testParsing();
@@ -332,6 +503,9 @@ int main()
     testInputThroughLetterbox();
     testWindowBoundsText();
     testWindowBounds();
+    testOverlayPlacement();
+    testFrameTiming();
+    testFrameTimingThreads();
 
     if( failures != 0 )
     {

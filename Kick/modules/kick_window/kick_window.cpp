@@ -29,5 +29,6 @@
 
 #include "source/kick_OpenGLSupport.cpp"
 #include "source/kick_WindowGeometry.cpp"
+#include "source/kick_FrameTiming.cpp"
 #include "source/kick_ScaledHost.cpp"
 #include "source/kick_MainWindow.cpp"

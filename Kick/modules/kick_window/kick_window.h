@@ -42,6 +42,7 @@
     #include <juce_opengl/juce_opengl.h>
 
     #include "source/kick_WindowGeometry.h"
+    #include "source/kick_FrameTiming.h"
     #include "source/kick_ScaledHost.h"
     #include "source/kick_MainWindow.h"
 

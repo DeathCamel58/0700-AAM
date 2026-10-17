@@ -19,11 +19,24 @@
 
 namespace kick::window
 {
+    ScaledHost::FrameStart::FrameStart( FrameTiming& timing )
+        : frameTiming( timing )
+    {
+        setInterceptsMouseClicks( false, false );
+        setAccessible( false );
+    }
+
+    void ScaledHost::FrameStart::paint( juce::Graphics& )
+    {
+        frameTiming.paintStarted();
+    }
+
     ScaledHost::ScaledHost( juce::Component& contentToShow )
         : content( contentToShow ),
           layout( 0, 0, contentToShow.getWidth(), contentToShow.getHeight() )
     {
         setOpaque( true );
+        addAndMakeVisible( frameStart );
         content.setTransform( {} );
         content.setBounds( layout );
         addAndMakeVisible( content );
@@ -31,8 +44,30 @@ namespace kick::window
 
     ScaledHost::~ScaledHost()
     {
+        setOverlay( nullptr );
         removeChildComponent( &content );
         content.setTransform( {} );
+    }
+
+    void ScaledHost::setOverlay( juce::Component* newOverlay )
+    {
+        if( overlay == newOverlay )
+            return;
+
+        if( overlay != nullptr )
+        {
+            removeChildComponent( overlay );
+            overlay->setTransform( {} );
+        }
+
+        overlay = newOverlay;
+        if( overlay == nullptr )
+            return;
+
+        // Above the content, whatever is brought to the front in there.
+        overlay->setAlwaysOnTop( true );
+        addChildComponent( overlay );
+        placeOverlay();
     }
 
     void ScaledHost::paint( juce::Graphics& g )
@@ -41,8 +76,40 @@ namespace kick::window
         g.fillAll( juce::Colours::black );
     }
 
+    void ScaledHost::paintOverChildren( juce::Graphics& )
+    {
+        // A frame is timed from the first child painted to here. JUCE leaves
+        // out paint() when opaque components in the content cover all that
+        // is repainted, but paints the children it does not cover (the
+        // transparent frame start, behind everything) and then always
+        // paintOverChildren(), with either renderer.
+        frameTiming.paintFinished();
+    }
+
     void ScaledHost::resized()
     {
+        frameStart.setBounds( getLocalBounds() );
         content.setTransform( computeLetterbox( getLocalBounds(), layout ).transform );
+        placeOverlay();
+    }
+
+    void ScaledHost::childBoundsChanged( juce::Component* child )
+    {
+        if( child != nullptr && child == overlay.getComponent() )
+            placeOverlay();
+    }
+
+    void ScaledHost::placeOverlay()
+    {
+        if( overlay == nullptr )
+            return;
+
+        // The overlay is sized in layout units, at the origin; the transform
+        // puts it in the corner. (Moving it back to the origin calls
+        // childBoundsChanged() again, which then changes nothing.)
+        if( overlay->getPosition() != juce::Point<int>() )
+            overlay->setTopLeftPosition( 0, 0 );
+        overlay->setTransform( placeInBottomRight( getLocalBounds(), layout,
+                                                   { overlay->getWidth(), overlay->getHeight() }, overlayMargin ) );
     }
 }
