@@ -439,8 +439,8 @@ namespace kick_ui
             mt::utils::makeVisible( infoLabel );
 
             sampleList.clear();
-            auto prog = pProg ? juce::String( mt::toString( pProg->type.get() ) ) : "Unknown ";
-            infoLabel.setText( "Pad Mixer Is Not Applicable For " + prog + " Program", juce::dontSendNotification );
+            infoLabel.setText( pProg ? "The Pad Mixer works with drum and clip programs only" : "This track has no program",
+                               juce::dontSendNotification );
         }
 
         tableView->setVisible( isProgramAvailable );
